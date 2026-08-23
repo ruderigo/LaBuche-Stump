@@ -1,11 +1,11 @@
 # LaBuche-Stump
 # Project Stump — Beta A
 
-<img width="1080" height="2340" alt="1000017846" src="https://github.com/user-attachments/assets/2dc16a46-869c-4479-9e52-7b11f4fac354" />
-<img width="1080" height="2340" alt="1000017847" src="https://github.com/user-attachments/assets/53f4e19f-04e2-49f0-9c16-b7617cbf7c31" />
-<img width="1080" height="2340" alt="1000017845" src="https://github.com/user-attachments/assets/bfe1289f-72d3-4bce-94d0-8e5f64d7cddb" />
-<img width="3000" height="4000" alt="1000017844" src="https://github.com/user-attachments/assets/caf31b8c-928c-4065-95fe-b12fea192b93" />
-<img width="3000" height="4000" alt="1000017843" src="https://github.com/user-attachments/assets/843bafa8-9786-4329-9cca-780b545a78e9" />
+<img width="270" height="585" alt="1000017843" src="https://github.com/user-attachments/assets/843bafa8-9786-4329-9cca-780b545a78e9" />
+<img width="270" height="585" alt="1000017844" src="https://github.com/user-attachments/assets/caf31b8c-928c-4065-95fe-b12fea192b93" />
+<img width="270" height="585" alt="1000017846" src="https://github.com/user-attachments/assets/2dc16a46-869c-4479-9e52-7b11f4fac354" />
+<img width="270" height="585" alt="1000017847" src="https://github.com/user-attachments/assets/53f4e19f-04e2-49f0-9c16-b7617cbf7c31" />
+<img width="270" height="585" alt="1000017845" src="https://github.com/user-attachments/assets/bfe1289f-72d3-4bce-94d0-8e5f64d7cddb" />
 
 
 An off-grid community node. A long-range encrypted mesh radio and a
