@@ -26,7 +26,7 @@ talk in the same rooms as the people standing in front of it.
 ## Contents
 
 - [Why two boards](#why-two-boards)
-- [Quick start](#quick-start)
+- [INSTALL](#INSTALL)
 - [Reading the boot log](#reading-the-boot-log)
 - [Troubleshooting](#troubleshooting)
 - [Repository layout](#repository-layout)
@@ -63,7 +63,7 @@ WiFi Station mode, so the CAM reaches it over TCP.
 
 ---
 
-## Quick start
+## INSTALL
 
 ```bash
 python3 provisioner.py
