@@ -1,6 +1,13 @@
 # LaBuche-Stump
 # Project Stump — Beta A
 
+<img width="300" height="400" alt="1000017926" src="https://github.com/user-attachments/assets/4c4698be-713c-4dae-9664-1dc1bdbc91bd" />
+
+<img width="400" height="300" alt="1000017928" src="https://github.com/user-attachments/assets/451049e8-7b12-4266-b880-98967b8daaec" />
+
+<img width="300" height="400" alt="1000017952" src="https://github.com/user-attachments/assets/0ae9f557-f1b8-4d1e-8b18-689d327365f2" />
+
+
 <img width="270" height="585" alt="1000017845" src="https://github.com/user-attachments/assets/bfe1289f-72d3-4bce-94d0-8e5f64d7cddb" />
 <img width="270" height="585" alt="1000017847" src="https://github.com/user-attachments/assets/53f4e19f-04e2-49f0-9c16-b7617cbf7c31" />
 <img width="270" height="585" alt="1000017846" src="https://github.com/user-attachments/assets/2dc16a46-869c-4479-9e52-7b11f4fac354" />
