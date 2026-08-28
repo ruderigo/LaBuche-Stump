@@ -1,0 +1,95 @@
+{
+  "plugin": "fservbot",
+  "version": "1.0",
+  "title": "fserv bot (RRC channel)",
+  "summary": "mIRC-style fserv bot that answers triggers in the RRC channel. Ships base templates and an editable dialogue table.",
+  "target_dir": "final_firmware/fservbot/",
+  "stump_version": "Beta A",
+
+  "modifies_core_files": false,
+  "binds_ports": false,
+  "starts_tasks": false,
+
+  "activation": {
+    "note": "The only change to any Stump file. Natural home is example_node.py, after RRC exists and before the server starts serving.",
+    "import_line": "import fservbot.install",
+    "call_line": "fservbot.install.activate()",
+    "removal": "Delete the two lines and the fservbot/ folder."
+  },
+
+  "files": [
+    "fservbot/__init__.py",
+    "fservbot/core.py",
+    "fservbot/templates.py",
+    "fservbot/install.py",
+    "fservbot/plugin.json",
+    "fservbot/README.md"
+  ],
+
+  "wizard": {
+    "mode": "technician_or_deferred",
+    "note": "Only the password prompt matters. If the technician leaves it blank, the bot still runs and still answers its base triggers -- only editing is off. Everything else can be set later from the RRC channel by a user who has the password.",
+    "prompts": [
+      {
+        "key": "FSERVBOT_OP_PASSWORD",
+        "prompt": "fserv bot operator password (blank = dialogue editing off)",
+        "type": "string",
+        "default": "",
+        "required": false,
+        "writes_to": "config.py",
+        "help": "Anyone in the RRC channel who knows this can add/remove the bot's dialogues with /fsadd and /fsdel. Blank means nobody can, including the technician, until it is set. It travels as plain chat over plain HTTP -- a deterrent, not a security boundary."
+      },
+      {
+        "key": "FSERVBOT_TRIGGER_PREFIX",
+        "prompt": "Trigger character the bot answers to",
+        "type": "string",
+        "default": "!",
+        "required": false,
+        "advanced": true,
+        "writes_to": "config.py",
+        "help": "Single character, must not be '/' (that is RRC's own command prefix). Changeable later from chat with /fsset. Skip this prompt unless the room already uses '!' for something else."
+      },
+      {
+        "key": "FSERVBOT_BROADCAST_MINS",
+        "prompt": "Minutes between 'what I am' notices in the channel (0 = off)",
+        "type": "int",
+        "default": 0,
+        "required": false,
+        "advanced": true,
+        "writes_to": "config.py",
+        "help": "The classic fserv channel ad. Posted on chat activity, never to an empty room, and never more often than this. Minimum 5 when enabled. Changeable later with /fsset."
+      }
+    ]
+  },
+
+  "config_block": [
+    "# ---- fservbot (RRC channel fserv bot) ----",
+    "# Blank password = dialogue editing is OFF. The bot still answers its",
+    "# base triggers; only /fsadd and /fsdel are refused. Set this to let a",
+    "# user in the RRC channel configure the bot after boot.",
+    "FSERVBOT_OP_PASSWORD = \"\"",
+    "FSERVBOT_TRIGGER_PREFIX = \"!\"",
+    "FSERVBOT_BROADCAST_MINS = 0"
+  ],
+
+  "runtime_storage": {
+    "path": "/sd/fservbot.json",
+    "note": "Dialogues and runtime options. Created on first edit. No SD card means edits last until reboot; the bot says so when it saves. Delete this file to return to shipped defaults."
+  },
+
+  "user_commands": {
+    "note": "Available in the RRC channel after boot. Password-gated commands are marked.",
+    "channel_triggers": ["!fserv", "!about", "!help", "!list", "!files", "!info", "!rules"],
+    "admin": [
+      "/fshelp                               no password -- explains the rest",
+      "/fslist                               no password -- active triggers",
+      "/fsshow <trigger>                     no password -- preview a reply",
+      "/fsadd <pw> <trigger> :: <response>   password",
+      "/fsdel <pw> <trigger>                 password",
+      "/fsset <pw> prefix <char>             password",
+      "/fsset <pw> broadcast <mins|off>      password"
+    ]
+  },
+
+  "manifest_note": "provisioner.py's EXPECTED_FILE_HASHES needs one entry per file above. No existing entry changes: this plugin edits no file it did not create. plugin.json and README.md are documentation and may be excluded from the upload set if the team prefers to keep the 52-file payload lean -- core.py, templates.py, install.py and __init__.py are the only files needed at runtime."
+}
