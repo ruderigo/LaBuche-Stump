@@ -185,7 +185,7 @@ DEFAULT_CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
 #   [print(f'    {str(f.relative_to(\"final_firmware\"))!r}: {hashlib.sha256(f.read_bytes()).hexdigest()[:16]!r},')
 #    for f in sorted(Path('final_firmware').rglob('*')) if f.is_file()]"
 EXPECTED_FILE_HASHES = {
-    "barkeep.py": "9f97e1181a9cc442",
+    "barkeep.py": "cc442e412734aed2",
     "billboard.py": "a2b913b6f66891de",
     "captive_portal.py": "b43f5cc1f9655590",
     "config.py": "bf1f1dd4b7422b7e",
@@ -206,7 +206,7 @@ EXPECTED_FILE_HASHES = {
     "peripherals/adc_reader.py": "005c0ea96ffdd24f",
     "rrc.py": "7da39623d45bf37e",
     "rrc_mesh.py": "f57d05093944839e",
-    "rrc_ui.py": "4334145dcfe56fd8",
+    "rrc_ui.py": "fc0fef9e453c4234",
     "urns/__init__.py": "4a83ee3f5cd42ca4",
     "urns/buffer.py": "b1da1d0723340421",
     "urns/bz2dec.py": "8149a39deee822c2",
