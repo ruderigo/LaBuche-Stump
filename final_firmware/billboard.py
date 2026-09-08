@@ -16,6 +16,7 @@
 
 import os
 import uasyncio as asyncio
+import i18n
 
 SD_STORAGE_FILE = "/sd/billboard.txt"
 FLASH_STORAGE_FILE = "/billboard.txt"
@@ -168,19 +169,23 @@ def _append_entry(text, identifier="unknown"):
     return True
 
 
-def _render_page():
+def _render_page(lang=None):
+    if lang is None:
+        lang = i18n.DEFAULT_LANG
     entries = _read_entries()[-MAX_ENTRIES_SHOWN:]
     entries.reverse()  # newest first
     items = "".join(
         "<li>" + _esc(text) + " <small>&mdash; " + sig + "</small></li>"
         for sig, text in entries
-    ) or "<li>(nothing posted yet)</li>"
+    ) or ("<li>" + i18n.t("billboard_nothing_yet", lang) + "</li>")
     return (
-        "<h1>The Billboard</h1>"
-        "<p class='sub'>Read what's here. Leave something if you like.</p>"
+        "<h1>" + i18n.t("billboard_title", lang) + "</h1>"
+        + i18n.switcher_html(lang, "/billboard") +
+        "<p class='sub'>" + i18n.t("billboard_intro", lang) + "</p>"
         "<form method='POST' action='/post' class='row'>"
-        "<input name='entry' maxlength='" + str(MAX_ENTRY_LEN) + "' placeholder='Leave a notice'>"
-        "<button type='submit'>Post</button>"
+        "<input name='entry' maxlength='" + str(MAX_ENTRY_LEN) + "' placeholder='" +
+        i18n.t("billboard_post_placeholder", lang) + "'>"
+        "<button type='submit'>" + i18n.t("billboard_post_button", lang) + "</button>"
         "</form>"
         "<div class='panel'>"
         "<ul>" + items + "</ul>"

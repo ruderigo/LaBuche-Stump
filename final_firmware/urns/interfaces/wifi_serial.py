@@ -228,6 +228,63 @@ class WiFiSerialInterface(Interface):
                 pass
             self._socket = None
 
+    def _send_keepalive(self):
+        """Sends one keepalive frame right now, if the connection is up.
+
+        Factored out of the periodic check in poll_loop() so the exact
+        same, already-tested frame construction is used everywhere a
+        keepalive is needed -- including prime(), added separately to
+        let a caller about to do something slow ping the link first
+        rather than risk it going stale mid-operation. Two call sites
+        sharing one implementation instead of two copies that could
+        drift, the same reasoning as everywhere else in this project.
+        """
+        try:
+            # A COMPLETE, well-formed empty CMD_DATA frame, not a bare
+            # FEND. A lone FEND would open a frame and leave the parser
+            # waiting on a command byte, desyncing the very next real
+            # frame's boundary -- caught this by tracing it through the
+            # command-byte-aware parser before testing, not as a
+            # symptom after.
+            self._socket.settimeout(2)
+            self._socket.sendall(bytes([FEND, CMD_DATA, FEND]))
+            self._socket.settimeout(0)
+            self._last_activity = time.time()
+        except Exception as e:
+            log("WiFi Serial keepalive failed: " + str(e), LOG_ERROR)
+            # A failed send almost always means the socket is already
+            # dead -- flagging offline here (not just logging) is what
+            # lets poll_loop's reconnect logic pick it up on its very
+            # next iteration instead of waiting for some other check to
+            # eventually notice. This also makes prime() correctly
+            # discover "the bridge was already down before we even got
+            # to the expensive part" rather than silently doing nothing
+            # useful and leaving the interface's own state stale.
+            self.online = False
+
+    def prime(self):
+        """Sends a keepalive right now, unconditionally (not waiting for
+        KEEPALIVE_INTERVAL to elapse) -- for a caller about to do
+        something that will block the WHOLE event loop for a while
+        (LXMF send, announce), so the link's inactivity clock restarts
+        from zero right before the freeze rather than from wherever it
+        already was.
+
+        This doesn't make the underlying operation any less blocking --
+        nothing on this side of a synchronous crypto call can do that.
+        What it changes is the ODDS that the Heltec's own connection
+        timeout (observed empirically at roughly 7 seconds of silence)
+        gets tripped by a freeze that starts partway through an already-
+        aging idle window, versus one that starts with a freshly reset
+        clock and the full window still available.
+
+        Safe to call whether or not the bridge is currently connected --
+        a no-op with nothing to do if it isn't, same as the internal
+        keepalive check already handles that case.
+        """
+        if self.online and self._socket:
+            self._send_keepalive()
+
     def _reconnect(self):
         now = time.time()
         # Backoff grows with consecutive failures, so a Heltec that
@@ -347,20 +404,7 @@ class WiFiSerialInterface(Interface):
                 log("WiFi Serial poll error: " + str(e), LOG_ERROR)
 
             if self.online and (time.time() - self._last_activity) > self.KEEPALIVE_INTERVAL:
-                try:
-                    # A COMPLETE, well-formed empty CMD_DATA frame, not a
-                    # bare FEND. A lone FEND would open a frame and leave
-                    # the parser waiting on a command byte, desyncing the
-                    # very next real frame's boundary -- caught this by
-                    # tracing it through the new command-byte-aware
-                    # parser before testing, not as a symptom after.
-                    self._socket.settimeout(2)
-                    self._socket.sendall(bytes([FEND, CMD_DATA, FEND]))
-                    self._socket.settimeout(0)
-                    self._last_activity = time.time()
-                except Exception as e:
-                    log("WiFi Serial keepalive failed: " + str(e), LOG_ERROR)
-                    self.online = False
+                self._send_keepalive()
 
             await asyncio.sleep(0.01)
 
@@ -373,3 +417,27 @@ class WiFiSerialInterface(Interface):
 
     def __str__(self):
         return "WiFiSerialInterface[" + self.name + "]"
+
+
+def prime_all_bridges():
+    """Primes every WiFiSerialInterface currently registered, if any.
+
+    A module-level function rather than something callers have to look
+    up an interface instance for themselves: both example_node.py's
+    reannounce_loop() (announce, every 120s, unconditional -- confirmed
+    the standing, chat-independent cause of a periodic bridge drop and
+    radio reconfigure) and rrc_mesh.py's forwarding loop need this same
+    call before their own blocking sends, and neither should need to
+    know how many bridges exist or how to find them. Importing
+    Transport here rather than at module load time avoids a circular
+    import (transport.py doesn't need to know this interface type
+    exists at all).
+
+    Safe to call when there is no bridge configured, or it's currently
+    offline -- iterates whatever's actually registered and lets each
+    prime() handle its own no-op/failure cases.
+    """
+    from ..transport import Transport
+    for iface in Transport.interfaces:
+        if isinstance(iface, WiFiSerialInterface):
+            iface.prime()

@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "note": "Everything the kiosk flasher can write. Adding hardware means adding an entry here and dropping the .bin in /sd/fw/ -- no code change anywhere. Keep entries ordered most-common-first; the page renders them in this order.",
+
+  "targets": [
+    {
+      "id": "stump-dataplane",
+      "name": "Stump Data Plane",
+      "board": "Freenove ESP32-S3-CAM",
+      "chip": "esp32s3",
+      "summary": "MicroPython for the board that runs the web side. Needs the SPIRAM_OCT build -- the plain ESP32-S3 image boots but never sees the PSRAM this app depends on.",
+      "erase": true,
+      "parts": [
+        { "offset": 0, "file": "micropython-esp32s3-spiram-oct.bin" }
+      ],
+      "after": "Flash the app filesystem next, or finish setup with the Provisioner from the Tools list.",
+      "usb": "native",
+      "enabled": false,
+      "missing_hint": "Download the SPIRAM_OCT build from micropython.org and place it in /sd/fw/."
+    },
+
+    {
+      "id": "stump-appfs",
+      "name": "Stump app filesystem",
+      "board": "Freenove ESP32-S3-CAM",
+      "chip": "esp32s3",
+      "summary": "The 57 firmware files as a single filesystem image. Writing one binary is far quicker than pushing files one at a time, and cannot half-succeed the way a per-file upload can.",
+      "erase": false,
+      "parts": [
+        { "offset": 2097152, "file": "stump-appfs.bin" }
+      ],
+      "after": "Board reboots into the Stump. Set config.py from the Provisioner.",
+      "usb": "native",
+      "enabled": false,
+      "missing_hint": "Built on a dev machine with mkfs/littlefs tooling; not yet generated."
+    },
+
+    {
+      "id": "rnode-heltec-v3",
+      "name": "RNode radio firmware",
+      "board": "Heltec LoRa32 V3",
+      "chip": "esp32s3",
+      "summary": "Turns a Heltec into the Control Plane radio. NOTE: flashing is only half the job -- region, frequency, TX power and EEPROM signing are set by rnodeconf afterwards, and that provisioning is not yet reproducible from the browser.",
+      "erase": true,
+      "parts": [
+        { "offset": 0, "file": "rnode-heltec-v3.bin" }
+      ],
+      "after": "Run rnodeconf from a laptop to set region and radio parameters, then -w STATION for the bridge.",
+      "usb": "bridge",
+      "enabled": false,
+      "missing_hint": "Obtain via rnodeconf --autoinstall on a laptop, or from the RNode_Firmware_CE releases."
+    }
+  ],
+
+  "chip_notes": {
+    "esp32s3": "Native-USB boards may need BOOT held while connecting. The port disappears and returns under a different name when it enters the bootloader -- reconnect if the browser loses it.",
+    "esp32": "Classic ESP32 with a CP2102/CH340 bridge; usually connects without touching BOOT.",
+    "esp8266": "Legacy. Slower flash; be patient."
+  }
+}

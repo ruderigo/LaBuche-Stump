@@ -32,6 +32,14 @@ import shutil
 import subprocess
 import sys
 import time
+
+# A distinct sentinel, not None -- _generate_config_py needs to tell
+# "this parameter wasn't passed, leave that config.py line untouched"
+# apart from "this parameter was explicitly passed as None", since for
+# ssid_name specifically, None IS a real, meaningful value (it means
+# "use the default hosted page"), not an absence of one. Reusing None
+# for both would make those two cases indistinguishable.
+_UNSET = object()
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -185,28 +193,40 @@ DEFAULT_CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
 #   [print(f'    {str(f.relative_to(\"final_firmware\"))!r}: {hashlib.sha256(f.read_bytes()).hexdigest()[:16]!r},')
 #    for f in sorted(Path('final_firmware').rglob('*')) if f.is_file()]"
 EXPECTED_FILE_HASHES = {
-    "barkeep.py": "cc442e412734aed2",
-    "billboard.py": "a2b913b6f66891de",
-    "captive_portal.py": "b43f5cc1f9655590",
-    "config.py": "bf1f1dd4b7422b7e",
-    "example_node.py": "f027dbbba6caab0e",
-    "fserv.py": "36768ef9dbfbca9a",
+    "barkeep.py": "f9ce7b2342bc4108",
+    "billboard.py": "0802a1334a6012c3",
+    "captive_portal.py": "8c2a0ee90cdc1e04",
+    "config.py": "40524df2178b7afe",
+    "example_node.py": "e9c4849ce755a3f2",
+    "flasher_ui.py": "f0af338707d46d25",
+    "fserv.py": "adaf199fa3e985e4",
     "fservbot/README.md": "4ab77b9e51dd5edc",
     "fservbot/__init__.py": "f164090d81312df8",
-    "fservbot/core.py": "e362dd336f305d4e",
-    "fservbot/install.py": "28bcbd0ee1a6c6a7",
+    "fservbot/core.py": "18ed35f2e0710d37",
+    "fservbot/install.py": "8d6f5e5870ce5437",
     "fservbot/plugin.json": "bc8aca2fefb8b9e7",
     "fservbot/templates.py": "120b25ba5d326958",
+    "i18n.py": "c4f43a1c98617ae1",
     "lib/bz2_fast_xtensawin.mpy": "ac55d9eda2126432",
     "lib/ed25519_fast_xtensawin.mpy": "96e74dac45f91687",
     "lib/ed25519_iram.mpy": "96e74dac45f91687",
     "lora_boards.py": "d60ef896cd1a0ff9",
     "main.py": "6cae6b96e3e569e9",
+    "node_common.py": "e1e748a3283da2f4",
     "peripherals/__init__.py": "d2bdac4de6de79de",
     "peripherals/adc_reader.py": "005c0ea96ffdd24f",
-    "rrc.py": "7da39623d45bf37e",
-    "rrc_mesh.py": "f57d05093944839e",
-    "rrc_ui.py": "fc0fef9e453c4234",
+    "rrc.py": "173b234f5f053039",
+    "rrc_mesh.py": "9b7d1f3f51cb009c",
+    "rrc_ui.py": "69759dcf4f1026d6",
+    "stumpid/README.md": "da60b797b09855c3",
+    "stumpid/__init__.py": "83462abf471caca1",
+    "stumpid/core.py": "ffcede53817a5da3",
+    "stumpid/install.py": "af7958f3deed3147",
+    "stumpid/plugin.json": "049f73bbf3ccfd03",
+    "tools_payload/flasher/catalog.json": "8dc38061d6bf49a3",
+    "tools_payload/flasher/esptool-bundle.js": "ef7d5a237d3f273e",
+    "tools_payload/flasher/esptool-js-LICENSE.txt": "1c25f29242785d63",
+    "tools_payload/images/README.txt": "9894095091770e4e",
     "urns/__init__.py": "4a83ee3f5cd42ca4",
     "urns/buffer.py": "b1da1d0723340421",
     "urns/bz2dec.py": "8149a39deee822c2",
@@ -214,7 +234,7 @@ EXPECTED_FILE_HASHES = {
     "urns/const.py": "4d9daaabfbbd93d7",
     "urns/crypto/__init__.py": "dec8540a87c232a4",
     "urns/crypto/aes.py": "274f35d97de9d852",
-    "urns/crypto/ed25519.py": "ae5b04bd3c2d88f2",
+    "urns/crypto/ed25519.py": "ebc40e75bb966c26",
     "urns/crypto/hashes.py": "4c44d02dbdf161c9",
     "urns/crypto/hkdf.py": "a42c6930a4ffcdfa",
     "urns/crypto/hmac.py": "f429e6f7db68c93c",
@@ -235,7 +255,7 @@ EXPECTED_FILE_HASHES = {
     "urns/interfaces/serial.py": "4c31a883a20f54c8",
     "urns/interfaces/tcp.py": "a29d90caa017764a",
     "urns/interfaces/udp.py": "1de3688c42ad0eb1",
-    "urns/interfaces/wifi_serial.py": "cdf8d83646e614dc",
+    "urns/interfaces/wifi_serial.py": "fdb89bf39095a2fe",
     "urns/link.py": "a562be337b6f8137",
     "urns/log.py": "4b5576693991c7a6",
     "urns/lxmf.py": "0d0c1d4bb42449c2",
@@ -258,7 +278,16 @@ BOARD_EXCLUDE_SUFFIXES = (".md",)
 BOARD_EXCLUDE_NAMES = ("plugin.json",)
 
 
+# Whole directories that are staged on the technician's machine and
+# pushed to the node's SD card, never written to its flash. The board
+# has megabytes; the flash partition does not, and a 218KB JS bundle
+# plus firmware images have no business competing with the app for it.
+BOARD_EXCLUDE_DIRS = ("tools_payload",)
+
+
 def _belongs_on_board(relpath):
+    if relpath.split("/")[0] in BOARD_EXCLUDE_DIRS:
+        return False
     name = relpath.split("/")[-1]
     if name in BOARD_EXCLUDE_NAMES:
         return False
@@ -371,6 +400,17 @@ def configure_plugins(fw_dir, show_advanced=False):
             return
         default = pr.get("default", "")
         ptype = pr.get("type", "string")
+
+        if ptype == "choice":
+            # A closed set (e.g. AUTH_MODE: open/hybrid/mandatory) written
+            # to config.py as free text was one string away from a plugin
+            # reading garbage and falling back silently. ask_choice()
+            # can't type garbage in the first place.
+            options = pr.get("options") or [str(default)]
+            picked = ask_choice("    " + pr.get("prompt", key), options)
+            values[key] = picked
+            return
+
         while True:
             raw = ask("    " + pr.get("prompt", key), str(default))
             if raw is None:
@@ -1310,8 +1350,99 @@ def upload_stump_app(port, app_dir=None):
                 all_ok = True
         else:
             print(f"  OK — all {len(present)} files confirmed present and matching local source.")
+            install_tools_on_node(port)
 
     return all_ok
+
+
+def install_tools_on_node(port):
+    """Copies this Provisioner onto the node's SD card.
+
+    So the node carries the tool that configures it. A technician can
+    then walk up with only a laptop, pull the Provisioner off the Stump
+    over HTTP, and run it there -- no USB stick to forget, and no doubt
+    about whether the copy on their desktop matches this build, because
+    the node hands back the version it was provisioned with.
+
+    Best-effort: a node with no SD card still provisions fine, it just
+    can't hand the tool back. Never fail the run over this.
+    """
+    me = Path(__file__).resolve()
+    here = me.parent
+
+    # THE THING THAT BIT US: mpremote soft-resets into the raw REPL,
+    # which deliberately does NOT run main.py. fserv.mount_sd() is
+    # therefore never called, /sd does not exist, and every copy to
+    # /sd/... fails while copies to flash succeed -- which is exactly
+    # the asymmetry that showed up in the field.
+    #
+    # Each mpremote invocation is its own session, so a mount done in
+    # one call is gone by the next. The mount and the copy have to be
+    # chained into a SINGLE invocation to share a session.
+    MOUNT = "import fserv\ntry:\n fserv.mount_sd()\nexcept Exception as e:\n print('mount failed:', e)\n"
+
+    def sd_ready():
+        ok, out = run(["mpremote", "connect", port, "exec",
+                       "import fserv\nprint('SD:' + ('yes' if fserv.mount_sd() else 'no'))\n"],
+                      timeout=25)
+        return ok and "SD:yes" in out, out
+
+    print("\n  Installing technician tools onto the node...")
+    ready, detail = sd_ready()
+    if not ready:
+        # Say WHY, and say it once, instead of four identical failures
+        # with no reason -- that log cost real debugging time.
+        print("  No usable SD card on the node, so there is nowhere to put them.")
+        print("  The node runs fine without this; it just can't hand tools back.")
+        print("  Fix the card (python3 provisioner.py --wipe-sd %s) and re-run" % port)
+        print("  --upload-app to install them.")
+        if detail.strip():
+            print("  (%s)" % detail.strip().splitlines()[-1][:90])
+        return False
+
+    for d in (":/sd/tools", ":/sd/fw"):
+        run(["mpremote", "connect", port, "exec", MOUNT, "fs", "mkdir", d], timeout=25)
+
+    installed, failed = [], []
+
+    def push(src, dest, label):
+        if not Path(src).is_file():
+            return
+        # exec + fs cp in ONE invocation so the mount is still live when
+        # the copy runs.
+        ok, out = run(["mpremote", "connect", port, "exec", MOUNT,
+                       "fs", "cp", str(src), dest], timeout=180)
+        if ok:
+            installed.append(label)
+        else:
+            failed.append((label, out.strip().splitlines()[-1][:70] if out.strip() else "no output"))
+
+    if me.is_file():
+        push(me, ":/sd/tools/provisioner.py", "provisioner.py")
+
+    payload = here / "final_firmware" / "tools_payload"
+    if not payload.is_dir():
+        payload = here / "tools_payload"
+    if payload.is_dir():
+        fl = payload / "flasher"
+        push(fl / "esptool-bundle.js", ":/sd/tools/esptool-bundle.js", "esptool-bundle.js")
+        push(fl / "esptool-js-LICENSE.txt", ":/sd/tools/esptool-js-LICENSE.txt", "licence")
+        push(fl / "catalog.json", ":/sd/fw/catalog.json", "catalog.json")
+        img_dir = payload / "images"
+        if img_dir.is_dir():
+            for img in sorted(img_dir.glob("*.bin")):
+                push(img, ":/sd/fw/" + img.name, img.name)
+    else:
+        print("  (no tools_payload folder found next to the firmware --")
+        print("   the browser flasher won't be available on this node)")
+
+    if installed:
+        print("  Installed: " + ", ".join(installed))
+        print("  Tools at   http://<node>/files")
+        print("  Flasher at http://<node>/flash")
+    for label, why in failed:
+        print("  Could not copy %s: %s" % (label, why))
+    return bool(installed)
 
 
 def _get_device_file_sizes(port):
@@ -1420,6 +1551,43 @@ def config_wizard(board_type):
         wifi_pass = ask("WiFi password", "")
         profile["wifi_ssid"] = wifi_ssid
         profile["wifi_pass"] = wifi_pass
+
+        # The walk-up hotspot's own name. Option 1 is the default,
+        # publicly hosted page -- a real address ("LaBuche-Stump.web.app")
+        # someone can read off their phone's WiFi list and type into a
+        # browser on their own data before ever joining. It's exactly
+        # 21 characters and fits WiFi's 32-byte SSID limit with room to
+        # spare -- but ONLY alone. Adding the AP-address suffix makes it
+        # 33, one character over, and truncating a real web address by
+        # even one character breaks it as something a browser can
+        # resolve ("...web.ap" doesn't exist). So the IP question is
+        # only ever reached in the custom-name branch, where clipping a
+        # free-text name is a cosmetic compromise, not a broken link --
+        # confirmed directly, not assumed: the truncated domain-plus-IP
+        # combination was tested and produces exactly that broken string.
+        # Kept as a literal here rather than parsed out of
+        # captive_portal.py -- this is a display string only, and
+        # introducing cross-file parsing for one constant is more
+        # complexity than the risk warrants. If DEFAULT_SSID ever
+        # changes there, this needs a matching update; noted so it
+        # isn't a silent trap.
+        cp_default_ssid = "LaBuche-Stump.web.app"
+        print("\nThe walk-up hotspot can broadcast as the public page")
+        print("(\"%s\"), so anyone can look up what this" % cp_default_ssid)
+        print("network is before ever joining -- or a custom name instead.")
+        use_default_ssid = ask_yes_no(
+            "Use the default hosted-page name?", True)
+        if use_default_ssid:
+            profile["ssid_name"] = None
+            # Forced off, not asked: the domain-plus-IP combination
+            # does not fit in 32 bytes without breaking the address --
+            # see above. Structural prevention, not a warning after
+            # the fact.
+            profile["ssid_include_ip"] = False
+        else:
+            profile["ssid_include_ip"] = ask_yes_no(
+                "Include the AP's IP address in the hotspot name?", True)
+            profile["ssid_name"] = ask("Custom hotspot name", node_name)
 
         heltec_host = ask(
             "Heltec Bridge IP (the static IP set on the Heltec via\n"
@@ -1612,6 +1780,8 @@ def push_config_to_board(port, board_type, profile):
             bot_name=profile.get("bot_name"),
             mesh_greeting=profile.get("mesh_greeting"),
             plugin_config=profile.get("plugin_config"),
+            ssid_include_ip=profile.get("ssid_include_ip"),
+            ssid_name=profile.get("ssid_name", _UNSET),
         )
     except Exception as e:
         print(f"FAILED to generate config.py: {e}")
@@ -1632,7 +1802,8 @@ def push_config_to_board(port, board_type, profile):
 
 def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, heltec_host, heltec_port,
                          credits_enabled=None, credit_weights=None, bot_name=None,
-                         mesh_greeting=None, plugin_config=None):
+                         mesh_greeting=None, plugin_config=None, ssid_include_ip=None,
+                         ssid_name=_UNSET):
     """
     Substitutes WIFI_SSID/WIFI_PASS/NODE_NAME and the Heltec Bridge
     interface's target_host/target_port into the existing config.py
@@ -1650,6 +1821,8 @@ def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, helt
     saw_credits = False
     saw_bot = False
     saw_greeting = False
+    saw_ssid_ip = False
+    saw_ssid_name = False
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("WIFI_SSID"):
@@ -1660,6 +1833,18 @@ def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, helt
             continue
         if stripped.startswith("NODE_NAME"):
             out.append("NODE_NAME = %r\n" % node_name)
+            continue
+        if stripped.startswith("SSID_INCLUDE_IP") and ssid_include_ip is not None:
+            out.append("SSID_INCLUDE_IP = %r\n" % bool(ssid_include_ip))
+            saw_ssid_ip = True
+            continue
+        if stripped.startswith("SSID_NAME") and ssid_name is not _UNSET:
+            # ssid_name legitimately CAN be None (meaning "use the
+            # default hosted page") -- checked against the _UNSET
+            # sentinel, not against None itself, so that real value
+            # isn't mistaken for "the wizard didn't touch this".
+            out.append("SSID_NAME = %r\n" % ssid_name)
+            saw_ssid_name = True
             continue
         if stripped.startswith("BOT_NAME") and bot_name is not None:
             out.append("BOT_NAME = %r\n" % bot_name)
@@ -1728,6 +1913,12 @@ def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, helt
         out.append("CREDITS_ENABLED = %r\n" % bool(credits_enabled))
         if credit_weights is not None:
             out.append("CREDIT_WEIGHTS = %r\n" % (dict(credit_weights),))
+    if ssid_include_ip is not None and not saw_ssid_ip:
+        out.append("\n# ---- Walk-up AP hotspot name (added by the Provisioner) ----\n")
+        out.append("SSID_INCLUDE_IP = %r\n" % bool(ssid_include_ip))
+    if ssid_name is not _UNSET and not saw_ssid_name:
+        out.append("\n# ---- Walk-up AP hotspot name (added by the Provisioner) ----\n")
+        out.append("SSID_NAME = %r\n" % ssid_name)
 
     return "".join(out)
 

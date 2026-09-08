@@ -9,6 +9,24 @@ patch scripts needed; this file can be dropped onto the device as-is.
 """
 
 from config import WIFI_SSID, WIFI_PASS, NODE_NAME, DEBUG, CONFIG
+try:
+    from config import SSID_INCLUDE_IP
+except ImportError:
+    # Matches captive_portal.setup_ap()'s own default (also False, for
+    # the identical reason: paired with SSID_NAME defaulting to None,
+    # True here produces a truncated, non-resolving hosted-page URL.
+    # An old config.py missing this setting entirely must land on the
+    # same safe default a fresh, unprovisioned one does -- not silently
+    # revert to the broken pairing this whole fix exists to prevent.
+    SSID_INCLUDE_IP = False
+try:
+    from config import SSID_NAME
+except ImportError:
+    SSID_NAME = None   # matches captive_portal.setup_ap()'s own default
+try:
+    from config import REANNOUNCE_INTERVAL
+except ImportError:
+    REANNOUNCE_INTERVAL = 120
 
 # Release tag, printed first thing at boot. The single most useful line
 # in a field bug report: it says exactly which build is on the board,
@@ -28,14 +46,6 @@ gc.collect()
 
 # ---- Echo reply ----
 ECHO_REPLY = False   # superseded by rrc_mesh; kept so the old path is explicit
-
-
-def _peer_name(router, dest_hash):
-    """Get display name for a destination hash, or short hex."""
-    peer = router.peers.get(dest_hash)
-    if peer and peer.get("name"):
-        return peer["name"]
-    return dest_hash.hex()[:8]
 
 
 async def _send_msg(router, dest_hash, body):
@@ -186,9 +196,13 @@ def connect_wifi(ssid, password, timeout=15):
 
 
 def setup_node(rns, node_name):
-    from urns.lxmf import LXMRouter
-    router = LXMRouter(identity=rns.identity)
-    dest = router.register_delivery_identity(rns.identity, display_name=node_name)
+    """Stump's own node bring-up: the shared identity/router mechanics
+    from node_common.py, plus Stump's specific inbound-message and
+    announce handling passed in as callbacks -- not hardcoded into a
+    shared function other firmware also uses. See node_common.py's own
+    docstring for why this split exists.
+    """
+    from node_common import setup_node as _shared_setup_node
 
     def on_message(message):
         import uasyncio as asyncio
@@ -205,7 +219,8 @@ def setup_node(rns, node_name):
             content = "\n".join(results)
 
         if DEBUG >= 1:
-            name = _peer_name(router, message.source_hash)
+            from node_common import peer_name
+            name = peer_name(router, message.source_hash)
             print()
             print("<" + name + "/" + sender + "> " + content)
 
@@ -221,14 +236,11 @@ def setup_node(rns, node_name):
             print("[rrc_mesh] inbound failed:", e)
         gc.collect()
 
-    router.register_delivery_callback(on_message)
-
     def on_announce(destination_hash, display_name):
         if DEBUG >= 1:
             print("[Peer] " + (display_name or "?") + " [" + destination_hash.hex()[:8] + "]")
 
-    router.register_announce_callback(on_announce)
-
+    dest, router = _shared_setup_node(rns, node_name, on_message=on_message, on_announce=on_announce)
     return dest, router
 
 
@@ -315,25 +327,19 @@ def main():
     # The LAN address is still printed by connect_wifi() above, so a
     # technician on the serial console can read it -- it just isn't
     # broadcast in the network name any more.
-    ap_ip = captive_portal.setup_ap(NODE_NAME or "Stump")
+    ap_ip = captive_portal.setup_ap(SSID_NAME, include_ip=SSID_INCLUDE_IP)
     import barkeep
     import fserv
     # After rrc/barkeep exist (plugins may wrap them) and before the
-    # server starts taking requests.
+    # server starts taking requests. Every plugin folder present gets
+    # activated here, individually guarded -- a broken or missing
+    # plugin is logged and skipped, never a reason the node fails to
+    # boot. (This used to also have a hand-written fservbot-specific
+    # activation block directly below; that was leftover from before
+    # this generic loader existed and just activated it a second time,
+    # caught only by fservbot's own re-entry guard. Removed.)
     load_plugins()
     fserv.mount_sd()
-
-    # fservbot: optional plugin, wraps rrc.handle_input at runtime.
-    # Guarded because it is an add-on -- a node whose bot fails to load
-    # should still serve the billboard, files and chat. Without this,
-    # a missing or broken plugin folder would raise straight out of
-    # main() into main.py's reset handler, which is a boot loop over a
-    # feature nobody would call essential.
-    try:
-        import fservbot.install
-        fservbot.install.activate()
-    except Exception as e:
-        print("[fservbot] not active:", e)
     # Move any flash-stored billboard onto the card now that it's
     # mounted, so posts written before a card was fitted aren't
     # stranded on flash and replaced by an empty SD-backed board.
@@ -343,6 +349,27 @@ def main():
 
     from urns import Reticulum
     from urns.log import LOG_NONE, LOG_NOTICE, LOG_DEBUG
+
+    # Announce rebroadcast throttling. Real and already enforced inside
+    # urns/transport.py -- but the two values that govern it were
+    # MicroPython const(), unreachable from config.py, so no deployment
+    # could tune them without editing urns/const.py directly and
+    # reflashing. const() only inlines bare-name references WITHIN the
+    # file that defines them; accessed cross-module as an attribute
+    # (which is how transport.py reads them: `from . import const`,
+    # then `const.ANNOUNCE_RATE_WINDOW` at call time) it's an ordinary,
+    # mutable module attribute -- confirmed directly, not assumed.
+    # Overriding here, before Reticulum() brings up Transport's own
+    # maintenance loop, means every later read sees the configured
+    # value. Left untouched (no override) when config.py doesn't
+    # specify them, so an older config.py keeps today's exact defaults.
+    try:
+        from config import ANNOUNCE_RATE_MAX, ANNOUNCE_RATE_WINDOW
+        import urns.const as _const
+        _const.ANNOUNCE_RATE_MAX = ANNOUNCE_RATE_MAX
+        _const.ANNOUNCE_RATE_WINDOW = ANNOUNCE_RATE_WINDOW
+    except ImportError:
+        pass
 
     log_map = {0: LOG_NONE, 1: LOG_NONE, 2: LOG_DEBUG}
     rns = Reticulum(loglevel=log_map.get(DEBUG, LOG_NOTICE))
@@ -372,7 +399,29 @@ def main():
 
     async def reannounce_loop():
         while True:
-            await asyncio.sleep(120)
+            await asyncio.sleep(REANNOUNCE_INTERVAL)
+            # router.announce() is fully synchronous -- confirmed zero
+            # yield points anywhere in its call chain -- so this freezes
+            # the entire event loop, including the Heltec bridge's own
+            # keepalive and receive servicing, for however long the
+            # signing takes. Diagnosed against a field report: a steady
+            # ~2-minute cadence of the bridge dropping and re-sending its
+            # full radio config matched this loop's interval exactly,
+            # independent of any chat activity -- confirming this
+            # specific call as a standing, unconditional cause.
+            #
+            # Priming right before it can't make the freeze shorter --
+            # nothing on this side of a synchronous crypto call can do
+            # that -- but it resets the bridge's inactivity clock to zero
+            # right as the freeze begins, rather than the freeze starting
+            # partway through whatever idle time had already elapsed.
+            # That's the difference between the freeze eating into the
+            # Heltec's own disconnect tolerance and eating past it.
+            try:
+                from urns.interfaces.wifi_serial import prime_all_bridges
+                prime_all_bridges()
+            except Exception:
+                pass  # never let a diagnostic aid block the actual announce
             try:
                 router.announce()
                 if DEBUG >= 2:

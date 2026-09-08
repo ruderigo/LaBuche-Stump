@@ -295,12 +295,27 @@ def help_line():
 COMMANDS = ("fsadd", "fsdel", "fslist", "fsset", "fsshow", "fshelp")
 
 
-def _auth(pw):
-    """Blank configured password means editing is OFF -- fail closed. A
+def check_op_password(pw):
+    """The one operator-password check for this node.
+
+    Public on purpose: other plugins (stumpid's /admin gate, and
+    anything after it) share this exact security decision rather than
+    re-implementing it, so a later change here -- rate limiting, a
+    hash instead of plaintext compare -- reaches every gated surface at
+    once instead of some of them silently drifting from the others.
+
+    Blank configured password means editing is OFF -- fail closed. A
     blank supplied password can never match a blank configured one, so
     a node that was never set up cannot be reconfigured by a passer-by
-    who simply omits the argument."""
+    who simply omits the argument.
+    """
     return bool(FSERVBOT_OP_PASSWORD) and pw == FSERVBOT_OP_PASSWORD
+
+
+# Old name, kept as a direct alias rather than a deprecated wrapper --
+# nothing about the old behaviour changed, only where it's advertised
+# from, so there's no reason to make internal call sites migrate.
+_auth = check_op_password
 
 
 _DENIED = ["wrong password -- or none set yet, in which case editing is "

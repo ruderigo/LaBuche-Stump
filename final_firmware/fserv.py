@@ -50,6 +50,23 @@ import billboard
 
 SD_MOUNT = "/sd"
 SHARED_DIR = SD_MOUNT + "/shared"
+# Technician tools live apart from user uploads. Separate directory so
+# they are never credit-charged, never listed among the things people
+# brought, and not casually overwritten by an upload that happens to
+# share a filename. The node carries the tool needed to reprovision it.
+TOOLS_DIR = SD_MOUNT + "/tools"
+# Flashable images and the catalog that describes them. Kept apart from
+# both user uploads and tools: adding hardware support should be
+# "drop a .bin here and add a catalog entry", with no risk of a user
+# upload shadowing a firmware image or vice versa.
+FW_DIR = SD_MOUNT + "/fw"
+# About-page assets (the hardware gallery photos), kept apart from
+# both user uploads and technician tools for the same reason those are
+# already separated from each other: a marketing photo has no business
+# competing with -- or being mistaken for -- something a visitor
+# actually uploaded, and it should never be credit-charged or listed
+# on the community Files page.
+ABOUT_DIR = SD_MOUNT + "/about"
 LEDGER_FILE = SD_MOUNT + "/fserv_ledger.json"
 AWAITING_FILE = SD_MOUNT + "/fserv_awaiting.json"
 
@@ -89,10 +106,11 @@ def mount_sd():
         # guessed here, and plain pin numbers, not Pin() objects.
         sd = SDCard(slot=1, width=1, sck=39, cmd=38, data=(40,))
         os.mount(sd, SD_MOUNT)
-        try:
-            os.mkdir(SHARED_DIR)
-        except OSError:
-            pass  # already exists
+        for d in (SHARED_DIR, TOOLS_DIR, FW_DIR, ABOUT_DIR):
+            try:
+                os.mkdir(d)
+            except OSError:
+                pass  # already exists
         sd_ok = True
         print("[fserv] SD mounted at", SD_MOUNT)
     except Exception as e:
@@ -260,6 +278,26 @@ async def drain(reader, length, chunk=2048):
 def _esc(s):
     return (s.replace("&", "&amp;").replace("<", "&lt;")
              .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def list_fw():
+    """Firmware images and catalog available for the kiosk flasher."""
+    if not sd_ok:
+        return []
+    try:
+        return sorted(os.listdir(FW_DIR))
+    except OSError:
+        return []
+
+
+def list_tools():
+    """Technician tools available for download from this node."""
+    if not sd_ok:
+        return []
+    try:
+        return sorted(os.listdir(TOOLS_DIR))
+    except OSError:
+        return []
 
 
 def _list_files():

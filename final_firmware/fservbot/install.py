@@ -44,6 +44,7 @@ import rrc
 from fservbot import core
 
 _original = None
+_installed_as = None
 
 
 def is_active():
@@ -57,7 +58,7 @@ def activate():
     Reports its own result, per this project's convention that a
     success message must be printed from where the work happened
     rather than next to the code that scheduled it."""
-    global _original
+    global _original, _installed_as
     if _original is not None:
         print("[fservbot] already active -- ignoring second activate()")
         return False
@@ -65,6 +66,10 @@ def activate():
     core.load()
     _original = rrc.handle_input
     rrc.handle_input = _dispatch
+    # Remembered so deactivate() can tell whether it's still safe to
+    # unwind -- see deactivate()'s comment for why this matters once a
+    # second plugin (stumpid) can also be wrapping the same function.
+    _installed_as = _dispatch
 
     mins = core.broadcast_mins()
     print("[fservbot] active: prefix '%s', %d trigger(s), notice %s" % (
@@ -80,12 +85,29 @@ def activate():
 
 def deactivate():
     """Restores the original handler. Used by tests, and the way out if
-    the bot ever needs to be taken out of the path without a reboot."""
-    global _original
+    the bot ever needs to be taken out of the path without a reboot.
+
+    Only restores if rrc.handle_input is STILL exactly what activate()
+    put there. If another plugin (stumpid) wrapped it again since, this
+    module is no longer the outermost layer, and blindly overwriting
+    rrc.handle_input with our own _original would silently discard
+    whatever wrapped on top of us -- confirmed this actually happens:
+    deactivating two stacked plugins in activation order (rather than
+    the reverse) corrupted the chain into a self-referential loop and
+    blew MicroPython's recursion limit. Refusing with a clear reason is
+    the safe failure here; the caller (or a human) can deactivate the
+    outer plugin first and retry."""
+    global _original, _installed_as
     if _original is None:
+        return False
+    if rrc.handle_input is not _installed_as:
+        print("[fservbot] cannot deactivate cleanly -- something else has "
+              "wrapped rrc.handle_input since this plugin activated. "
+              "Deactivate that plugin first.")
         return False
     rrc.handle_input = _original
     _original = None
+    _installed_as = None
     print("[fservbot] deactivated")
     return True
 

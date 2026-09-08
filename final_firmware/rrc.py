@@ -29,6 +29,7 @@
 # whole node is not.
 
 import time
+import i18n
 
 MAX_ROOMS = 16
 MAX_MESSAGES_PER_ROOM = 60
@@ -310,18 +311,23 @@ def reset():
 # Command handling
 # ---------------------------------------------------------------------
 
-HELP = [
-    "/nick <name>      change your name",
-    "/join <room>      join or create a room",
-    "/part             leave, back to #main",
-    "/rooms            list rooms",
-    "/names            who's in this room",
-    "/topic <text>     set the room topic",
-    "/msg <who> <text> private message, only they see it",
-    "/me <action>      speak in the third person",
-    "/clear            clear your own view",
-    "/help             this list",
-]
+def help_lines(lang):
+    """The /help listing, in the requesting client's language. Command
+    WORDS and their column alignment stay fixed across all languages
+    (a consistent vocabulary, same reasoning as barkeep.py's bot
+    console) -- only the description after each one is translated."""
+    return [
+        "/nick <name>      " + i18n.t("help_nick", lang),
+        "/join <room>      " + i18n.t("help_join", lang),
+        "/part             " + i18n.t("help_part", lang),
+        "/rooms            " + i18n.t("help_rooms", lang),
+        "/names            " + i18n.t("help_names", lang),
+        "/topic <text>     " + i18n.t("help_topic", lang),
+        "/msg <who> <text> " + i18n.t("help_msg", lang),
+        "/me <action>      " + i18n.t("help_me", lang),
+        "/clear            " + i18n.t("help_clear", lang),
+        "/help             " + i18n.t("help_help", lang),
+    ]
 
 
 def handle_input(client_id, room, text):
@@ -332,6 +338,7 @@ def handle_input(client_id, room, text):
     sender (command output, errors); anything everyone should see is
     posted to the room instead. new_room is None unless the room changed.
     """
+    lang = i18n.get_lang(client_id)
     user = get_user(client_id)
     text = _clean(text, MAX_MESSAGE_LEN)
     if not text:
@@ -341,7 +348,7 @@ def handle_input(client_id, room, text):
         touch_user(client_id, room=room)
         posted = post(room, user["nick"], text)
         if posted is None:
-            return ["that room is gone -- try /join main"], None
+            return [i18n.t("room_gone", lang)], None
         return [], None
 
     parts = text[1:].split(" ", 1)
@@ -349,82 +356,97 @@ def handle_input(client_id, room, text):
     arg = parts[1].strip() if len(parts) > 1 else ""
 
     if cmd == "help":
-        return HELP, None
+        return help_lines(lang), None
 
     if cmd == "nick":
         new = clean_nick(arg)
         if not new:
-            return ["usage: /nick <name>  (letters, numbers, - _ [ ] { })"], None
+            return [i18n.t("nick_usage", lang)], None
         if new.lower() == user["nick"].lower():
-            return ["that's already your name"], None
+            return [i18n.t("nick_already", lang)], None
         if nick_taken(new, client_id):
-            return ["'%s' is taken in here" % new], None
+            return [i18n.t("nick_taken", lang, nick=new)], None
         old = user["nick"]
         touch_user(client_id, nick=new, room=room)
-        system(room, "%s is now known as %s" % (old, new))
+        system(room, i18n.t("nick_changed", lang, old=old, new=new))
         return [], None
 
     if cmd in ("join", "j"):
         if not arg:
-            return ["usage: /join <room>"], None
+            return [i18n.t("join_usage", lang)], None
         target, err = create_room(arg)
         if err:
             return [err], None
         if target == room:
-            return ["you're already in #%s" % target], None
-        system(room, "%s left" % user["nick"])
+            return [i18n.t("join_already", lang, room=target)], None
+        system(room, i18n.t("left_notice", lang, nick=user["nick"]))
         touch_user(client_id, room=target)
-        system(target, "%s joined" % user["nick"])
+        system(target, i18n.t("join_notice", lang, nick=user["nick"]))
         return [], target
 
     if cmd == "part":
         if room == DEFAULT_ROOM:
-            return ["you're in #main -- nowhere to part to"], None
-        system(room, "%s left" % user["nick"])
+            return [i18n.t("part_in_main", lang)], None
+        system(room, i18n.t("left_notice", lang, nick=user["nick"]))
         touch_user(client_id, room=DEFAULT_ROOM)
-        system(DEFAULT_ROOM, "%s joined" % user["nick"])
+        system(DEFAULT_ROOM, i18n.t("join_notice", lang, nick=user["nick"]))
         return [], DEFAULT_ROOM
 
     if cmd == "rooms":
+        here_word = i18n.t("rooms_here", lang)
         lines = []
         for r in room_names():
             n = len(users_in_room(r))
             t = topic(r)
-            lines.append("#%s  (%d here)%s" % (r, n, "  -- " + t if t else ""))
+            lines.append("#%s  (%d %s)%s" % (r, n, here_word, "  -- " + t if t else ""))
         return lines, None
 
     if cmd == "names":
         names = users_in_room(room)
-        return ["in #%s: %s" % (room, ", ".join(names) if names else "(just you)")], None
+        names_str = ", ".join(names) if names else i18n.t("just_you", lang)
+        return [i18n.t("names_here", lang, room=room, names=names_str)], None
 
     if cmd == "topic":
         if not arg:
-            t = topic(room)
-            return ["#%s topic: %s" % (room, t if t else "(none set)")], None
+            t = topic(room) or i18n.t("topic_none", lang)
+            return [i18n.t("topic_show", lang, room=room, topic=t)], None
         set_topic(room, arg)
-        system(room, "%s set the topic: %s" % (user["nick"], topic(room)))
+        system(room, i18n.t("topic_set", lang, nick=user["nick"], topic=topic(room)))
         return [], None
 
     if cmd in ("msg", "m", "w"):
         # /msg <nick> <text>
         bits = arg.split(" ", 1)
         if len(bits) < 2 or not bits[1].strip():
-            return ["usage: /msg <who> <message>"], None
+            return [i18n.t("msg_usage", lang)], None
         target, body = bits[0], bits[1].strip()
         if target.lower() == user["nick"].lower():
-            return ["talking to yourself is free -- try someone else"], None
+            return [i18n.t("msg_self", lang)], None
         touch_user(client_id, room=room)
         ok, info = send_dm(user["nick"], target, body)
         if not ok:
+            # info is a plain reason string send_dm assembles itself,
+            # not a code -- matched EXACTLY against the two strings
+            # that function can actually produce (checked directly
+            # against its source), not a fragile prefix guess. If
+            # send_dm's wording ever changes, this stops matching and
+            # falls back to the raw English reason rather than either
+            # crashing or mistranslating -- a safe degraded state, not
+            # a silent wrong one, but worth knowing about if send_dm's
+            # messages are ever edited without updating this.
+            if info == "nothing to send":
+                return [i18n.t("msg_nothing_to_send", lang)], None
+            if info.startswith("no one here called"):
+                return [i18n.t("msg_no_such_user", lang, nick=target)], None
             return [info], None
         # Confirmed to the sender only. Nothing is posted to the room --
         # that is the whole point, and it also keeps private traffic off
         # the radio, since rrc_mesh forwards room messages but not these.
-        return ["-> %s: %s" % (info, body)], None
+        return [i18n.t("msg_sent", lang, nick=info, body=body)], None
 
     if cmd == "me":
         if not arg:
-            return ["usage: /me <action>"], None
+            return [i18n.t("me_usage", lang)], None
         touch_user(client_id, room=room)
         post(room, user["nick"], arg, kind="action")
         return [], None
@@ -432,4 +454,4 @@ def handle_input(client_id, room, text):
     if cmd == "clear":
         return ["__CLEAR__"], None
 
-    return ["unknown command: /%s  (try /help)" % cmd], None
+    return [i18n.t("unknown_command", lang, cmd=cmd)], None

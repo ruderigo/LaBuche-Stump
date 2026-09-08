@@ -20,6 +20,7 @@
 
 import ujson as json
 import rrc
+import i18n
 
 STYLE = """
 *{box-sizing:border-box;}
@@ -103,6 +104,31 @@ button:hover{background:#f0a050;}
   #rooms{width:96px;}
   header{font-size:13px;}
 }
+/* Language switcher, sitting just below the header. Small and out of
+   the way -- used once per visit, not something that should compete
+   with the actual conversation for attention. */
+/* A real bar, not floating text: background + border-bottom matching
+   header's own treatment, so this reads as a clearly separate band
+   rather than blending into whatever comes next. Confirmed the bug
+   this fixes directly: with no background/border and zero bottom
+   padding, this used to sit with almost no visual clearance directly
+   above #rooms -- itself a similarly dark, busy sidebar starting
+   immediately below -- which is exactly what reads as the switcher
+   "bleeding" into the room list on a narrow screen where everything
+   stacks tightly. Padding is now symmetric top/bottom, not just top. */
+.langbar{
+  display:flex; gap:6px; padding:8px 12px; margin:0;
+  background:#241d17; border-bottom:1px solid #493c2e;
+}
+.langbar a,.langbar span{
+  min-width:36px; min-height:28px; display:flex; align-items:center;
+  justify-content:center; padding:3px 9px; border-radius:6px;
+  font-size:.72rem; font-weight:bold; text-decoration:none;
+  border:1px solid #493c2e;
+}
+.langbar a{color:#9c8d76;}
+.langbar a:hover,.langbar a:focus{color:#d97a3a; border-color:#d97a3a; outline:none;}
+.langbar span.lang-active{background:#d97a3a; color:#1b1512; border-color:#d97a3a;}
 """
 
 SCRIPT = """
@@ -285,11 +311,31 @@ _NAV_HOME = (
     "stroke-linejoin='round'><path d='M3 10.5 12 3l9 7.5'/>"
     "<path d='M5.5 9.5V20h13V9.5'/></svg>"
 )
+_NAV_TOOLS = (
+    "<svg viewBox='0 0 24 24' width='20' height='20' fill='none' "
+    "stroke='currentColor' stroke-width='1.8' stroke-linecap='round' "
+    "stroke-linejoin='round'><path d='M14.5 6.5a3.5 3.5 0 0 0 4.6 4.6l-7.2 7.2"
+    "a2.3 2.3 0 0 1-3.2-3.2z'/><path d='M14.5 6.5 17 4l3 3-2.5 2.5'/></svg>"
+)
+_NAV_FILES = (
+    "<svg viewBox='0 0 24 24' width='20' height='20' fill='none' "
+    "stroke='currentColor' stroke-width='1.8' stroke-linecap='round' "
+    "stroke-linejoin='round'><path d='M4 6.5A1.5 1.5 0 0 1 5.5 5h4L11 7h7.5"
+    "A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5z'/>"
+    "</svg>"
+)
 _NAV_BOARD = (
     "<svg viewBox='0 0 24 24' width='20' height='20' fill='none' "
     "stroke='currentColor' stroke-width='1.8' stroke-linecap='round' "
     "stroke-linejoin='round'><rect x='3' y='4' width='18' height='15' rx='1.5'/>"
     "<path d='M3 8h18M12 19v2M8 21h8'/></svg>"
+)
+_NAV_ABOUT = (
+    "<svg viewBox='0 0 24 24' width='20' height='20' fill='none' "
+    "stroke='currentColor' stroke-width='1.8' stroke-linecap='round' "
+    "stroke-linejoin='round'><circle cx='12' cy='12' r='9'/>"
+    "<path d='M12 11v5.5'/><circle cx='12' cy='7.7' r='.15' fill='currentColor' "
+    "stroke-width='1.4'/></svg>"
 )
 
 # The way OUT of the chat.
@@ -302,13 +348,25 @@ _NAV_BOARD = (
 #
 # Sized for a finger, not a mouse: 44px is the smallest reliable touch
 # target, and this runs on a wall-mounted resistive panel.
-NAV_LINKS = (
-    "<nav class='nav'>"
-    "<a href='/' title='Home' aria-label='Home'>" + _NAV_HOME + "<span>Home</span></a>"
-    "<a href='/billboard' title='Billboard' aria-label='Billboard'>" + _NAV_BOARD +
-    "<span>Board</span></a>"
-    "</nav>"
-)
+def _nav_links(lang):
+    """Was a module-level constant with hardcoded English labels, built
+    once at import time -- converted to a function for the same reason
+    barkeep.py's nav tiles were: labels now depend on who's asking, so
+    this has to render fresh per request rather than once at boot."""
+    return (
+        "<nav class='nav'>"
+        "<a href='/' title='Home' aria-label='Home'>" + _NAV_HOME +
+        "<span>" + i18n.t("nav_home", lang) + "</span></a>"
+        "<a href='/billboard' title='Billboard' aria-label='Billboard'>" + _NAV_BOARD +
+        "<span>" + i18n.t("nav_board", lang) + "</span></a>"
+        "<a href='/files' title='Files' aria-label='Files'>" + _NAV_FILES +
+        "<span>" + i18n.t("nav_files", lang) + "</span></a>"
+        "<a href='/tools' title='Tools' aria-label='Tools'>" + _NAV_TOOLS +
+        "<span>" + i18n.t("nav_tools", lang) + "</span></a>"
+        "<a href='/about' title='About' aria-label='About'>" + _NAV_ABOUT +
+        "<span>" + i18n.t("nav_about", lang) + "</span></a>"
+        "</nav>"
+    )
 
 
 def _esc(s):
@@ -324,7 +382,7 @@ def _esc(s):
              .replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;"))
 
 
-def render_page(room, nick):
+def render_page(room, nick, lang=None):
     """The whole client, one self-contained page.
 
     room/nick go through json.dumps, not hand-written quotes: clean_nick
@@ -336,6 +394,8 @@ def render_page(room, nick):
     JSON string syntax is a guaranteed-valid subset of JS syntax with
     correct escaping already handled.
     """
+    if lang is None:
+        lang = i18n.DEFAULT_LANG
     script = (SCRIPT
               .replace("ROOM_INIT", _js(room))
               .replace("NICK_INIT", _js(nick)))
@@ -344,14 +404,15 @@ def render_page(room, nick):
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<title>RRC — Stump</title><style>" + STYLE + "</style></head><body>"
         "<header><b>RRC</b><span id='topic'></span>"
-        "<span class='me'>you are <span id='me'>" + _esc(nick) + "</span></span>"
-        + NAV_LINKS + "</header>"
+        "<span class='me'>" + i18n.t("rrc_you_are", lang) + " <span id='me'>" + _esc(nick) + "</span></span>"
+        + _nav_links(lang) + "</header>"
+        + i18n.switcher_html(lang, "/rrc") +
         "<main><div id='rooms'></div><div id='log'></div></main>"
         "<footer>"
         "<input id='in' maxlength='" + str(rrc.MAX_MESSAGE_LEN) + "' "
         "autocomplete='off' autocapitalize='none' spellcheck='false' "
-        "placeholder='message, or /help'>"
-        "<button id='go'>Send</button>"
+        "placeholder='" + i18n.t("rrc_input_placeholder", lang) + "'>"
+        "<button id='go'>" + i18n.t("rrc_send", lang) + "</button>"
         "</footer>"
         "<script>" + script + "</script>"
         "</body></html>"

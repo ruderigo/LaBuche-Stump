@@ -49,7 +49,28 @@ def _get_peer(dest_hash_hex, display_name):
     now = time.time()
     if dest_hash_hex not in _peers:
         nick = _make_nick(display_name, dest_hash_hex)
-        room = rrc.DEFAULT_ROOM
+        # Defers to stumpid's operator-settable mesh landing room if one
+        # is configured, else today's unchanged default (#main). The
+        # import is defensive, not required -- rrc_mesh has no hard
+        # dependency on stumpid being installed at all, matching this
+        # project's own plugin-optionality convention elsewhere (see
+        # stumpid's own soft coupling to fservbot for the same reasoning).
+        #
+        # mesh_landing_room() runs the SAME can_join_room() gate an
+        # explicit /join already goes through -- this is the one thing
+        # that actually has to happen here: automatic first-contact
+        # placement is a different code path from /join, and would
+        # otherwise land an unqualified peer straight inside a tiered
+        # room with no check at all, since they never typed a command
+        # stumpid's dispatch layer could intercept.
+        redirected = False
+        redirect_reason = None
+        try:
+            import stumpid.core as _stumpid
+            room, allowed, redirect_reason = _stumpid.mesh_landing_room(dest_hash_hex)
+            redirected = not allowed
+        except ImportError:
+            room = rrc.DEFAULT_ROOM
         _peers[dest_hash_hex] = {
             "nick": nick,
             "room": room,
@@ -57,6 +78,19 @@ def _get_peer(dest_hash_hex, display_name):
             "last_sent_id": 0,
         }
         rrc.system(room, nick + " joined from the mesh")
+        if redirected:
+            # Told directly, not left to wonder why they didn't land
+            # where an operator may have said to expect. Reuses the
+            # SAME translated messages /join's own rejection already
+            # shows for these two reasons, keyed by the mesh peer's own
+            # language preference exactly like a web visitor's -- their
+            # dest_hash_hex IS their client_id everywhere else in this
+            # project, so i18n.get_lang() already works for them with
+            # no special-casing needed.
+            import i18n
+            lang = i18n.get_lang(dest_hash_hex)
+            key = "room_needs_verified" if redirect_reason == "needs_verified" else "room_invite_only"
+            rrc.system(room, nick + ": " + i18n.t(key, lang))
     else:
         _peers[dest_hash_hex]["last_seen"] = now
     _prune_peers(now)
@@ -85,7 +119,7 @@ def on_message(router, message):
         # LXMessage carries no source_display_name, so the original
         # lookup raised AttributeError into a bare except and every
         # mesh peer silently ended up as "mesh-xxxx" forever. This is
-        # the same lookup example_node._peer_name() already uses, and
+        # the same lookup node_common.peer_name() already uses, and
         # it keys on the raw hash bytes, not the hex string.
         display_name = None
         try:
@@ -262,6 +296,22 @@ async def poll_loop(router):
     while True:
         await asyncio.sleep(5)
         try:
+            # Primed ONCE per cycle, before whatever sends this cycle is
+            # about to make -- not once per individual send, which would
+            # just be extra synchronous socket work for no benefit. The
+            # point is resetting the bridge's inactivity clock right
+            # before the burst of blocking router.send_message() calls
+            # below begins, since each one freezes the whole event loop
+            # (confirmed: zero yield points anywhere in that call chain)
+            # for however long the signing takes. See the identical
+            # reasoning in example_node.py's reannounce_loop, which this
+            # mirrors for the same underlying cause.
+            try:
+                from urns.interfaces.wifi_serial import prime_all_bridges
+                prime_all_bridges()
+            except Exception:
+                pass  # never let a diagnostic aid block real forwarding
+
             while _send_queue:
                 item = _send_queue.pop(0)
                 rtr, dest_hash_bytes, text = item

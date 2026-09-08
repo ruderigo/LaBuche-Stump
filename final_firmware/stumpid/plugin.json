@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "id": "stumpid",
+  "title": "stumpid (identity verification)",
+  "version": "1.0",
+  "summary": "Optional Ed25519 identity proof for RRC. Lets a client (e.g. Firefly) prove it's the same identity across reconnects and transports, and lets the operator require that proof before writes.",
+  "stump_version": "Beta A",
+
+  "modifies_core_files": false,
+  "binds_ports": false,
+  "starts_tasks": false,
+
+  "activation": {
+    "note": "No manual activation needed -- example_node.py's load_plugins() discovers any folder with an install.py and calls activate() automatically. Order relative to fservbot does not matter for CORRECTNESS -- each plugin captures whatever is currently bound to rrc.handle_input, so wraps compose regardless of order. It DOES matter for which plugin ends up OUTERMOST: alphabetical discovery activates 'stumpid' after 'fservbot', which is required here since gating a write means intercepting it before anything else acts on it. A future plugin sorting ahead of 'stumpid' that also wants to gate writes would need this reconsidered.",
+    "import_line": "(none -- auto-discovered)",
+    "call_line": "(none -- auto-discovered)",
+    "removal": "Delete the two lines and the stumpid/ folder. AUTH_MODE has no effect once the wrapper is gone -- every client is treated as it always was, by client_id alone."
+  },
+
+  "requires": [],
+  "soft_requires": ["fservbot"],
+  "requires_note": "No hard dependency. If fservbot is installed and has an operator password set, /admin reuses it -- one password, two capabilities, nothing new to remember. If fservbot is absent or has no password, stumpid falls back to its own AUTH_ADMIN_PASSWORD. Either plugin can be removed without breaking the other.",
+
+  "config_block": [
+    "# ---- stumpid (RRC identity verification) ----",
+    "# open: today's behaviour, client_id alone (no proof required).",
+    "# hybrid: reading is open; posting, joining, DMing etc. require a",
+    "#   verified identity.",
+    "# mandatory: everything except /auth, /whoami, /help requires one.",
+    "AUTH_MODE = \"open\"",
+    "# Unlocks /admin. Leave blank to fall back to FSERVBOT_OP_PASSWORD",
+    "# if fservbot is installed and has one set.",
+    "AUTH_ADMIN_PASSWORD = \"\""
+  ],
+
+  "wizard": {
+    "mode": "technician_or_deferred",
+    "note": "Most nodes want 'open' -- this only matters once a client that mints real identities (like Firefly) is expected to visit.",
+    "prompts": [
+      {
+        "key": "AUTH_MODE",
+        "prompt": "Identity requirement",
+        "type": "choice",
+        "options": ["open", "hybrid", "mandatory"],
+        "default": "open",
+        "required": false,
+        "advanced": false,
+        "writes_to": "config.py",
+        "help": "hybrid: reads open, writes need a verified identity. mandatory: everything but /auth and /whoami needs one."
+      },
+      {
+        "key": "AUTH_ADMIN_PASSWORD",
+        "prompt": "Admin password for /admin (blank = reuse fservbot's, if any)",
+        "type": "string",
+        "default": "",
+        "required": false,
+        "advanced": true,
+        "writes_to": "config.py"
+      }
+    ]
+  },
+
+  "commands": [
+    "/auth                            -- request a challenge (step 1)",
+    "/auth <pubkey_hex> <sig_hex>     -- answer it (step 2)",
+    "/whoami                          -- show current verification status",
+    "/admin <password> mode <m>       -- change AUTH_MODE live",
+    "/admin <password> revoke <hash>  -- forget a saved identity"
+  ],
+
+  "files": [
+    "stumpid/__init__.py",
+    "stumpid/core.py",
+    "stumpid/install.py",
+    "stumpid/plugin.json",
+    "stumpid/README.md"
+  ]
+}

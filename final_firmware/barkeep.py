@@ -15,9 +15,11 @@ import os
 import ujson as json
 import uasyncio as asyncio
 import billboard
+import i18n
 import fserv
 import rrc
 import rrc_ui
+import flasher_ui
 
 # Per-node greeter name. Falls back so this module still imports on its
 # own (tests, or a config.py from a build that predates the setting).
@@ -89,9 +91,31 @@ li{padding:7px 0; border-bottom:1px solid var(--border);}
 li:last-child{border-bottom:none;}
 small{color:var(--muted);}
 
+/* File rows. Each is a full-width touch target -- on the kiosk these
+   are tapped with a finger, so the whole row is the link, not just the
+   filename text. */
+ul.files{list-style:none; padding:0; margin:0;}
+ul.files li{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:10px; padding:0; border-bottom:1px solid var(--border);
+}
+ul.files li:last-child{border-bottom:none;}
+ul.files a{
+  display:flex; align-items:center; gap:10px; flex:1; min-width:0;
+  padding:14px 4px; text-decoration:none; min-height:44px;
+}
+ul.files a span{overflow-wrap:break-word; word-break:break-word;}
+ul.files small{flex-shrink:0; padding-left:8px; text-align:right;}
+
 /* Two destination tiles. Grid so they stay equal width and stack
    sensibly on a narrow phone, which is the common case here. */
-.tiles{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0;}
+/* auto-fit, not a fixed column count: a row of 3 or 4 tiles then fills
+   the width evenly instead of wrapping one orphan onto its own line,
+   which is what the old two-column grid did. */
+.tiles{
+  display:grid; gap:10px; margin:14px 0;
+  grid-template-columns:repeat(auto-fit, minmax(92px, 1fr));
+}
 .tile{
   display:flex; flex-direction:column; align-items:center; gap:4px;
   background:var(--panel); border:1px solid var(--border); border-radius:8px;
@@ -102,6 +126,130 @@ small{color:var(--muted);}
 .tile span{font-weight:bold; font-size:.95rem;}
 .tile small{color:var(--muted); text-align:center; line-height:1.25;}
 @media (max-width:380px){ .tiles{grid-template-columns:1fr;} }
+
+/* Language switcher. Small and out of the way -- it's used once per
+   visit, not something that should compete for attention with the
+   actual content on every single page. Touch-sized regardless (44px
+   minimum), since this shows on the same kiosk touchscreen as
+   everything else here. A border-bottom gives it a clear edge of its
+   own rather than floating text with nothing to visually separate it
+   from whatever comes next -- the same underlying gap that caused the
+   switcher to look like it bled into RRC's room list, fixed there with
+   a full bar treatment; here a lighter border is enough since these
+   pages are single-column, not sitting flush against a busy sidebar. */
+.langbar{
+  display:flex; gap:6px; margin:10px 0 14px; padding-bottom:12px;
+  border-bottom:1px solid var(--border);
+}
+.langbar a,.langbar span{
+  min-width:38px; min-height:32px; display:flex; align-items:center;
+  justify-content:center; padding:4px 10px; border-radius:6px;
+  font-size:.8rem; font-weight:bold; text-decoration:none;
+  border:1px solid var(--border);
+}
+.langbar a{color:var(--muted);}
+.langbar a:hover,.langbar a:focus{color:var(--ember); border-color:var(--ember); outline:none;}
+.langbar span.lang-active{background:var(--ember); color:var(--panel); border-color:var(--ember);}
+
+/* About page. h2 is new -- nothing on any other page currently uses a
+   second-level heading, so this is purely additive, not an override of
+   existing behaviour. .tiles/.tile are already spoken for by the nav
+   system (icon + label, centered) -- the About page's own tiles are a
+   different shape entirely (left-aligned info cards, no icon), so they
+   get their own names rather than silently colliding with the nav
+   tiles' styling the moment both appear in the same stylesheet. */
+h2{
+  font-family:ui-monospace,'Cascadia Code','SF Mono','Courier New',monospace;
+  color:var(--ember-bright); font-size:1.15rem; letter-spacing:.02em;
+  border-bottom:1px solid var(--border); padding-bottom:6px; margin:28px 0 12px;
+}
+.badge-open{
+  display:inline-block; font-family:ui-monospace,monospace;
+  background:rgba(217,122,58,.15); color:var(--ember-bright);
+  border:1px solid var(--ember); border-radius:4px; padding:2px 8px;
+  font-size:.8rem; font-weight:bold; margin-bottom:10px;
+}
+.info-tiles{
+  display:grid; gap:10px; margin:14px 0 20px;
+  grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));
+}
+.info-tile{
+  display:flex; flex-direction:column; align-items:flex-start; gap:4px;
+  background:var(--panel); border:1px solid var(--border); border-radius:8px;
+  padding:14px 12px; color:var(--ember);
+}
+.info-tile span{font-weight:bold; font-size:.95rem;}
+.info-tile small{color:var(--muted); line-height:1.25; font-size:.8rem;}
+.links-grid{
+  display:grid; gap:10px; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
+  margin-top:14px;
+}
+.link-tile{
+  display:flex; flex-direction:column; text-decoration:none;
+  background:#221b15; border:1px solid var(--border); border-radius:6px;
+  padding:12px 14px; transition:border-color .2s, background .2s;
+}
+.link-tile:hover{border-color:var(--ember); background:#271f18;}
+.link-tile .title{
+  font-family:ui-monospace,monospace; font-size:.9rem; font-weight:bold;
+  color:var(--ember); margin-bottom:2px;
+}
+.link-tile .desc{
+  font-size:.8rem; color:var(--muted); overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap;
+}
+
+/* About page: view tabs (About / Connect / Hardware). A real UI
+   interaction switched client-side on purpose -- these are three
+   facets of one page, not three destinations, so a server round-trip
+   for something this cheap would just be latency with no benefit. */
+.tab-bar{display:flex; gap:8px; flex-wrap:wrap; margin:0 0 20px;}
+.view-btn{
+  min-height:38px; padding:6px 14px; border-radius:6px;
+  font-family:ui-monospace,monospace; font-size:.85rem; font-weight:bold;
+  background:transparent; border:1px solid var(--border); color:var(--muted);
+  cursor:pointer;
+}
+.view-btn:hover{border-color:var(--ember); color:var(--text);}
+.view-btn.active{background:var(--ember); color:var(--panel); border-color:var(--ember); cursor:default;}
+.view-pane{display:none;}
+.view-pane.active{display:block;}
+
+/* Connect pane: numbered step cards. */
+.steps-container{display:flex; flex-direction:column; gap:12px; margin:16px 0 20px;}
+.step-item{
+  display:flex; gap:14px; background:var(--panel); border:1px solid var(--border);
+  border-radius:8px; padding:14px 16px; align-items:flex-start;
+}
+.step-icon{
+  width:24px; height:24px; min-width:24px; stroke:var(--ember); fill:none;
+  stroke-width:2; stroke-linecap:round; stroke-linejoin:round; margin-top:2px;
+}
+.step-body{flex:1;}
+.step-title{
+  font-family:ui-monospace,monospace; font-weight:bold; font-size:.95rem;
+  color:var(--ember-bright); margin-bottom:4px;
+}
+.step-text{font-size:.95rem; color:var(--text); margin:0; line-height:1.45;}
+code.ip-tag{
+  font-family:ui-monospace,monospace; background:var(--bg);
+  border:1px solid var(--border); color:var(--ember-bright);
+  padding:2px 8px; border-radius:4px; font-size:.9rem; display:inline-block;
+}
+
+/* Hardware pane: photo gallery. Two columns on anything wide enough
+   to show them side by side, one column on a narrow kiosk/phone. */
+.gallery-grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));}
+.gallery-card{
+  background:var(--panel); border:1px solid var(--border); border-radius:8px;
+  overflow:hidden;
+}
+.gallery-card img{width:100%; height:auto; display:block; background:#161210;}
+.gallery-card .caption{
+  padding:8px 10px; display:flex; flex-direction:column; gap:2px;
+}
+.gallery-card .caption span:first-child{font-weight:bold; font-size:.85rem; color:var(--ember);}
+.gallery-card .caption span:last-child{font-size:.75rem; color:var(--muted);}
 """
 
 
@@ -123,6 +271,50 @@ def _esc_name(s):
 # would silently fail to load for precisely the people this is built
 # for -- the same reasoning the stylesheet already follows. These are a
 # few hundred bytes and always work.
+_ICON_FILES = (
+    "<svg viewBox='0 0 24 24' width='24' height='24' fill='none' "
+    "stroke='currentColor' stroke-width='1.6' stroke-linecap='round' "
+    "stroke-linejoin='round'><path d='M4 6.5A1.5 1.5 0 0 1 5.5 5h4L11 7h7.5"
+    "A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5z'/>"
+    "</svg>"
+)
+
+_ICON_DOWNLOAD = (
+    "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' "
+    "stroke='currentColor' stroke-width='1.8' stroke-linecap='round' "
+    "stroke-linejoin='round'><path d='M12 4v10M8 11l4 3 4-3'/>"
+    "<path d='M5 18.5h14'/></svg>"
+)
+
+_ICON_TOOLS = (
+    "<svg viewBox='0 0 24 24' width='24' height='24' fill='none' "
+    "stroke='currentColor' stroke-width='1.6' stroke-linecap='round' "
+    "stroke-linejoin='round'><path d='M14.5 6.5a3.5 3.5 0 0 0 4.6 4.6l-7.2 7.2"
+    "a2.3 2.3 0 0 1-3.2-3.2z'/><path d='M14.5 6.5 17 4l3 3-2.5 2.5'/></svg>"
+)
+
+_ICON_FLASH = (
+    "<svg viewBox='0 0 24 24' width='24' height='24' fill='none' "
+    "stroke='currentColor' stroke-width='1.6' stroke-linecap='round' "
+    "stroke-linejoin='round'><path d='M13 2 4.5 13.5H11l-.5 8.5L19 10.5h-6.5z'/>"
+    "</svg>"
+)
+
+_ICON_ABOUT = (
+    "<svg viewBox='0 0 24 24' width='24' height='24' fill='none' "
+    "stroke='currentColor' stroke-width='1.6' stroke-linecap='round' "
+    "stroke-linejoin='round'><circle cx='12' cy='12' r='9'/>"
+    "<path d='M12 11v5.5'/><circle cx='12' cy='7.7' r='.15' fill='currentColor' "
+    "stroke-width='1.4'/></svg>"
+)
+
+_ICON_HOME = (
+    "<svg viewBox='0 0 24 24' width='24' height='24' fill='none' "
+    "stroke='currentColor' stroke-width='1.6' stroke-linecap='round' "
+    "stroke-linejoin='round'><path d='M3 10.5 12 3l9 7.5'/>"
+    "<path d='M5.5 9.5V20h13V9.5'/></svg>"
+)
+
 _ICON_CHAT = (
     "<svg viewBox='0 0 24 24' width='30' height='30' fill='none' "
     "stroke='currentColor' stroke-width='1.6' stroke-linecap='round' "
@@ -140,14 +332,33 @@ _ICON_BOARD = (
     "<path d='M6.5 11.5h5M6.5 14.5h8'/></svg>"
 )
 
-NAV_TILES = (
-    "<div class='tiles'>"
-    "<a class='tile' href='/rrc'>" + _ICON_CHAT +
-    "<span>Chat</span><small>talk to whoever's here</small></a>"
-    "<a class='tile' href='/billboard'>" + _ICON_BOARD +
-    "<span>Billboard</span><small>notices &amp; messages</small></a>"
-    "</div>"
-)
+def _home_tiles(lang):
+    """The three big tiles on the home page. Kept separate from _nav()
+    (which builds the smaller nav-bar tiles used on every OTHER page)
+    because these carry a subtitle line the compact nav tiles don't --
+    was a static module-level constant with hardcoded English text;
+    now built fresh per request in the requesting client's language.
+    Uses the same nav_board/tile_board_sub keys FILES_NAV etc. use for
+    the billboard tile, unifying what were two independently-written
+    English labels ("Billboard" here, "Board" elsewhere) that meant the
+    same thing -- no reason to translate one concept two different ways
+    just because the original English text happened to say it twice."""
+    return (
+        "<div class='tiles'>"
+        "<a class='tile' href='/rrc'>" + _ICON_CHAT +
+        "<span>" + i18n.t("nav_chat", lang) + "</span>"
+        "<small>" + i18n.t("tile_chat_sub", lang) + "</small></a>"
+        "<a class='tile' href='/billboard'>" + _ICON_BOARD +
+        "<span>" + i18n.t("nav_board", lang) + "</span>"
+        "<small>" + i18n.t("tile_board_sub", lang) + "</small></a>"
+        "<a class='tile' href='/files'>" + _ICON_FILES +
+        "<span>" + i18n.t("nav_files", lang) + "</span>"
+        "<small>" + i18n.t("tile_files_sub", lang) + "</small></a>"
+        "<a class='tile' href='/about'>" + _ICON_ABOUT +
+        "<span>" + i18n.t("nav_about", lang) + "</span>"
+        "<small>" + i18n.t("tile_about_sub", lang) + "</small></a>"
+        "</div>"
+    )
 
 
 def _page(body):
@@ -179,47 +390,42 @@ def _clean_filename(name):
     return name.strip()
 
 
-def _process_command(text, identifier):
+def _process_command(text, identifier, lang):
     cmd = text.strip()
     lower = cmd.lower()
 
     if lower in ("menu", "help", ""):
         # 'balance' is only listed when there's actually a tab to check.
-        balance_line = (
-            "&nbsp;&nbsp;<b>balance</b> &mdash; what you've got saved up<br>"
-            if fserv.CREDITS_ENABLED else ""
-        )
+        balance_line = i18n.t("bot_menu_balance", lang) if fserv.CREDITS_ENABLED else ""
         return (
-            "Here's what I've got:<br>"
-            "&nbsp;&nbsp;<b>menu</b> &mdash; this list<br>"
-            "&nbsp;&nbsp;<b>chat</b> &mdash; talk to whoever else is here<br>"
-            "&nbsp;&nbsp;<b>billboard</b> &mdash; the notice board<br>"
-            "&nbsp;&nbsp;<b>files</b> &mdash; what's on the shelf<br>"
-            "&nbsp;&nbsp;<b>get &lt;name&gt;</b> &mdash; take something home<br>"
-            + balance_line +
-            "&nbsp;&nbsp;<b>upload</b> &mdash; how to bring something of your own"
+            i18n.t("bot_menu_header", lang)
+            + i18n.t("bot_menu_menu", lang)
+            + i18n.t("bot_menu_chat", lang)
+            + i18n.t("bot_menu_billboard", lang)
+            + i18n.t("bot_menu_files", lang)
+            + i18n.t("bot_menu_get", lang)
+            + balance_line
+            + i18n.t("bot_menu_upload", lang)
         )
 
     if lower in ("upload", "how to upload", "how do i upload", "share", "share a file"):
         # Don't promise credit that isn't being given.
         if fserv.CREDITS_ENABLED:
-            return ("See that box below, under the chat? Pick a file there and hit "
-                     "Upload &mdash; bring something, and I'll credit you for it.")
-        return ("See that box below, under the chat? Pick a file there and hit "
-                 "Upload &mdash; anything you leave is there for the next person.")
+            return i18n.t("bot_upload_credit", lang)
+        return i18n.t("bot_upload_free", lang)
 
     if lower in ("chat", "rrc", "irc", "talk"):
-        return "Everyone's in here &mdash; <a href='/rrc'>open RRC</a>."
+        return i18n.t("bot_chat_pointer", lang)
 
     if lower == "billboard":
-        return "Right through there &mdash; <a href='/billboard'>the billboard</a>."
+        return i18n.t("bot_billboard_pointer", lang)
 
     if lower == "files":
         if not fserv.sd_ok:
-            return "Shelf's empty right now &mdash; no card in the slot."
+            return i18n.t("bot_files_no_card", lang)
         names = fserv._list_files()
         if not names:
-            return "Nothing on the shelf yet. Bring something, if you've got it."
+            return i18n.t("bot_files_empty", lang)
         lines = []
         for n in names:
             cls = fserv.guess_class(n)
@@ -235,44 +441,45 @@ def _process_command(text, identifier):
                 "&nbsp;&nbsp;<a href='/download?f=" + _url_encode(n) + "'>" + safe_name +
                 "</a>" + tag
             )
-        return "On the shelf:<br>" + "<br>".join(lines)
+        return i18n.t("bot_files_header", lang) + "<br>".join(lines)
 
     if lower.startswith("get "):
         fname = _clean_filename(cmd[4:])
         if not fname:
-            return "Get what, exactly?"
-        return ("Here you go &mdash; <a href='/download?f=" + _url_encode(fname) + "'>" +
-                 billboard._esc(fname) + "</a>. Click to take it.")
+            return i18n.t("bot_get_what", lang)
+        return i18n.t("bot_get_here", lang, href=_url_encode(fname), name=billboard._esc(fname))
 
     if lower == "balance":
         if not fserv.CREDITS_ENABLED:
-            return "No tab to keep here &mdash; everything's free. Take what you need."
+            return i18n.t("bot_balance_free", lang)
         bal = fserv.credit_balance(identifier)
-        unit = "credit" if bal == 1 else "credits"
-        return "You've got " + str(bal) + " " + unit + " with me."
+        unit = i18n.t("bot_credit_singular", lang) if bal == 1 else i18n.t("bot_credit_plural", lang)
+        return i18n.t("bot_balance_have", lang, n=str(bal), unit=unit)
 
-    return "Don't know that one. Try <b>menu</b>."
+    return i18n.t("bot_unknown", lang)
 
 
-def _render_chat_page():
+def _render_chat_page(lang):
+    you_label = i18n.t("home_you_label", lang)
     return (
         "<pre>" + BARKEEP_ART + "</pre>"
         "<h1>Stump</h1>"
-        "<p class='sub'>Pull up a log. I'm " + _esc_name(BOT_NAME) + ".</p>"
+        + _lang_switcher(lang, "/") +
+        "<p class='sub'>" + i18n.t("barkeep_greeting", lang, bot_name=_esc_name(BOT_NAME)) + "</p>"
         "<div class='panel' id='log'>"
-        "<p><b>" + _esc_name(BOT_NAME) + ":</b> Evening. Type <b>menu</b> to see what's around.</p>"
+        "<p><b>" + _esc_name(BOT_NAME) + ":</b> " + i18n.t("barkeep_evening", lang) + "</p>"
         "</div>"
         "<div class='row'>"
-        "<input id='in' placeholder='Say something...' autofocus>"
-        "<button onclick='sendMsg()'>Send</button>"
+        "<input id='in' placeholder='" + i18n.t("home_say_something", lang) + "' autofocus>"
+        "<button onclick='sendMsg()'>" + i18n.t("rrc_send", lang) + "</button>"
         "</div>"
-        + NAV_TILES +
+        + _home_tiles(lang) +
         "<div class='panel'>"
-        "<p class='sub' style='margin-top:0;'>Bring something?</p>"
+        "<p class='sub' style='margin-top:0;'>" + i18n.t("home_bring_something", lang) + "</p>"
         "<input type='file' id='upfile'>"
         "<div class='row'>"
-        "<input id='uphash' placeholder='Awaiting-slot hash (optional)'>"
-        "<button onclick='doUpload()'>Upload</button>"
+        "<input id='uphash' placeholder='" + i18n.t("home_awaiting_hash", lang) + "'>"
+        "<button onclick='doUpload()'>" + i18n.t("home_upload_button", lang) + "</button>"
         "</div>"
         "<p id='upstatus'><small></small></p>"
         "</div>"
@@ -282,7 +489,7 @@ def _render_chat_page():
         "  if(!file){return;}"
         "  var hash=document.getElementById('uphash').value;"
         "  var status=document.getElementById('upstatus');"
-        "  status.innerHTML='<small>Sending...</small>';"
+        "  status.innerHTML='<small>" + i18n.t("home_sending", lang) + "</small>';"
         "  fetch('/upload',{method:'POST',headers:{'X-Filename':file.name,'X-Hash':hash},body:file})"
         "    .then(function(r){return r.text();})"
         "    .then(function(t){status.innerHTML='<small>'+t+'</small>';});"
@@ -292,7 +499,7 @@ def _render_chat_page():
         "  var text=input.value;"
         "  if(!text)return;"
         "  var log=document.getElementById('log');"
-        "  log.innerHTML+='<p><b>You:</b> '+text.replace(/</g,'&lt;')+'</p>';"
+        "  log.innerHTML+='<p><b>" + you_label + ":</b> '+text.replace(/</g,'&lt;')+'</p>';"
         "  input.value='';"
         "  fetch('/chat',{method:'POST',body:text})"
         "    .then(function(r){return r.text();})"
@@ -313,25 +520,315 @@ def _render_chat_page():
 # reach every other in one touch -- going Billboard -> Home -> Chat is
 # two deliberate taps on a wall panel, and the old page couldn't reach
 # chat at all.
-_ICON_HOME = (
-    "<svg viewBox='0 0 24 24' width='24' height='24' fill='none' "
-    "stroke='currentColor' stroke-width='1.6' stroke-linecap='round' "
-    "stroke-linejoin='round'><path d='M3 10.5 12 3l9 7.5'/>"
-    "<path d='M5.5 9.5V20h13V9.5'/></svg>"
-)
+_CHAT_SMALL = _ICON_CHAT.replace("width='30' height='30'", "width='24' height='24'")
+_BOARD_SMALL = _ICON_BOARD.replace("width='30' height='30'", "width='24' height='24'")
 
-KIOSK_NAV = (
-    "<div class='tiles'>"
-    "<a class='tile' href='/'>" + _ICON_HOME + "<span>Home</span></a>"
-    "<a class='tile' href='/rrc'>"
-    + _ICON_CHAT.replace("width='30' height='30'", "width='24' height='24'")
-    + "<span>Chat</span></a>"
-    "</div>"
-)
+# Every destination in one table, so a page picks a set rather than
+# hand-assembling markup. Three near-identical nav blocks had already
+# drifted apart on tile count, which is what left the grid with holes.
+# Labels are i18n KEYS, not literal text -- looked up per request
+# against the requesting client's language, since these render fresh
+# on every page load rather than once at import time now.
+_DESTINATIONS = {
+    "home":  ("/", _ICON_HOME, "nav_home"),
+    "chat":  ("/rrc", _CHAT_SMALL, "nav_chat"),
+    "board": ("/billboard", _BOARD_SMALL, "nav_board"),
+    "files": ("/files", _ICON_FILES, "nav_files"),
+    "tools": ("/tools", _ICON_TOOLS, "nav_tools"),
+    "flash": ("/flash", _ICON_FLASH, "nav_flash"),
+    "about": ("/about", _ICON_ABOUT, "nav_about"),
+}
 
 
-def _render_billboard_page():
-    return billboard._render_page() + KIOSK_NAV
+def _nav(lang, *keys):
+    """Builds a tile row in the requesting client's language. The grid
+    is auto-fit, so whatever number of tiles a page asks for spreads
+    evenly across the row instead of leaving an orphan on a second
+    line.
+
+    Was a module-level constant, built once at import time with
+    hardcoded English labels -- that stopped being possible the moment
+    labels depend on who's asking, so this is now called fresh inside
+    each page renderer instead."""
+    out = ["<div class='tiles'>"]
+    for k in keys:
+        href, icon, label_key = _DESTINATIONS[k]
+        out.append("<a class='tile' href='" + href + "'>" + icon +
+                    "<span>" + i18n.t(label_key, lang) + "</span></a>")
+    out.append("</div>")
+    return "".join(out)
+
+
+def _lang_switcher(lang, current_path):
+    """Thin wrapper over the shared builder in i18n.py -- one
+    implementation used by both this server-rendered page and
+    rrc_ui.py's client page, rather than two that could drift apart."""
+    return i18n.switcher_html(lang, current_path)
+
+
+
+def _human_size(n):
+    """Bytes as something a person can judge at a glance -- 'is this
+    worth waiting for on a slow link' is the actual question here."""
+    if n < 1024:
+        return "%d B" % n
+    if n < 1024 * 1024:
+        return "%.0f KB" % (n / 1024)
+    return "%.1f MB" % (n / (1024 * 1024))
+
+
+def _render_files_page(lang):
+    """A real page for the shelf, not just a chat reply.
+
+    The file list previously existed only as a BarKeep command, which
+    meant finding a download required knowing to type 'files' first.
+    On a kiosk with no keyboard in reach that is close to unusable.
+    """
+    if not fserv.sd_ok:
+        rows = "<p class='sub'>" + i18n.t("files_no_card", lang) + "</p>"
+    else:
+        names = fserv._list_files()
+        if not names:
+            rows = "<p class='sub'>" + i18n.t("files_none_yet", lang) + "</p>"
+        else:
+            items = []
+            for n in names:
+                cls = fserv.guess_class(n)
+                try:
+                    size = _human_size(os.stat(fserv.SHARED_DIR + "/" + n)[6])
+                except Exception:
+                    size = ""
+                meta = cls + (", " + size if size else "")
+                if fserv.CREDITS_ENABLED:
+                    meta += " &middot; %d %s" % (fserv.credit_cost(n), i18n.t("files_credit_suffix", lang))
+                items.append(
+                    "<li><a href='/download?f=" + _url_encode(n) + "'>"
+                    + _ICON_DOWNLOAD + "<span>" + billboard._esc(n) + "</span>"
+                    "</a><small>" + meta + "</small></li>"
+                )
+            rows = "<ul class='files'>" + "".join(items) + "</ul>"
+
+    return (
+        "<h1>" + i18n.t("nav_files", lang) + "</h1>"
+        + _lang_switcher(lang, "/files") +
+        "<p class='sub'>" + i18n.t("files_tap_to_download", lang) + "</p>"
+        "<div class='panel'>" + rows + "</div>"
+        + _nav(lang, "home", "chat", "board", "tools", "about")
+    )
+
+
+def _render_tools_page(lang):
+    """Technician tools, on their own page.
+
+    Split out of the file list deliberately. Visitors browsing for
+    something to read or listen to have no use for a flashing tool, and
+    mixing the two made the file page longer for everyone to serve a
+    case that only comes up when a technician is standing there.
+
+    The point: someone can walk up to a Stump with nothing but a laptop
+    and pull down the tool that configures it. No USB stick to forget,
+    no wondering whether the copy on your desktop is the one that
+    matches this build -- the node hands you the version it was
+    provisioned with.
+
+    Downloaded here and run on the laptop, exactly as before. The
+    Provisioner needs esptool, mpremote and rnodeconf, which are CPython
+    programs; none of that changes, and none of it runs on the board.
+    """
+    tools = fserv.list_tools()
+    items = []
+    for t in tools:
+        try:
+            size = _human_size(os.stat(fserv.TOOLS_DIR + "/" + t)[6])
+        except Exception:
+            size = ""
+        items.append(
+            "<li><a href='/tool?f=" + _url_encode(t) + "'>"
+            + _ICON_DOWNLOAD + "<span>" + billboard._esc(t) + "</span>"
+            "</a><small>" + size + "</small></li>"
+        )
+    if items:
+        listing = "<div class='panel'><ul class='files'>" + "".join(items) + "</ul></div>"
+    else:
+        listing = "<div class='panel'><p class='sub'>" + i18n.t("tools_none_installed", lang) + "</p></div>"
+
+    return (
+        "<h1>" + i18n.t("tools_header", lang) + "</h1>"
+        + _lang_switcher(lang, "/tools") +
+        "<p class='sub'>" + i18n.t("tools_intro", lang) + "</p>"
+        + listing +
+        "<h2 class='sub'>" + i18n.t("tools_flash_header", lang) + "</h2>"
+        "<p class='sub'>" + i18n.t("tools_flash_intro", lang) + "</p>"
+        "<div class='panel'>"
+        "<p><a href='/flash'>" + i18n.t("tools_open_flasher", lang) + "</a></p>"
+        "</div>"
+        + _nav(lang, "home", "files", "chat", "about")
+    )
+
+
+def _current_ap_ip():
+    """The AP's actual current IP, queried live rather than assumed --
+    same technique captive_portal.py itself uses at boot, so the About
+    page's connection instructions always describe the real address
+    rather than a hardcoded example that could silently go stale.
+    Falls back to the standard default if the interface can't be read
+    for any reason, matching captive_portal.py's own defensive fallback."""
+    try:
+        import network
+        return network.WLAN(network.AP_IF).ifconfig()[0]
+    except Exception:
+        return "192.168.4.1"
+
+
+def _render_about_page(lang):
+    """The About page: what Stump/Fireflies are, how to connect, and a
+    hardware gallery -- three views in one page, switched client-side
+    (a real UI interaction, not a navigation -- no reason to round-trip
+    the server for it), with the SAME server-side language handling
+    every other page uses, replacing the standalone client-side
+    language toggle the source page shipped with. One language
+    mechanism for the whole site, not two that could drift out of sync.
+
+    Content is the PR/marketing team's own copy, ported not rewritten,
+    with two corrections made deliberately rather than silently: the
+    connect instructions no longer assume the SSID "starts with
+    LaBuche" (stale against this build's actual default, which is
+    either the full hosted-page domain or a technician-chosen custom
+    name), and the example IP is the AP's real, live address instead of
+    a hardcoded placeholder from wherever the page was originally drafted.
+
+    Gallery images are served from the SD card (see /about/img),
+    not baked into the firmware -- a technician copies the two photos
+    onto the card; nothing here assumes they're already present, and a
+    missing photo just renders as a broken image, the same as any other
+    web page missing an asset.
+    """
+    ip_html = "<code class='ip-tag'>http://" + _current_ap_ip() + "</code>"
+
+    about_pane = (
+        "<div class='badge-open'>" + i18n.t("about_badge", lang) + "</div>"
+        "<div class='panel'>"
+        "<p style='margin-bottom:0'>" + i18n.t("about_badge_text", lang) + "</p>"
+        "</div>"
+
+        "<h2>" + i18n.t("about_what_h2", lang) + "</h2>"
+        "<div class='panel'>"
+        "<p>" + i18n.t("about_what_p1", lang) + "</p>"
+        "<p style='margin-bottom:0'>" + i18n.t("about_what_p2", lang) + "</p>"
+        "</div>"
+
+        "<h2>" + i18n.t("about_fireflies_h2", lang) + "</h2>"
+        "<p>" + i18n.t("about_fireflies_intro", lang) + "</p>"
+        "<div class='info-tiles'>"
+        "<div class='info-tile'><span>" + i18n.t("about_tile1_title", lang) + "</span>"
+        "<small>" + i18n.t("about_tile1_desc", lang) + "</small></div>"
+        "<div class='info-tile'><span>" + i18n.t("about_tile2_title", lang) + "</span>"
+        "<small>" + i18n.t("about_tile2_desc", lang) + "</small></div>"
+        "<div class='info-tile'><span>" + i18n.t("about_tile3_title", lang) + "</span>"
+        "<small>" + i18n.t("about_tile3_desc", lang) + "</small></div>"
+        "</div>"
+        "<div class='panel'>"
+        "<p style='margin-bottom:0'>" + i18n.t("about_fireflies_closing", lang) + "</p>"
+        "</div>"
+
+        "<h2>" + i18n.t("about_visions_h2", lang) + "</h2>"
+        "<div class='panel'><p style='margin-bottom:0'>" + i18n.t("about_visions_p", lang) + "</p></div>"
+
+        "<h2>" + i18n.t("about_creator_h2", lang) + "</h2>"
+        "<div class='panel'>"
+        "<p>" + i18n.t("about_creator_p", lang) + "</p>"
+        "<div class='links-grid'>"
+        "<a class='link-tile' href='https://github.com/ruderigo/LaBuche-Stump' target='_blank' rel='noopener'>"
+        "<div class='title'>GitHub</div><div class='desc'>" + i18n.t("about_link_github_desc", lang) + "</div></a>"
+        "<a class='link-tile' href='https://www.linkedin.com/in/rodrigo-gl' target='_blank' rel='noopener'>"
+        "<div class='title'>LinkedIn</div><div class='desc'>rodrigo-gl</div></a>"
+        "<a class='link-tile' href='mailto:Rodrigoandresgl@gmail.com'>"
+        "<div class='title'>" + i18n.t("about_link_email_title", lang) + "</div>"
+        "<div class='desc'>Rodrigoandresgl@gmail.com</div></a>"
+        "</div>"
+        "</div>"
+    )
+
+    def step(icon_path, title_key, text_key, **fmt):
+        return (
+            "<div class='step-item'>"
+            "<svg class='step-icon' viewBox='0 0 24 24'>" + icon_path + "</svg>"
+            "<div class='step-body'>"
+            "<div class='step-title'>" + i18n.t(title_key, lang) + "</div>"
+            "<p class='step-text'>" + i18n.t(text_key, lang, **fmt) + "</p>"
+            "</div></div>"
+        )
+
+    connect_pane = (
+        "<p class='sub'>" + i18n.t("about_connect_tagline", lang) + "</p>"
+        "<h2>" + i18n.t("about_connect_h2", lang) + "</h2>"
+        "<p class='sub'>" + i18n.t("about_connect_intro", lang) + "</p>"
+        "<div class='steps-container'>"
+        + step("<path d='M5 12.55a11 11 0 0 1 14.08 0'/><path d='M1.42 9a16 16 0 0 1 21.16 0'/>"
+               "<path d='M8.53 16.11a6 6 0 0 1 6.95 0'/><line x1='12' y1='20' x2='12.01' y2='20'/>",
+               "about_connect_step1_title", "about_connect_step1_text")
+        + step("<rect x='3' y='11' width='18' height='11' rx='2' ry='2'/><path d='M7 11V7a5 5 0 0 1 9.9-1'/>",
+               "about_connect_step2_title", "about_connect_step2_text")
+        + step("<circle cx='12' cy='12' r='10'/><polygon points='12 8 8 12 12 16 12 8'/><line x1='16' y1='12' x2='8' y2='12'/>",
+               "about_connect_step3_title", "about_connect_step3_text", ip=ip_html)
+        + "</div>"
+    )
+
+    def gallery_card(fname, alt_key, title_key, sub_key):
+        return (
+            "<div class='gallery-card'>"
+            "<img src='/about/img?f=" + _url_encode(fname) + "' alt='" + i18n.t(alt_key, lang) + "'>"
+            "<div class='caption'><span>" + i18n.t(title_key, lang) + "</span>"
+            "<span>" + i18n.t(sub_key, lang) + "</span></div>"
+            "</div>"
+        )
+
+    hardware_pane = (
+        "<p class='sub'>" + i18n.t("about_hardware_tagline", lang) + "</p>"
+        "<h2>" + i18n.t("about_hardware_h2", lang) + "</h2>"
+        "<p class='sub'>" + i18n.t("about_hardware_intro", lang) + "</p>"
+        "<div class='gallery-grid'>"
+        + gallery_card("examplenode.jpg", "about_hardware_img1_alt", "about_hardware_img1_title", "about_hardware_img1_sub")
+        + gallery_card("examplenode2.jpg", "about_hardware_img2_alt", "about_hardware_img2_title", "about_hardware_img2_sub")
+        + "</div>"
+    )
+
+    tabs = (
+        "<div class='tab-bar'>"
+        "<button class='view-btn active' id='tab-about' onclick=\"switchAboutView('about')\">"
+        + i18n.t("about_tab_about", lang) + "</button>"
+        "<button class='view-btn' id='tab-connect' onclick=\"switchAboutView('connect')\">"
+        + i18n.t("about_tab_connect", lang) + "</button>"
+        "<button class='view-btn' id='tab-hardware' onclick=\"switchAboutView('hardware')\">"
+        + i18n.t("about_tab_hardware", lang) + "</button>"
+        "</div>"
+    )
+
+    script = (
+        "<script>function switchAboutView(view){"
+        "document.querySelectorAll('.view-pane').forEach(function(el){el.classList.remove('active');});"
+        "document.getElementById('pane-'+view).classList.add('active');"
+        "document.querySelectorAll('.view-btn').forEach(function(el){el.classList.remove('active');});"
+        "document.getElementById('tab-'+view).classList.add('active');"
+        "}</script>"
+    )
+
+    return (
+        "<pre class='art'>" + BARKEEP_ART + "</pre>"
+        "<h1 class='doctitle'>Projet Stump &amp; Fireflies</h1>"
+        + i18n.switcher_html(lang, "/about") +
+        "<p class='tagline'>" + i18n.t("about_tagline", lang) + "</p>"
+        + tabs +
+        "<div class='view-pane active' id='pane-about'>" + about_pane + "</div>"
+        "<div class='view-pane' id='pane-connect'>" + connect_pane + "</div>"
+        "<div class='view-pane' id='pane-hardware'>" + hardware_pane + "</div>"
+        + _nav(lang, "home", "chat", "board", "files")
+        + script
+    )
+
+
+def _render_billboard_page(lang):
+    return billboard._render_page(lang) + _nav(lang, "home", "chat", "files", "about")
 
 
 async def _send(writer, status, body, content_type="text/html"):
@@ -339,7 +836,28 @@ async def _send(writer, status, body, content_type="text/html"):
     rather than concatenated -- 'str' + bytes is a hard TypeError in
     MicroPython (verified against the real interpreter), so the old
     concatenating version failed outright on every binary response.
-    fserv.py's own _send already did it this way; this had diverged."""
+    fserv.py's own _send already did it this way; this had diverged.
+
+    Body is encoded to bytes BEFORE Content-Length is computed, not
+    after -- confirmed directly that these differ for any non-ASCII
+    text: "Tirez-vous une bûche" is 20 Python characters but 21 UTF-8
+    bytes (û alone is 2 bytes). Every actual caller of this function
+    passes text/html, text/plain, or application/json -- nothing binary
+    ever reaches it (file downloads go through a separate byte-accurate
+    path reading a real file size from disk) -- so charset=utf-8 is
+    always correct to declare, unconditionally.
+
+    Both bugs were real and both were shipping: no charset declaration
+    meant a browser guessing the wrong single-byte encoding for
+    anything with accents (the exact "Ã©"-for-"é" pattern this project
+    hit in the field), and the uncorrected character-count
+    Content-Length meant every response containing an accented
+    character was already lying about its own size before that.
+    """
+    if isinstance(body, str):
+        body = body.encode()
+    if "charset" not in content_type:
+        content_type = content_type + "; charset=utf-8"
     # Connection: close matters here. The server closes after every
     # response, but HTTP/1.1 defaults to keep-alive -- so without this
     # the browser holds the socket open expecting to reuse it, then has
@@ -349,8 +867,6 @@ async def _send(writer, status, body, content_type="text/html"):
              "\r\nContent-Length: " + str(len(body)) +
              "\r\nConnection: close\r\n\r\n")
     await writer.awrite(resp)
-    if isinstance(body, str):
-        body = body.encode()
     await writer.awrite(body)
 
 
@@ -384,13 +900,23 @@ def _disposition_name(filename):
     return "".join(out)
 
 
-async def _send_file(writer, fpath, size, filename, chunk=16384):
+async def _send_file(writer, fpath, size, filename, chunk=16384, inline=False):
     """Streams a file from disk in chunks instead of reading it into RAM.
 
     Content-Disposition is what actually gives the saved file its real
     name. Without it the browser names the download after the last URL
     path segment -- "download" -- with no extension, so every file
     arrived unreadable until the user renamed it by hand.
+
+    inline=True omits the "attachment" disposition entirely rather than
+    setting it to "inline" -- browsers already render an <img> tag's
+    response body regardless of what Content-Disposition says as long
+    as it isn't "attachment", so simply not sending it is enough, and
+    it avoids asserting a disposition value this function has never
+    tested against every browser's handling of it. Downloads (the
+    default) keep forcing Save-As, unchanged from before -- this exists
+    for the about-page gallery, which needs the opposite behaviour: a
+    photo that renders on the page, not one that pops a save dialog.
 
     16KB chunks, not 2KB: a 10MB transfer at 2KB is over 5000
     read/write/await cycles, and every await hands control to the DNS
@@ -399,9 +925,12 @@ async def _send_file(writer, fpath, size, filename, chunk=16384):
     against available PSRAM and nowhere near large enough to fragment
     the heap, but cuts the cycle count eightfold.
     """
+    disposition = "" if inline else (
+        "Content-Disposition: attachment; filename=\"" + _disposition_name(filename) + "\"\r\n"
+    )
     await writer.awrite(
         "HTTP/1.1 200 OK\r\nContent-Type: " + _mime_for(filename) + "\r\n"
-        "Content-Disposition: attachment; filename=\"" + _disposition_name(filename) + "\"\r\n"
+        + disposition +
         "Content-Length: " + str(size) + "\r\nConnection: close\r\n\r\n"
     )
     with open(fpath, "rb") as f:
@@ -510,7 +1039,7 @@ async def _handle(reader, writer):
         if method == "POST" and path.startswith("/chat"):
             length = int(headers.get("content-length", "0"))
             body = await _read_small_body(reader, length)
-            reply = _process_command(body.decode(), identifier)
+            reply = _process_command(body.decode(), identifier, i18n.get_lang(identifier))
             await _send(writer, "200 OK", reply, "text/plain")
 
         elif method == "POST" and path.startswith("/post"):
@@ -588,10 +1117,81 @@ async def _handle(reader, writer):
 
         elif method == "GET" and path.startswith("/rrc"):
             user = rrc.touch_user(identifier)
-            await _send(writer, "200 OK", rrc_ui.render_page(user["room"], user["nick"]))
+            await _send(writer, "200 OK", rrc_ui.render_page(user["room"], user["nick"], i18n.get_lang(identifier)))
+
+        elif method == "GET" and path.startswith("/flash"):
+            # Pass the address the client actually used, so the Chrome
+            # flag printed on the page is copy-pasteable rather than a
+            # placeholder someone has to work out.
+            host = headers.get("host", "").split(":")[0] or "this-node"
+            await _send(writer, "200 OK", flasher_ui.render_page(host))
+
+        elif method == "GET" and path.startswith("/fw"):
+            raw_f = path.split("f=", 1)[-1] if "f=" in path else ""
+            fname = _clean_filename(billboard._url_decode(raw_f))
+            fpath = fserv.FW_DIR + "/" + fname
+            try:
+                size = os.stat(fpath)[6]
+                # Firmware images are megabytes; _send_file streams them
+                # in chunks so a 2MB image doesn't have to exist in RAM.
+                await _send_file(writer, fpath, size, fname)
+            except OSError:
+                await _send(writer, "404 Not Found", "no such image", "text/plain")
+
+        elif method == "GET" and path.startswith("/lang"):
+            # Sets the requesting client's language preference, then
+            # redirects back to wherever they were -- no cookies, no
+            # JS, just a link and a 303, matching the existing pattern
+            # already used for billboard posts. next= is decoded and
+            # falls back to home if missing or empty, so a stripped or
+            # malformed query string can't leave someone stranded.
+            new_lang = _query(path, "set") or i18n.DEFAULT_LANG
+            next_path = billboard._url_decode(_query(path, "next") or "/") or "/"
+            i18n.set_lang(identifier, new_lang)
+            await writer.awrite(
+                "HTTP/1.1 303 See Other\r\nLocation: " + next_path +
+                "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+
+        elif method == "GET" and path.startswith("/about/img"):
+            # Checked before the general /about route below -- /about/img
+            # would otherwise be swallowed by a startswith("/about")
+            # match, exactly the /tools-before/tool ordering already
+            # established elsewhere in this file: the more specific
+            # path always has to be checked first.
+            raw_f = path.split("f=", 1)[-1] if "f=" in path else ""
+            iname = _clean_filename(billboard._url_decode(raw_f))
+            ipath = fserv.ABOUT_DIR + "/" + iname
+            try:
+                size = os.stat(ipath)[6]
+                await _send_file(writer, ipath, size, iname, inline=True)
+            except OSError:
+                await _send(writer, "404 Not Found", "not found", "text/plain")
+
+        elif method == "GET" and path.startswith("/about"):
+            await _send(writer, "200 OK", _page(_render_about_page(i18n.get_lang(identifier))))
+
+        elif method == "GET" and path.startswith("/tools"):
+            await _send(writer, "200 OK", _page(_render_tools_page(i18n.get_lang(identifier))))
+
+        elif method == "GET" and path.startswith("/tool"):
+            raw_f = path.split("f=", 1)[-1] if "f=" in path else ""
+            tname = _clean_filename(billboard._url_decode(raw_f))
+            tpath = fserv.TOOLS_DIR + "/" + tname
+            try:
+                # Deliberately NOT the /download route: tools carry no
+                # credit cost and must not be charged for, and keeping
+                # the paths apart means a user file can never be served
+                # as a tool or the reverse.
+                size = os.stat(tpath)[6]
+                await _send_file(writer, tpath, size, tname)
+            except OSError:
+                await _send(writer, "404 Not Found", "no such tool", "text/plain")
+
+        elif method == "GET" and path.startswith("/files"):
+            await _send(writer, "200 OK", _page(_render_files_page(i18n.get_lang(identifier))))
 
         elif method == "GET" and path.startswith("/billboard"):
-            await _send(writer, "200 OK", _page(_render_billboard_page()))
+            await _send(writer, "200 OK", _page(_render_billboard_page(i18n.get_lang(identifier))))
 
         elif method == "POST" and path.startswith("/upload"):
             fname = _clean_filename(headers.get("x-filename", "upload.bin"))
@@ -658,7 +1258,7 @@ async def _handle(reader, writer):
                 await _send(writer, "404 Not Found", "not found", "text/plain")
 
         else:
-            await _send(writer, "200 OK", _page(_render_chat_page()))
+            await _send(writer, "200 OK", _page(_render_chat_page(i18n.get_lang(identifier))))
 
     except Exception as e:
         print("[barkeep] request error:", e)

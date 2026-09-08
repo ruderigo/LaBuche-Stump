@@ -143,23 +143,55 @@ async def run_dns_server(ap_ip):
 # to answer DNS. Two servers on port 80 could never both bind anyway.
 
 
-def setup_ap(essid="Stump"):
+DEFAULT_SSID = "LaBuche-Stump.web.app"
+
+
+def setup_ap(essid=None, include_ip=False):
     """Brings up the AP interface, open (no password). Returns the AP's
     own IP.
 
-    The SSID becomes "<name>-<ap_ip>", e.g. "LaBuche-192.168.4.1".
+    The SSID defaults to DEFAULT_SSID -- a real, publicly hosted page
+    that explains what this network is and how to use it, so someone
+    scanning nearby WiFi networks can type the name straight into a
+    browser (on their own data, before ever joining) and get an answer
+    without needing this node to be reachable first. essid overrides
+    it with a custom name instead; None or an empty string both fall
+    through to the default.
+
+    Was previously "LaBuche " plus the node's own display name (the
+    same name used for its mesh identity) -- decoupled on purpose. The
+    WiFi hotspot's name and the mesh identity's display name are
+    genuinely different concerns; forcing them to share one value meant
+    the hosted-page default couldn't exist at all without also renaming
+    the node on the mesh, which was never the intent.
+
+    include_ip appends " <ap_ip>" -- defaults to False specifically
+    because essid defaults to None (the hosted page): that combination
+    is 33 characters, one over WiFi's hard 32-byte SSID limit, and
+    truncating a real web address by even one character breaks it as
+    something a browser can resolve. Confirmed directly, not just
+    reasoned about: an earlier version of this function defaulted
+    include_ip to True regardless, and calling setup_ap() with no
+    arguments at all -- its own signature inviting exactly that --
+    produced "LaBuche-Stump.web. 192.168.4.1" (silently missing "app")
+    from a plain, unprovisioned boot. The Provisioner wizard already
+    enforces this pairing by construction when a technician runs it
+    (the IP question is only ever asked in the custom-name branch);
+    this default is what protects everyone else -- a fresh, unflashed
+    template, a test script, anything calling this function directly.
 
     ap_ip is Stump's own AP address -- always 192.168.4.1 in practice
-    (MicroPython's ESP32 default, stable across boots). It's broadcast
-    because the captive-portal redirect isn't guaranteed on every device
-    or OS version, and when it doesn't fire the address in the network
-    name is what someone falls back to.
+    (MicroPython's ESP32 default, stable across boots). When included,
+    it's broadcast because the captive-portal redirect isn't guaranteed
+    on every device or OS version, and when it doesn't fire, the
+    address in the network name is what someone falls back to.
 
-    The LAN address is deliberately NOT here. It only helps people
-    already on the upstream network, who can be told it directly, and
-    carrying it consumed nearly the whole 32-character field -- forcing
-    the AP address to be abbreviated and the node name to be clipped, to
-    advertise an address most people reading the Wi-Fi list can't use.
+    The LAN address is deliberately never here, IP suffix on or off. It
+    only helps people already on the upstream network, who can be told
+    it directly, and it previously consumed nearly the whole 32-byte
+    field on its own -- forcing the AP address to be abbreviated and
+    the node name clipped, to advertise an address most people reading
+    the WiFi list couldn't have used anyway.
     """
     import network
     import time as _time
@@ -184,24 +216,24 @@ def setup_ap(essid="Stump"):
         ap_ip = "192.168.4.1"                # MicroPython's ESP32 default
         print("[ap] interface slow to report an address, assuming", ap_ip)
 
-    # SSID is the node name plus the AP address, and nothing else.
-    #
-    # The LAN address used to be here too, on the reasoning that DHCP
-    # makes it unguessable. But the SSID's job is getting someone onto
-    # THIS network, and once they're on it the AP address is the only
-    # one that works -- the LAN address matters solely to people already
-    # on the upstream network, who can be told it directly or read it
-    # off a chalkboard. Carrying it cost nearly the whole 32-character
-    # field: it forced the AP address to be compressed, then forced the
-    # node name to be clipped, to squeeze in an address most readers of
-    # the Wi-Fi list couldn't use anyway.
-    #
-    # Dropped, the tail is a fixed 12 characters, leaving 20 for the
-    # name -- enough that truncation stops being the normal case.
-    ap_part = "-" + ap_ip
-    keep = 32 - len(ap_part)
-    name = essid[:keep].rstrip("-") if keep > 0 else ""
-    full_essid = (name + ap_part)[:32]
+    # WiFi's SSID limit is a hard 32 BYTES, not a soft guideline.
+    # DEFAULT_SSID is 21 characters -- fits alone with room to spare,
+    # but DEFAULT_SSID + " " + a dotted-quad IP is 33, one character
+    # OVER the limit. That one character matters more here than it
+    # would for an ordinary name: clipping "...web.app" to "...web.ap"
+    # doesn't just shorten a label, it breaks a real, typeable web
+    # address. The Provisioner wizard checks for and warns about this
+    # exact combination before it ever reaches here; this function
+    # still truncates safely if it happens anyway, rather than crash
+    # or silently exceed the hardware limit.
+    base = (essid or DEFAULT_SSID).rstrip()
+    if include_ip:
+        ap_part = " " + ap_ip
+        keep = 32 - len(ap_part)
+        name = base[:keep].rstrip() if keep > 0 else ""
+        full_essid = (name + ap_part)[:32]
+    else:
+        full_essid = base[:32].rstrip()
 
     # Set the SSID on its own first. Passing authmode alongside it is
     # rejected on some builds, and because config() is all-or-nothing
