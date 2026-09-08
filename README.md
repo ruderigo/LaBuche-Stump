@@ -1,6 +1,11 @@
+
 # Project Stump — Beta A (Release)
 
 # https://labuche-stump.web.app/
+
+<img width="800" height="600" alt="examplenode" src="https://github.com/user-attachments/assets/b3085262-a6de-4b35-a6c1-cc264fb5b2b2" />
+
+<img width="600" height="800" alt="examplenode2" src="https://github.com/user-attachments/assets/cf41343a-7006-4f98-b231-5c1a4adc345c" />
 
 An off-grid community node. A long-range encrypted mesh radio and a
 local high-bandwidth server, deliberately kept on separate hardware.
