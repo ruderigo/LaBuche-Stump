@@ -232,18 +232,19 @@ def _cmd_admin(client_id, stripped):
         return ["unknown mode -- use open, hybrid, or mandatory"]
 
     if sub == "meshroom":
-        if not rest:
-            current = core.MESH_DEFAULT_ROOM
-            return ["mesh landing room: " + (current or "(unset -- defaults to #main)")]
-        arg0 = rest[0].lower()
-        if arg0 in ("off", "none", "unset"):
-            core.set_mesh_room(None)
-            return ["mesh landing room cleared -- mesh peers default to #main again"]
-        slug = core.set_mesh_room(rest[0])
-        if slug is None:
-            return ["that name isn't usable as a room name"]
-        return ["mesh peers now land in #" + slug + " by default (until reboot; "
-                "not written to config.py)"]
+        # The room itself is fixed (rrc.MESH_ROOM, "#lxmf") -- always
+        # present, not something this command creates or names any
+        # more. What's left worth surfacing here is just its current
+        # tier, since that's the one thing an operator can still change
+        # about it, via the existing, unmodified /admin room command.
+        tier = core.room_tier(rrc.MESH_ROOM)
+        if tier == "open":
+            status = "open to everyone (default)"
+        else:
+            status = "tiered '" + tier + "'"
+        return ["#" + rrc.MESH_ROOM + " is always available, mesh peers land there "
+                "by default -- currently " + status + ". Change the tier with "
+                "/admin <password> room " + rrc.MESH_ROOM + " <open|minted|hybrid>."]
 
     if sub == "revoke":
         if not rest:
@@ -273,7 +274,7 @@ def _cmd_admin(client_id, stripped):
                 return [err]
         return ["#%s is now %s" % (target_room, tier)]
 
-    return ["unknown admin command -- try mode, revoke, or room"]
+    return ["unknown admin command -- try mode, meshroom, revoke, or room"]
 
 
 # ---------------------------------------------------------------------

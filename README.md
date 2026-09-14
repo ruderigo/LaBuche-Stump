@@ -1,11 +1,4 @@
-
 # Project Stump — Beta A (Release)
-
-# https://labuche-stump.web.app/
-
-<img width="800" height="600" alt="examplenode" src="https://github.com/user-attachments/assets/b3085262-a6de-4b35-a6c1-cc264fb5b2b2" />
-
-<img width="600" height="800" alt="examplenode2" src="https://github.com/user-attachments/assets/cf41343a-7006-4f98-b231-5c1a4adc345c" />
 
 An off-grid community node. A long-range encrypted mesh radio and a
 local high-bandwidth server, deliberately kept on separate hardware.
@@ -58,6 +51,7 @@ assuming you know what "turn on hybrid" does.
 - [Troubleshooting](#troubleshooting)
 - [Repository layout](#repository-layout)
 - [Architecture](#architecture)
+- [Standalone Heltec V3 transport role](#standalone-heltec-v3-transport-role)
 - [HTTP API](#http-api)
 - [Access control](#access-control)
 - [Internationalization](#internationalization)
@@ -192,10 +186,11 @@ technician has to copy the actual photos there. See `/about/img` in
 ## Repository layout
 
 ```
-final_firmware/              71 files hashed, 63 uploaded (~1.3 MB)
-├── main.py                  boot entry; retries transient failures, stops on persistent ones
-├── example_node.py          the real boot sequence; wires everything together
-├── config.py                ALL configuration lives here
+final_firmware/              74 files hashed, 64 uploaded to a CAM (~1.3 MB)
+├── main.py                  CAM boot entry -- boots example_node.py via boot_common
+├── boot_common.py           Shared retry-vs-give-up boot logic main.py delegates to
+├── example_node.py          the real CAM boot sequence; wires everything together
+├── config.py                ALL CAM configuration lives here
 ├── node_common.py           shared identity/router bring-up, safe for other firmware to import
 ├── i18n.py                  trilingual (FR/EN/ES) string table + per-visitor language state
 ├── barkeep.py                HTTP server (the only one), chat console, page router
@@ -206,16 +201,22 @@ final_firmware/              71 files hashed, 63 uploaded (~1.3 MB)
 ├── fserv.py                      file storage, streaming I/O, credit economy
 ├── captive_portal.py              AP bring-up + DNS redirect
 ├── flasher_ui.py                   browser-based board flasher (WebSerial)
-├── lora_boards.py                   LoRa pinout presets
+├── lora_boards.py                   LoRa pinout presets (native SPI radio boards)
 ├── fservbot/                         PLUGIN — channel bot
 ├── stumpid/                           PLUGIN — identity verification + room + mesh access
 ├── tools_payload/                      host-side flasher assets (not uploaded to the board)
 ├── lib/                                 native crypto accelerators
-├── peripherals/                          ADC / battery reading
+├── peripherals/                          ADC / battery reading (incl. gated-divider boards)
 └── urns/                                  µReticulum: identity, LXMF, crypto, interfaces
 
-provisioner.py               technician deployment tool (runs on a laptop)
+provisioner.py               technician deployment tool (runs on a laptop) -- provisions
+                              three board roles; see "Standalone Heltec V3 transport role" below
 ```
+
+**Not part of `final_firmware/` at all**: the standalone Heltec V3 transport role runs
+`microReticulum_Firmware`, a real, pre-built, third-party C++ firmware -- flashed and
+configured entirely via `rnodeconf`, with no files from this repository involved. See its
+own section below for why, and what replaced an earlier, retired approach.
 
 ---
 
@@ -269,6 +270,81 @@ ImportError` — the mesh bridge has no hard dependency on the identity
 plugin being installed at all. If `stumpid` isn't present, mesh peers
 land in `#main`, exactly as if no landing-room setting had ever been
 configured.
+
+---
+
+## Standalone Heltec V3 transport role
+
+A single, battery-powered Heltec V3 — no CAM, no attached host, no
+HTTP/chat stack — acting as a real, standalone Reticulum transport
+node: it rebroadcasts announces and forwards in-transit packets for
+other nodes, extending mesh reach.
+
+**This runs `microReticulum_Firmware`** (github.com/attermann/microReticulum_Firmware),
+a real, actively maintained fork of RNode_Firmware with a C++ port of
+the Reticulum stack built in — a pre-built, third-party binary, not
+any file from this repository. Flashed and configured entirely
+through `rnodeconf`, the same tool the "Control Plane" Heltec role
+already uses.
+
+**Confirmed working in the field** on this exact board.
+
+### Why this, and not a custom MicroPython app
+
+An earlier version of this role ran a hand-written MicroPython
+application (identity + `urns` + a custom LoRa interface) built
+specifically for this project. It hit a real, reproducible
+`MemoryError` on actual (PSRAM-less) hardware, traced to native crypto
+module loading during identity generation, and never got past it —
+despite a 70% code-size reduction from pre-compiling to `.mpy`
+bytecode and reordering initialization to give the radio first claim
+on available heap. `microReticulum_Firmware`, designed from the start
+around exactly this board's memory constraints, worked immediately.
+That custom application, its config file, and its LED/display
+peripherals have been removed from this repository entirely — nothing
+from the old approach is still in use.
+
+### Provisioning it
+
+`python3 provisioner.py` offers this as a third board role. The
+sequence, run by `flash_heltec_standalone_reticulum()`:
+
+1. **`rnodeconf --clear-cache`** — so a stale, previously-cached build
+   is never silently reused instead of the current release.
+2. **`rnodeconf --autoinstall --fw-url <microReticulum_Firmware releases URL> <port>`**
+   — interactive; rnodeconf asks its own hardware questions.
+3. **`rnodeconf <port> -T --freq ... --bw ... --txp ... --sf ... --cr ...`**
+   — TNC mode and every radio parameter locked together in **one**
+   command, not set separately. Setting these as separate steps risks
+   rnodeconf dropping the write cycle or reverting to Normal
+   (host-controlled) mode instead of TNC. The wizard prompts for and
+   confirms these against the same `DEFAULT_RADIO` values the existing
+   Heltec role already uses.
+
+Switching to `-T` makes the board write to EEPROM and immediately
+reboot standalone, which drops the serial connection mid-command —
+that shows up as a timeout or non-zero exit from `rnodeconf`'s own
+perspective. **This is expected**, not a failure; the code treats it
+as such and waits before the final verification step, which runs
+`rnodeconf --info` and checks the output for `TNC` directly, rather
+than trusting the lock command's own unreliable-by-design exit status.
+
+**The one thing no amount of testing from here can close**: radio
+parameters have to match whatever your actual deployed Heltec Bridge
+units were provisioned with — an operational fact set at flash time on
+each existing unit, invisible from source. Confirm this before relying
+on a newly-provisioned relay in the field.
+
+### Known limits specific to this role
+
+- `--upload-app` (the CLI shortcut for re-pushing MicroPython files
+  without reflashing) doesn't apply here — there are no files to
+  upload; the firmware is a single pre-built binary.
+- `--diag` now treats this role the same as the existing "heltec"
+  RNode role: serial-bridge and SD-card checks correctly skip (neither
+  applies — no MicroPython, no SD card), and the radio check
+  (`rnodeconf --info`) runs for real, since this role now genuinely is
+  RNode-family firmware.
 
 ---
 
@@ -561,7 +637,9 @@ gets the same IP. Test at the engine level with distinct client ids.
 
 **Hardware-proven.** The LoRa bridge, both directions, including a live
 LXMF announce passing full Ed25519 signature validation on a separate
-reference device.
+reference device. The standalone Heltec V3 transport role
+(`microReticulum_Firmware`, flashed and TNC-locked via `rnodeconf`) —
+confirmed working in the field on real hardware.
 
 **Tested against real MicroPython** (real sockets, real crypto, through
 actual dispatch, not mocks): the full `/auth` cycle; every room-tier
@@ -586,6 +664,10 @@ Python) a given deployed board actually loads.
 - `wifi_serial.py` wraps `sendall` in a 2s blocking timeout — a
   hardware-validated ESP32-S3 lwIP workaround, left untouched
   deliberately.
+- The standalone transport role's radio parameters must match whatever
+  your deployed Heltec Bridge units were actually provisioned with via
+  `rnodeconf` — an operational fact invisible from source. See its own
+  section above.
 
 ---
 

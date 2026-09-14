@@ -49,9 +49,16 @@ def _get_peer(dest_hash_hex, display_name):
     now = time.time()
     if dest_hash_hex not in _peers:
         nick = _make_nick(display_name, dest_hash_hex)
-        # Defers to stumpid's operator-settable mesh landing room if one
-        # is configured, else today's unchanged default (#main). The
-        # import is defensive, not required -- rrc_mesh has no hard
+        # Lands in rrc.MESH_ROOM ("#lxmf") unconditionally -- that room
+        # is always present (seeded in rrc.py exactly like #main), so
+        # this needs no configuration and no stumpid dependency to do
+        # the basic triaging. Auth is secondary to this, not a
+        # precondition for it: if stumpid IS installed and #lxmf has
+        # been explicitly tiered, its gate still applies (below); if
+        # stumpid isn't installed at all, or #lxmf is untiered (the
+        # default), every mesh peer simply lands in #lxmf, full stop.
+        #
+        # The import is defensive, not required -- rrc_mesh has no hard
         # dependency on stumpid being installed at all, matching this
         # project's own plugin-optionality convention elsewhere (see
         # stumpid's own soft coupling to fservbot for the same reasoning).
@@ -70,10 +77,20 @@ def _get_peer(dest_hash_hex, display_name):
             room, allowed, redirect_reason = _stumpid.mesh_landing_room(dest_hash_hex)
             redirected = not allowed
         except ImportError:
-            room = rrc.DEFAULT_ROOM
+            room = rrc.MESH_ROOM
         _peers[dest_hash_hex] = {
             "nick": nick,
             "room": room,
+            # Recorded once, at first contact, distinct from "room"
+            # (which changes as the peer /joins elsewhere). This is
+            # where /part should return them -- whatever room they
+            # actually, legitimately landed in, whether that's #lxmf
+            # (the normal case) or #main (if a tiered #lxmf redirected
+            # them here instead). Hardcoding either constant was wrong
+            # in one of the two cases; this is correct in both, since
+            # it's just "wherever mesh_landing_room() actually decided,"
+            # not an assumption about what that should have been.
+            "home_room": room,
             "last_seen": now,
             "last_sent_id": 0,
         }
@@ -206,11 +223,12 @@ def _handle(dest_hash_hex, peer, text):
         return ["in #" + room + ": " + (", ".join(names) if names else "(just you)")], None
 
     if text.lower() == "/part":
-        if room == rrc.DEFAULT_ROOM:
-            return ["you're in #main -- nowhere to part to"], None
+        home = peer["home_room"]
+        if room == home:
+            return ["you're in #" + home + " -- nowhere to part to"], None
         rrc.system(room, nick + " left")
-        rrc.system(rrc.DEFAULT_ROOM, nick + " joined from the mesh")
-        return [], rrc.DEFAULT_ROOM
+        rrc.system(home, nick + " returned")
+        return [], home
 
     if text.lower() in ("/help", "/?"):
         return [

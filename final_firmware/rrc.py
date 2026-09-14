@@ -39,11 +39,21 @@ MAX_ROOM_NAME_LEN = 20
 MAX_USERS = 40
 USER_TIMEOUT = 300          # seconds of silence before a user is dropped from a room roster
 DEFAULT_ROOM = "main"
+# Always present, exactly like DEFAULT_ROOM -- not created lazily, not
+# something an operator has to set up first. A mesh peer lands here by
+# default, unconditionally, whether or not stumpid (or any auth layer)
+# is even installed. Auth/tiers are a SEPARATE, optional concern that
+# can restrict who's welcome in this room once it exists; they don't
+# decide whether it exists or what it's called. That split is the
+# actual point: the room itself is core RRC/mesh-bridge behaviour, not
+# a feature of the identity plugin.
+MESH_ROOM = "lxmf"
 
 # room -> list of {"id", "ts", "nick", "body", "kind"}
 # kind: "msg" (normal), "action" (/me), "system" (joins, parts, topic)
-_rooms = {DEFAULT_ROOM: []}
-_topics = {DEFAULT_ROOM: "General. Be decent."}
+_rooms = {DEFAULT_ROOM: [], MESH_ROOM: []}
+_topics = {DEFAULT_ROOM: "General. Be decent.",
+           MESH_ROOM: "Mesh/LoRa traffic lands here by default."}
 _next_id = [1]
 
 # client_id -> list of {"id","ts","nick","body","kind"} addressed to
@@ -300,8 +310,10 @@ def reset():
     do I clear the chat' -- there is no persistence to clear."""
     _rooms.clear()
     _rooms[DEFAULT_ROOM] = []
+    _rooms[MESH_ROOM] = []
     _topics.clear()
     _topics[DEFAULT_ROOM] = "General. Be decent."
+    _topics[MESH_ROOM] = "Mesh/LoRa traffic lands here by default."
     _users.clear()
     _dms.clear()
     _next_id[0] = 1

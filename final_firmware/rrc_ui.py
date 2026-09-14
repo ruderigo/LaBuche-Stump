@@ -69,6 +69,19 @@ main{flex:1; display:flex; min-height:0;}
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 #rooms div:hover{background:#2f271e;}
 #rooms div.active{background:#d97a3a; color:#1b1512; font-weight:bold;}
+/* DM section nests plain divs inside #rooms, so the base row styling
+   above (#rooms div{...}) already applies -- descendant selectors
+   match at any depth, not just direct children. Only the header label
+   and the unread badge need their own rules, and they need !important
+   specifically: #rooms div's id-based selector outranks a bare class
+   selector on specificity alone, so .dm-header's overrides would
+   silently lose without it. */
+.dm-header{
+  padding:10px 10px 4px !important; cursor:default !important;
+  font-size:.72rem; text-transform:uppercase; letter-spacing:.06em;
+  color:#7d715f; border-bottom:none !important;
+}
+#rooms div.dm-entry.unread{color:#f0a050; font-weight:bold;}
 #log{flex:1; overflow-y:auto; padding:10px 12px; line-height:1.5;}
 #log p{margin:0 0 3px; overflow-wrap:break-word; word-break:break-word;}
 .nick{color:#d97a3a;}
@@ -134,6 +147,12 @@ button:hover{background:#f0a050;}
 SCRIPT = """
 var room=ROOM_INIT, lastId=0, nick=NICK_INIT, polling=false, pollAgain=false;
 var log=document.getElementById('log');
+// DM thread state -- purely client-side and session-scoped, since the
+// server has no concept of "threads": it just delivers a flat inbox
+// per recipient (rrc.py's _dms). Grouping by sender, tracking unread
+// counts, and remembering which thread is currently open all happen
+// here, not on the board.
+var dmThreads={}, dmUnread={}, viewingDM=null;
 var inp=document.getElementById('in');
 
 // Escapes the five characters that matter in HTML. The previous
@@ -159,7 +178,8 @@ function line(html, cls){
 
 function render(m){
   if(m.kind==='dm'){
-    line('&#8594; <span class="nick">'+esc(m.nick)+'</span> '+esc(m.body),'dm');
+    var self=(m.nick===nick)?' self':'';
+    line('&#8594; <span class="nick">'+esc(m.nick)+'</span> '+esc(m.body),'dm'+self);
     return;
   }
   if(m.kind==='system'){ line(esc(m.body),'system'); return; }
@@ -174,10 +194,49 @@ function setRooms(list, here){
   list.forEach(function(r){
     var d=document.createElement('div');
     d.textContent='#'+r;
-    if(r===here) d.className='active';
-    d.onclick=function(){ send('/join '+r); };
+    if(!viewingDM && r===here) d.className='active';
+    // Clicking a room always exits DM view, back to normal chat --
+    // the two are mutually exclusive display modes, never both at once.
+    d.onclick=function(){ viewingDM=null; send('/join '+r); };
     box.appendChild(d);
   });
+  var dmBox=document.createElement('div');
+  dmBox.id='dm-section';
+  box.appendChild(dmBox);
+  renderDMSidebar();
+}
+
+function renderDMSidebar(){
+  // Its own nested container, rebuilt independently of the room list
+  // above -- setRooms() only runs once per poll (when d.rooms is
+  // present), but an unread count needs to update the instant a DM
+  // arrives or a thread is opened, without waiting for or duplicating
+  // the room list rebuild.
+  var dmBox=document.getElementById('dm-section');
+  if(!dmBox) return;
+  dmBox.innerHTML='';
+  var senders=Object.keys(dmThreads);
+  if(senders.length===0) return;
+  var hdr=document.createElement('div');
+  hdr.className='dm-header';
+  hdr.textContent='Direct Messages';
+  dmBox.appendChild(hdr);
+  senders.sort().forEach(function(s){
+    var unread=dmUnread[s]||0;
+    var d=document.createElement('div');
+    d.className='dm-entry'+(viewingDM===s?' active':'')+(unread>0?' unread':'');
+    d.textContent=s+(unread>0?' ('+unread+')':'');
+    d.onclick=function(){ openDM(s); };
+    dmBox.appendChild(d);
+  });
+}
+
+function openDM(sender){
+  viewingDM=sender;
+  dmUnread[sender]=0;
+  log.innerHTML='';
+  (dmThreads[sender]||[]).forEach(function(m){ render(m); });
+  renderDMSidebar();
 }
 
 function poll(){
@@ -195,20 +254,32 @@ function poll(){
   fetch('/rrc/poll?room='+encodeURIComponent(room)+'&since='+lastId)
    .then(function(r){return r.json();})
    .then(function(d){
-     if(d.room && d.room!==room){ room=d.room; lastId=0; log.innerHTML=''; }
-     // Room messages and private ones share the id sequence, so merging
-     // and sorting shows them in the order they actually happened rather
-     // than in two separate clumps.
-     var all=(d.messages||[]).concat(d.dms||[]);
-     all.sort(function(a,b){return a.id-b.id;});
-     all.forEach(function(m){
-       // Second line of defence: never render an id already shown, so
-       // even an overlapping response can't duplicate anything.
+     if(d.room && d.room!==room){
+       room=d.room; lastId=0;
+       if(!viewingDM){ log.innerHTML=''; }
+     }
+     // Room messages and DMs are no longer merged into one stream --
+     // they render into two different places now (the room log vs. a
+     // per-sender thread), so the ordering between them stopped
+     // mattering the moment they stopped sharing a display. Each is
+     // still processed in its own arrival order, id-guarded exactly
+     // as before against a re-delivered or overlapping response.
+     var maxId=lastId;
+     (d.messages||[]).forEach(function(m){
+       if(m.id>maxId) maxId=m.id;
        if(m.id<=lastId) return;
-       render(m);
-       lastId=m.id;
+       if(!viewingDM) render(m);
      });
-     if(d.rooms) setRooms(d.rooms, room);
+     (d.dms||[]).forEach(function(m){
+       if(m.id>maxId) maxId=m.id;
+       if(m.id<=lastId) return;
+       var box=dmThreads[m.nick]=dmThreads[m.nick]||[];
+       box.push(m);
+       if(viewingDM===m.nick){ render(m); }
+       else{ dmUnread[m.nick]=(dmUnread[m.nick]||0)+1; }
+     });
+     lastId=maxId;
+     if(d.rooms) setRooms(d.rooms, room); else renderDMSidebar();
      if(d.topic!==undefined) document.getElementById('topic').textContent=d.topic?('— '+d.topic):'';
      if(d.nick && d.nick!==nick){ nick=d.nick; document.getElementById('me').textContent=nick; }
      onPollOk();
@@ -238,16 +309,36 @@ function send(text){
   // outcome, so a failed request cannot leave the box permanently dead.
   if(sending) return;
   setBusy(true);
-  fetch('/rrc/send',{method:'POST',body:text})
+  // While a DM thread is open, a plain line (no leading /) is sent as
+  // a reply to that thread rather than posted to whatever room the
+  // server still has you in -- typing and hitting Enter should just
+  // work, the way replying in any chat app does, without retyping
+  // "/msg <name>" every single line. A command (still starting with
+  // /) is left alone and goes to the server exactly as typed.
+  var isDMReply=(viewingDM && text.charAt(0)!=='/');
+  var outgoing=isDMReply ? ('/msg '+viewingDM+' '+text) : text;
+  fetch('/rrc/send',{method:'POST',body:outgoing})
    .then(function(r){return r.json();})
    .then(function(d){
-     (d.replies||[]).forEach(function(t){
-       if(t==='__CLEAR__'){ log.innerHTML=''; return; }
-       line(esc(t),'local');
-     });
+     if(isDMReply){
+       // The server only ever delivers a DM to its RECIPIENT's inbox
+       // (rrc.py's _dms is keyed by recipient, never the sender) -- so
+       // without echoing it here directly, the sender would never see
+       // their own half of the conversation in the thread view at all,
+       // confirmed by reading send_dm()'s actual storage target.
+       var box=dmThreads[viewingDM]=dmThreads[viewingDM]||[];
+       var mine={id:0, nick:nick, body:text, kind:'dm'};
+       box.push(mine);
+       render(mine);
+     } else {
+       (d.replies||[]).forEach(function(t){
+         if(t==='__CLEAR__'){ log.innerHTML=''; return; }
+         line(esc(t),'local');
+       });
+     }
      if(d.room && d.room!==room){
-       room=d.room; lastId=0; log.innerHTML='';
-       line('now in #'+room,'local');
+       room=d.room; lastId=0;
+       if(!viewingDM){ log.innerHTML=''; line('now in #'+room,'local'); }
      }
      poll();
    })

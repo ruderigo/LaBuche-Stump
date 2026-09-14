@@ -7,8 +7,8 @@ from lora_boards import LORA_BOARDS
 
 # ---- Node settings ----
 WIFI_SSID = "Bob's Glitch"
-WIFI_PASS = 'SalutComment'
-NODE_NAME = 'LaBuche'
+WIFI_PASS = "SalutComment"
+NODE_NAME = "ESP32s3"
 
 # The walk-up hotspot's own name -- separate from NODE_NAME (the mesh
 # identity's display name) on purpose; these are different concerns.
@@ -39,7 +39,7 @@ SSID_INCLUDE_IP = False
 # The name the local greeter answers to on the web pages. Purely
 # cosmetic and per-node -- it has nothing to do with NODE_NAME above,
 # which is the identity mesh peers see.
-BOT_NAME = 'Concierge'
+BOT_NAME = "BarKeep"
 
 # Sent once to each mesh peer the first time they message this node.
 # Blank disables it entirely.
@@ -50,7 +50,7 @@ BOT_NAME = 'Concierge'
 # with a paragraph and do it again for the next three words. A greeting
 # on first contact says who this node is and what it offers; after that
 # the conversation is the point.
-MESH_GREETING = "Bonjour Hi je suis Concierge et je m'occupe de cette Buche. Plus d'info LaBuche-Stump.web.app"
+MESH_GREETING = ""
 MESH_GREETING_MAX = 200
 
 # How often this node announces its LXMF identity to the mesh, in
@@ -134,7 +134,7 @@ CONFIG = {
             "type": "WiFiSerialInterface",
             "name": "Heltec Bridge",
             "enabled": True,
-            "target_host": '192.168.0.222',
+            "target_host": "192.168.0.222",
             "target_port": 7633,
         },
 
@@ -153,12 +153,5 @@ SENSOR_HUB = ""
 # CREDIT_WEIGHTS is what an upload of each file class EARNS, and equally
 # what a download of it COSTS. Set every value to 1 for a flat
 # one-file-in-one-file-out economy; raise a class to make it scarcer.
-CREDITS_ENABLED = False
-CREDIT_WEIGHTS = {'video': 3, 'music': 2, 'document': 1, 'other': 1}
-
-# ---- Plugin settings (added by the Provisioner) ----
-AUTH_ADMIN_PASSWORD = 'TeK'
-AUTH_MODE = 'open'
-FSERVBOT_BROADCAST_MINS = 5
-FSERVBOT_OP_PASSWORD = 'TeK_Knoh'
-FSERVBOT_TRIGGER_PREFIX = '!'
+CREDITS_ENABLED = True
+CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}

@@ -7,7 +7,12 @@ A self-contained flasher / config wizard / diagnostic suite for field
 technicians deploying Stump (Tier 1) and Firefly (Tier 2) hardware.
 
 Boards it knows how to handle:
-  - Heltec V3 (ESP32-S3 + SX1262)  -> flashed as an RNode radio via `rnodeconf`
+  - Heltec V3 (ESP32-S3 + SX1262), Control Plane role -> flashed as an
+                                       RNode radio bridged to a CAM, via `rnodeconf`
+  - Heltec V3 (ESP32-S3 + SX1262), Standalone Transport role -> flashed with
+                                       microReticulum_Firmware (a self-contained
+                                       Reticulum node, no CAM, no host), also via
+                                       `rnodeconf`, then locked into TNC mode
   - Freenove ESP32-S3-CAM          -> flashed with MicroPython, then loaded
                                        with the Stump substance-engine app
                                        (billboard / RRC chat / BarKeep bot)
@@ -31,6 +36,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 # A distinct sentinel, not None -- _generate_config_py needs to tell
@@ -195,8 +201,11 @@ DEFAULT_CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
 EXPECTED_FILE_HASHES = {
     "barkeep.py": "f9ce7b2342bc4108",
     "billboard.py": "0802a1334a6012c3",
+    "boot_common.py": "d1f60dd4434752bf",
     "captive_portal.py": "8c2a0ee90cdc1e04",
     "config.py": "40524df2178b7afe",
+    "docs/CLIENT_QUICKSTART.md": "22f09055cb4c65f1",
+    "docs/COMMANDS.md": "6eed8b61909899a0",
     "example_node.py": "e9c4849ce755a3f2",
     "flasher_ui.py": "f0af338707d46d25",
     "fserv.py": "adaf199fa3e985e4",
@@ -211,17 +220,17 @@ EXPECTED_FILE_HASHES = {
     "lib/ed25519_fast_xtensawin.mpy": "96e74dac45f91687",
     "lib/ed25519_iram.mpy": "96e74dac45f91687",
     "lora_boards.py": "d60ef896cd1a0ff9",
-    "main.py": "6cae6b96e3e569e9",
+    "main.py": "1aa56ed560be50d7",
     "node_common.py": "e1e748a3283da2f4",
     "peripherals/__init__.py": "d2bdac4de6de79de",
-    "peripherals/adc_reader.py": "005c0ea96ffdd24f",
-    "rrc.py": "173b234f5f053039",
-    "rrc_mesh.py": "9b7d1f3f51cb009c",
-    "rrc_ui.py": "69759dcf4f1026d6",
+    "peripherals/adc_reader.py": "50a393bfa61641d4",
+    "rrc.py": "7e426d7389bcf6bd",
+    "rrc_mesh.py": "f981f4669737a96e",
+    "rrc_ui.py": "b6be27b07a1c10b3",
     "stumpid/README.md": "da60b797b09855c3",
     "stumpid/__init__.py": "83462abf471caca1",
-    "stumpid/core.py": "ffcede53817a5da3",
-    "stumpid/install.py": "af7958f3deed3147",
+    "stumpid/core.py": "d7f755af8f6b5494",
+    "stumpid/install.py": "7b218d5825cf1ecc",
     "stumpid/plugin.json": "049f73bbf3ccfd03",
     "tools_payload/flasher/catalog.json": "8dc38061d6bf49a3",
     "tools_payload/flasher/esptool-bundle.js": "ef7d5a237d3f273e",
@@ -321,6 +330,7 @@ CAM_FIRMWARE_LATEST_URL = (
 # candidate, so a plain GENERIC_S3 image sitting in Downloads isn't
 # suggested for a board that would silently lose its PSRAM to it.
 CAM_FIRMWARE_NAME_MARKERS = ("esp32_generic_s3", "spiram_oct")
+
 FIRMWARE_CACHE_DIR = Path.home() / ".provisioner" / "firmware"
 
 
@@ -766,7 +776,6 @@ def _download_cam_firmware(url=None):
         return None
 
 
-
 def _find_unextracted_zips(roots, max_depth=2):
     """Looks for firmware archives that were downloaded but never
     extracted. Bounded to a shallow scan of the same roots already
@@ -1022,7 +1031,8 @@ def choose_board():
     # precisely the prompt people accept without reading. The guess is
     # still shown, and pre-selects the default -- it just no longer gets
     # to decide by itself.
-    heltec_label = "Heltec V3 (Control Plane — RNS/LoRa mesh)"
+    heltec_label = "Heltec V3 (Control Plane — RNS/LoRa mesh, bridged to a CAM)"
+    heltec_transport_label = "Heltec V3 (Standalone Transport — microReticulum firmware, no CAM)"
     cam_label = "ESP32-S3-CAM (Data Plane — local vault + web)"
     guess = chosen["guess"]
     if guess and guess != "unknown board":
@@ -1031,8 +1041,19 @@ def choose_board():
     else:
         print(f"\n  Couldn't identify this board from USB alone ({chosen['description']}).")
 
-    board_choice = ask_choice("What kind of board is this?", [heltec_label, cam_label])
-    return chosen_device, ("heltec" if any(m in board_choice for m in _HELTEC_MARKERS) else "cam")
+    # An exact-label lookup, not a substring match against "Heltec" --
+    # that approach broke the moment a second Heltec-labeled choice
+    # existed, since both labels legitimately contain the word. Matching
+    # the precise, unique label a person actually picked is the fix,
+    # not a more elaborate substring rule.
+    board_choice = ask_choice("What kind of board is this?",
+                               [heltec_label, heltec_transport_label, cam_label])
+    board_type_map = {
+        heltec_label: "heltec",
+        heltec_transport_label: "heltec_transport",
+        cam_label: "cam",
+    }
+    return chosen_device, board_type_map[board_choice]
 
 
 # ---------------------------------------------------------------------------
@@ -1052,6 +1073,112 @@ def flash_heltec_rnode(port):
     ok = run_interactive(["rnodeconf", "--autoinstall", port], timeout=180)
     print("\nOK — RNode firmware flashed." if ok else "\nFAILED or cancelled — see rnodeconf's own output above.")
     return ok
+
+
+STANDALONE_RETICULUM_FW_URL = "https://github.com/attermann/microReticulum_Firmware/releases/"
+
+
+def flash_heltec_standalone_reticulum(port, radio):
+    """
+    Flashes the standalone Heltec V3 transport role using
+    microReticulum_Firmware -- a real, actively maintained fork of
+    RNode_Firmware with the microReticulum C++ Reticulum stack built in,
+    confirmed to actually work on this hardware in the field. This
+    REPLACES an earlier, custom MicroPython-based approach for this
+    role (identity + urns + a hand-written LoRa interface) that hit a
+    real, reproducible MemoryError on actual (PSRAM-less) hardware,
+    traced to native crypto module loading, and never got past it --
+    while this pre-built firmware, designed from the start around
+    exactly this board's memory constraints, worked immediately.
+
+    Three steps, run in this order for a reason:
+
+    1. --clear-cache: rnodeconf caches firmware downloads locally: if a
+       previous attempt (this role's old flow, or an earlier partial
+       run) already cached a build, autoinstall would silently reuse
+       stale bytes instead of fetching the current release.
+
+    2. --autoinstall --fw-url <url>: interactive (asks rnodeconf's own
+       hardware questions), so this uses run_interactive like the
+       existing flash_heltec_rnode() above, not the output-capturing
+       run() helper.
+
+    3. -T --freq/--bw/--txp/--sf/--cr set TOGETHER in ONE command, not
+       as separate steps -- confirmed this matters: setting the
+       operating mode and radio parameters separately risks rnodeconf
+       dropping the write cycle or reverting to Normal (host-
+       controlled) mode instead of TNC. This step deliberately treats
+       what LOOKS LIKE a failure as success: switching to -T makes the
+       board write to EEPROM and immediately reboot standalone, which
+       drops the serial connection and surfaces as a timeout/non-zero
+       exit from rnodeconf's own perspective. That's confirmed expected
+       behavior for this exact transition, not a fault -- so this
+       treats it as fine even when the run() call itself looks failed,
+       and includes a real wait (mirroring how esptool's own hard
+       reset needed a similar wait elsewhere in this file) before
+       trying to talk to the board again.
+
+    Ends with rnodeconf --info to actually confirm Device mode reads
+    TNC -- not just assumed from the lock command appearing to run,
+    since that command's own success/failure signal is unreliable here
+    by design (see above).
+    """
+    banner(f"FLASHING STANDALONE RETICULUM FIRMWARE — {port}")
+    print(f"Source: {STANDALONE_RETICULUM_FW_URL}")
+    print("(microReticulum_Firmware -- a self-contained Reticulum transport")
+    print(" node, not stock RNode firmware. Confirmed working on this exact")
+    print(" role's hardware in the field.)\n")
+
+    print("Clearing rnodeconf's firmware cache...")
+    run(["rnodeconf", "--clear-cache"], timeout=30)
+
+    print("\nRunning autoinstall -- rnodeconf will ask its own questions below.")
+    ok = run_interactive(["rnodeconf", "--autoinstall", "--fw-url", STANDALONE_RETICULUM_FW_URL, port], timeout=240)
+    if not ok:
+        print("\nFAILED or cancelled during autoinstall -- see rnodeconf's own output above.")
+        return False
+    print("\nOK — firmware flashed.")
+
+    print("\nLocking TNC mode and radio parameters together (one command --")
+    print("setting these separately risks rnodeconf reverting to host-controlled")
+    print("mode instead)...")
+    lock_cmd = [
+        "rnodeconf", port, "-T",
+        "--freq", str(int(radio["frequency"])),
+        "--bw", str(int(radio["bandwidth"])),
+        "--txp", str(int(radio["txpower"])),
+        "--sf", str(int(radio["spreadingfactor"])),
+        "--cr", str(int(radio["codingrate"])),
+    ]
+    ok, out = run(lock_cmd, timeout=30)
+    # A timeout/non-zero exit HERE is the expected shape of success, not
+    # a fault -- see this function's own docstring. Printed either way
+    # so a technician sees what actually happened, not a silent guess.
+    if ok:
+        print("  (command completed without the usual reboot-triggered timeout --")
+        print("   also fine, just less common for this particular transition)")
+    else:
+        print("  Serial read timeout / non-zero exit -- EXPECTED here. The board")
+        print("  writes to EEPROM and reboots standalone the moment -T is set,")
+        print("  which drops the connection mid-command. Not a failure on its own.")
+
+    print("\nWaiting for the board to finish rebooting into standalone mode...")
+    time.sleep(6)
+
+    print("Verifying...")
+    ok, out = run(["rnodeconf", port, "--info"], timeout=30)
+    if not ok:
+        print(f"  Could not reach the board for verification: {out.strip()}")
+        print(f"  Retry manually once it's settled: rnodeconf {port} --info")
+        return False
+    print(out.strip())
+    if "TNC" in out:
+        print("\nOK — Device mode confirmed as TNC (standalone). Board is a real transport node now.")
+        return True
+    else:
+        print("\nDevice mode does NOT read TNC -- still Normal (host-controlled) or unclear.")
+        print(f"  Retry the lock step manually: {' '.join(lock_cmd)}")
+        return False
 
 
 def _bootloader_recovery(port):
@@ -1177,13 +1304,7 @@ def flash_cam_micropython(port, firmware_path=None):
     return (ok, port if ok else None)
 
 
-# config.py is deliberately exempt from the staleness hash check below:
-# it's the one file that's SUPPOSED to differ per node, since the config
-# wizard writes each node's real WiFi credentials, name, and bridge
-# target into it. Hashing it would flag every correctly-configured node
-# as "stale" -- and a warning that fires on correct behavior is worse
-# than no warning, because it trains technicians to click past the one
-# check that has actually caught real bugs on this project.
+
 HASH_CHECK_EXEMPT = {"config.py"}
 
 # Files that live in the firmware folder but must NEVER be part of the
@@ -1501,9 +1622,36 @@ def _diff_against_device(resolved, filenames, device_sizes):
 
 def config_wizard(board_type):
     banner("GUIDED CONFIG WIZARD")
-    node_name = ask("Node name (shown to peers)", "unnamed-stump" if board_type == "cam" else "unnamed-firefly")
+    # Three roles, three sensible defaults -- the old binary check here
+    # (cam vs. everything-else-is-firefly) silently gave a standalone
+    # transport relay the wrong default name ("unnamed-firefly"), since
+    # it isn't one. Caught by a review, not by anyone hitting it in the
+    # field, but worth fixing before someone did.
+    default_names = {
+        "cam": "unnamed-stump",
+        "heltec_transport": "unnamed-repeater",
+    }
+    node_name = ask("Node name (shown to peers)", default_names.get(board_type, "unnamed-firefly"))
 
     profile = {"node_name": node_name, "board_type": board_type}
+
+    if board_type == "heltec_transport":
+        # Radio parameters MUST match the rest of the deployed mesh --
+        # confirmed explicitly here rather than silently trusted,
+        # exactly like the existing "heltec" role already does below.
+        # A relay with mismatched radio parameters doesn't error, it
+        # just never hears or is heard by anything -- there's no
+        # message for that failure mode, only silence, so this is the
+        # one place to actually catch it before it ships.
+        print("\nRadio parameters (defaults match the deployed mesh):")
+        radio = dict(DEFAULT_RADIO)
+        radio["frequency"] = int(ask("Frequency (Hz)", radio["frequency"]))
+        radio["bandwidth"] = int(ask("Bandwidth (Hz)", radio["bandwidth"]))
+        radio["txpower"] = int(ask("TX power", radio["txpower"]))
+        radio["spreadingfactor"] = int(ask("Spreading factor", radio["spreadingfactor"]))
+        radio["codingrate"] = int(ask("Coding rate", radio["codingrate"]))
+        profile["radio"] = radio
+        return profile, None
 
     if board_type == "heltec":
         print("\nRadio parameters (defaults match the deployed mesh):")
@@ -1752,6 +1900,13 @@ def push_config_to_board(port, board_type, profile):
             return wok
         return True
 
+    # heltec_transport: no longer reaches this function at all -- the
+    # standalone Reticulum firmware role locks its radio parameters as
+    # part of flashing itself (flash_heltec_standalone_reticulum,
+    # rnodeconf -T --freq/--bw/... in one command), not as a separate
+    # config-push step against a MicroPython filesystem that no longer
+    # exists on this board. See main()'s own dispatch for this role.
+
     # cam: a real MicroPython board. config.py here is a real Python file
     # with hardcoded constants (WIFI_SSID, WIFI_PASS, NODE_NAME) plus a
     # nested interfaces list -- not a separate JSON file loaded at
@@ -1986,7 +2141,7 @@ def sd_card_status(port):
     return False, out or "no response from board (is fserv.py uploaded to it?)"
 
 
-def wipe_sd_card(port, skip_confirmation=False):
+def wipe_sd_card(port, skip_confirmation=False, board_type=None):
     """
     Fully erases and reformats the card. This build's fserv.py has no
     wipe function of its own (only mount_sd(), which mounts an
@@ -2001,7 +2156,41 @@ def wipe_sd_card(port, skip_confirmation=False):
     is invoked as a direct non-interactive retry immediately after a
     diagnostic already showed the card unusable and the technician
     already agreed to a wipe there).
+
+    REFUSES OUTRIGHT for any Heltec board, regardless of role, and
+    regardless of what the caller passes for skip_confirmation --
+    this is a hard safety check inside the function itself, not just
+    at its call sites, precisely because a call site can be added
+    later (or already existed, at the --wipe-sd CLI flag below) without
+    anyone re-deriving this reasoning. sck=39/cmd=38/data=40 are the
+    CAM's own SD wiring -- GPIO38 specifically falls inside GPIO33-38,
+    which Heltec's own official wiki and datasheet both list, in
+    matching wording, as reserved for SPI Flash/SubSPI communication:
+    "must not be used as general GPIO." This isn't a theoretical
+    concern -- a board went completely dark immediately after this
+    exact code path ran against it, and came back only after a power
+    cycle, consistent with (though not certain proof of) exactly this
+    interference. board_type=None (unknown) also refuses, on the same
+    reasoning ask_yes_no() defaults to the safer option under
+    uncertainty: a board that hasn't been identified might be a
+    Heltec, and there is no safe way to tell from here.
     """
+    if board_type != "cam":
+        banner(f"WIPE SD CARD — {port}")
+        print("REFUSED. This board is" + (" not identified as a CAM" if board_type is None
+              else f" a {board_type}") + ", and this function's hardcoded pins")
+        print("(sck=39, cmd=38, data=40) are the CAM's own SD wiring specifically.")
+        print("GPIO38 falls inside GPIO33-38 -- reserved by Heltec's own hardware")
+        print("documentation for SPI Flash/SubSPI communication, explicitly listed as")
+        print("\"must not be used as general GPIO.\" Driving it as an SD command line")
+        print("risks interfering with the chip's own access to its program flash --")
+        print("exactly consistent with a board that went completely dark immediately")
+        print("after this code path ran against it in the field.")
+        print()
+        print("Neither Heltec role has an SD card at all. There is nothing to wipe")
+        print("here regardless of board type.")
+        return False
+
     banner(f"WIPE SD CARD — {port}")
     if not skip_confirmation:
         print("This ERASES EVERYTHING currently on the card and lays down a")
@@ -2048,24 +2237,34 @@ def diagnostics(port, board_type=None, interactive=True):
     banner(f"DIAGNOSTIC SUITE — {port}")
     results = {}
 
-    # 1. Serial bridging (mpremote / MicroPython-specific -- only meaningful
-    # for the CAM board. A Heltec V3 running RNode firmware has no
-    # MicroPython REPL for mpremote to reach at all; the radio test below
-    # (rnodeconf --info) is this board type's real equivalent check.
+    # 1. Serial bridging (mpremote / MicroPython-specific). Meaningful
+    # ONLY for the CAM now -- heltec_transport used to run MicroPython
+    # (a now-retired custom stack), but now runs the same kind of
+    # pre-built, non-MicroPython firmware as the "heltec" role, reached
+    # the same way rnodeconf reaches that one: the radio test below is
+    # this role's real check, same as "heltec"'s.
     print("[1/4] Serial bridge test...")
-    if board_type == "heltec":
-        print("  SKIPPED — this board runs RNode firmware, not MicroPython;")
-        print("  mpremote has nothing to connect to here. See the radio test below.")
+    if board_type in ("heltec", "heltec_transport"):
+        print("  SKIPPED — this board runs standalone Reticulum/RNode-family")
+        print("  firmware, not MicroPython; mpremote has nothing to connect to")
+        print("  here. See the radio test below.")
         results["serial_bridge"] = None
     else:
         ok, out = run(["mpremote", "connect", port, "exec", "print('provisioner-ping')"], timeout=15)
         results["serial_bridge"] = ok
         print("  OK — board responded over serial." if ok else f"  FAILED: {out.strip()}")
 
-    # 2. SD card storage (only meaningful for the CAM board)
+    # 2. SD card storage -- meaningful ONLY for the CAM. Neither Heltec
+    # role has an SD card at all, confirmed directly: this is also the
+    # test that, on a failure, offers to call wipe_sd_card() -- which
+    # now refuses outright for any non-CAM board_type on its own, but
+    # skipping the whole test here means a heltec_transport board never
+    # even reaches a false "card looks unusable" prompt in the first
+    # place, rather than relying on the wipe function's own refusal as
+    # the only line of defence.
     print("[2/4] SD card storage test...")
-    if board_type == "heltec":
-        print("  SKIPPED — Heltec V3 has no SD card.")
+    if board_type in ("heltec", "heltec_transport"):
+        print("  SKIPPED — neither Heltec role has an SD card.")
         results["sd_card"] = None
     else:
         ok, msg = sd_card_status(port)
@@ -2077,12 +2276,18 @@ def diagnostics(port, board_type=None, interactive=True):
             if interactive:
                 do_wipe = ask_yes_no("  Card looks unusable as-is. Wipe and reformat it now?", False)
                 if do_wipe:
-                    if wipe_sd_card(port, skip_confirmation=True):
+                    if wipe_sd_card(port, skip_confirmation=True, board_type=board_type):
                         ok2, msg2 = sd_card_status(port)
                         results["sd_card"] = ok2
                         print(f"  Re-check after wipe: {'OK' if ok2 else 'FAILED'} — {msg2}")
 
-    # 3. Radio TX/RX
+    # 3. Radio TX/RX -- meaningful for any board actually running
+    # RNode-family firmware. heltec_transport now does (standalone
+    # Reticulum firmware, reached the same way as the "heltec" role's
+    # stock RNode) -- this used to be skipped here when this role ran a
+    # custom MicroPython stack instead, where rnodeconf --info had
+    # nothing real to check; that's no longer the case now that the
+    # underlying firmware is genuinely RNode-family.
     print("[3/4] Radio TX/RX test...")
     if board_type == "cam":
         print("  SKIPPED — the CAM has no radio of its own; it reaches the mesh through the Heltec Bridge (tested separately below).")
@@ -2093,30 +2298,43 @@ def diagnostics(port, board_type=None, interactive=True):
         ok, out = run(["rnodeconf", "--info", port], timeout=30)
         results["radio"] = ok
         print("  OK — RNode responded to --info." if ok else f"  FAILED: {out.strip()}")
+        if ok and board_type == "heltec_transport" and "TNC" not in out:
+            print("  Note: responded, but doesn't show Device mode: TNC -- worth confirming")
+            print(f"  with: rnodeconf {port} --info")
 
-    # 4. Heltec Bridge reachability -- the TCP/KISS link the whole
-    # architecture depends on. Tested from THIS machine, not from the
-    # board: it's a plain TCP connect to the Heltec's WiFi Remote port,
-    # so it works whichever board happens to be plugged in, and it
-    # isolates "is the Heltec actually reachable on the network" from
-    # "did the CAM's software connect to it" -- two different failures
-    # that look identical from the CAM's logs alone.
+    # 4. Heltec Bridge reachability -- the TCP/KISS link the CAM<->Heltec
+    # architecture depends on. Meaningless for a standalone transport
+    # role: it reads bridge_target from config.py (the CAM's own
+    # config) and probes whatever address happens to be THERE --
+    # confirmed this can return a completely unrelated "OK" if some
+    # other, already-deployed Heltec Bridge happens to be reachable on
+    # the network, regardless of whether it has anything to do with the
+    # specific board plugged in right now. Still irrelevant here even
+    # though heltec_transport is now RNode-family firmware too -- this
+    # role has no bridge relationship to any CAM at all, standalone
+    # means standalone.
     print("[4/4] Heltec Bridge reachability...")
-    bridge_target = _read_bridge_target_from_config()
-    if bridge_target is None:
-        print("  SKIPPED — couldn't read the bridge target from config.py")
-        print("  (run the config wizard first, or check the firmware folder).")
+    if board_type == "heltec_transport":
+        print("  SKIPPED — this role has no CAM<->Heltec bridge relationship at all;")
+        print("  it's a standalone relay, not a bridge target. This check reads an")
+        print("  unrelated config.py value and would test the wrong thing entirely.")
         results["heltec_bridge"] = None
     else:
-        host, bport = bridge_target
-        ok, detail = _probe_bridge(host, bport)
-        results["heltec_bridge"] = ok
-        if ok:
-            print(f"  OK — {host}:{bport} accepting connections.")
+        bridge_target = _read_bridge_target_from_config()
+        if bridge_target is None:
+            print("  SKIPPED — couldn't read the bridge target from config.py")
+            print("  (run the config wizard first, or check the firmware folder).")
+            results["heltec_bridge"] = None
         else:
-            print(f"  FAILED: {host}:{bport} — {detail}")
-            print("  Check: is the Heltec powered on, on the same network, and still in")
-            print("  WiFi Station mode? Confirm with: rnodeconf <heltec-port> --info")
+            host, bport = bridge_target
+            ok, detail = _probe_bridge(host, bport)
+            results["heltec_bridge"] = ok
+            if ok:
+                print(f"  OK — {host}:{bport} accepting connections.")
+            else:
+                print(f"  FAILED: {host}:{bport} — {detail}")
+                print("  Check: is the Heltec powered on, on the same network, and still in")
+                print("  WiFi Station mode? Confirm with: rnodeconf <heltec-port> --info")
 
     banner("DIAGNOSTIC SUMMARY")
     for k, v in results.items():
@@ -2201,102 +2419,139 @@ def interactive_wizard():
         print("Aborted — no board selected.")
         return
 
-    # Preflight: resolve local file dependencies (firmware tree,
-    # firmware image) up front, before touching the board at all. Catches
-    # a wrong working-directory/layout as a friendly prompt right away
-    # instead of after erase_flash has already run.
-    resolved_app_dir = None
-    if board_type == "cam":
-        banner("PREFLIGHT — CHECKING LOCAL FILE LOCATIONS")
-        resolved_app_dir = resolve_path(
-            STUMP_APP_DIR,
-            _STUMP_FILES_DESC,
-            remember_key="stump_app_dir",
-            is_dir=True,
-            search_roots=[Path.cwd(), Path.cwd().parent, Path(__file__).resolve().parent,
-                          Path.home() / "Desktop", Path.home() / "Downloads"],
-            search_name="final_firmware",
-            validate_fn=_is_current_firmware_folder,
-        )
-        if resolved_app_dir:
-            print(f"  Using firmware source: {resolved_app_dir}")
-        else:
-            print("  No firmware folder found — MicroPython will still flash,")
-            print("  but the app upload step will be skipped unless this is fixed.")
-
-    if ask_yes_no(f"\nFlash firmware onto {port} now?", True):
-        if board_type == "heltec":
-            flash_heltec_rnode(port)
-        else:
-            flash_ok, flashed_port = flash_cam_micropython(port)
-            if flash_ok:
-                # Bootloader recovery can land the board on a different
-                # serial port than the one we started with, so carry the
-                # working port forward -- the upload, config push and IP
-                # query below all need to target where the board
-                # actually is, not where it was before the flash.
-                if flashed_port and flashed_port != port:
-                    print(f"\nBoard moved to {flashed_port} during flashing -- using that from here.")
-                    port = flashed_port
-                # esptool hard-resets the board via RTS right after writing
-                # the image (visible in its own output: "Hard resetting via
-                # RTS pin..."). Starting the upload immediately races that
-                # reboot -- the board hasn't finished booting MicroPython
-                # yet, so the very first mpremote connection attempt fails
-                # with "could not enter raw repl" almost every time, while
-                # every attempt after succeeds instantly. This wait is the
-                # actual fix for that pattern, not just the retry papering
-                # over it.
-                print("\nWaiting for the board to finish booting after the flash...")
-                time.sleep(5)
-                upload_stump_app(port, app_dir=resolved_app_dir)
-            else:
-                print("\nSkipping app upload since flashing failed -- fix that first, then")
-                print(f"retry the upload separately with: python3 provisioner.py --upload-app {port}")
-
-    if ask_yes_no("\nRun guided config wizard?", True):
-        profile, _ = config_wizard(board_type)
-        push_config_to_board(port, board_type, profile)
-
+    # heltec_transport now has its own complete, self-contained flow --
+    # a real, pre-built firmware (microReticulum_Firmware) flashed and
+    # RF-locked in one combined step, not MicroPython files uploaded
+    # afterward. None of the preflight-firmware-folder, app-upload, or
+    # separate config-push logic below applies to it at all, so this
+    # branch runs its own sequence and then joins the shared
+    # diagnostics/DONE ending below, same as every other role.
+    if board_type == "heltec_transport":
+        if ask_yes_no(f"\nFlash standalone Reticulum firmware onto {port} now?", True):
+            print("\nRadio parameters (defaults match the deployed mesh):")
+            radio = dict(DEFAULT_RADIO)
+            radio["frequency"] = int(ask("Frequency (Hz)", radio["frequency"]))
+            radio["bandwidth"] = int(ask("Bandwidth (Hz)", radio["bandwidth"]))
+            radio["txpower"] = int(ask("TX power", radio["txpower"]))
+            radio["spreadingfactor"] = int(ask("Spreading factor", radio["spreadingfactor"]))
+            radio["codingrate"] = int(ask("Coding rate", radio["codingrate"]))
+            flash_heltec_standalone_reticulum(port, radio)
+        # Falls through to the shared diagnostics/DONE ending below --
+        # radio and serial_bridge checks there now treat this role the
+        # same as the existing "heltec" RNode role, since both are now
+        # the same kind of firmware, reached the same way.
+    else:
+        # Preflight: resolve local file dependencies (firmware tree,
+        # firmware image) up front, before touching the board at all. Catches
+        # a wrong working-directory/layout as a friendly prompt right away
+        # instead of after erase_flash has already run.
+        resolved_app_dir = None
         if board_type == "cam":
-            banner("FINDING THE NODE'S IP ADDRESS(ES)")
-            # Reset first, then wait for the real boot sequence. Querying
-            # straight after the config push would almost always miss:
-            # the new config.py has only just landed, and the addresses
-            # only exist once example_node.py has actually run its WiFi
-            # join. Resetting here means the wizard reports a real
-            # address instead of handing the technician homework.
-            print("Resetting the board so it boots with the new config...")
-            run(["mpremote", "connect", port, "reset"], timeout=15)
-            print("Waiting for boot (WiFi join, NTP sync, Reticulum startup)...")
-            time.sleep(12)
-            print("Querying the board for its current network state...")
-            addrs = get_stump_ip(port)
-            if addrs and (addrs.get("sta") or addrs.get("ap")):
-                print()
-                if addrs.get("sta"):
-                    print(f"LAN IP (from '{profile['wifi_ssid']}'): {addrs['sta']}")
-                    print(f"  -- reachable from anyone else on that same network:")
-                    print(f"     http://{addrs['sta']}/billboard")
-                if addrs.get("ap"):
-                    print(f"Local hotspot IP: {addrs['ap']}")
-                    print(f"  -- connect a phone to the node's own 'Stump' Wi-Fi network,")
-                    print(f"     then browse to: http://{addrs['ap']}/billboard")
-                if not addrs.get("sta"):
-                    print("\n(No LAN IP yet -- if this is right after flashing/config, power-cycle")
-                    print(" the board so example_node.py actually runs through its real WiFi join.)")
+            banner("PREFLIGHT — CHECKING LOCAL FILE LOCATIONS")
+            resolved_app_dir = resolve_path(
+                STUMP_APP_DIR,
+                _STUMP_FILES_DESC,
+                remember_key="stump_app_dir",
+                is_dir=True,
+                search_roots=[Path.cwd(), Path.cwd().parent, Path(__file__).resolve().parent,
+                              Path.home() / "Desktop", Path.home() / "Downloads"],
+                search_name="final_firmware",
+                validate_fn=_is_current_firmware_folder,
+            )
+            if resolved_app_dir:
+                print(f"  Using firmware source: {resolved_app_dir}")
             else:
-                print("\nCouldn't confirm either address yet. That's expected if the board hasn't")
-                print("been power-cycled since the config/upload above -- this build's WiFi join,")
-                print(f"NTP sync, and Reticulum startup all happen in example_node.py's real boot")
-                print(f"sequence, not something this query can fake. Reset the board, wait a few")
-                print(f"seconds, then try: python3 provisioner.py --get-ip {port}")
+                print("  No firmware folder found — MicroPython will still flash,")
+                print("  but the app upload step will be skipped unless this is fixed.")
 
+        if ask_yes_no(f"\nFlash firmware onto {port} now?", True):
+            if board_type == "heltec":
+                flash_heltec_rnode(port)
+            else:
+                flash_ok, flashed_port = flash_cam_micropython(port)
+                if flash_ok:
+                    # Bootloader recovery can land the board on a different
+                    # serial port than the one we started with, so carry the
+                    # working port forward -- the upload, config push and IP
+                    # query below all need to target where the board
+                    # actually is, not where it was before the flash.
+                    if flashed_port and flashed_port != port:
+                        print(f"\nBoard moved to {flashed_port} during flashing -- using that from here.")
+                        port = flashed_port
+                    # esptool hard-resets the board via RTS right after writing
+                    # the image (visible in its own output: "Hard resetting via
+                    # RTS pin..."). Starting the upload immediately races that
+                    # reboot -- the board hasn't finished booting MicroPython
+                    # yet, so the very first mpremote connection attempt fails
+                    # with "could not enter raw repl" almost every time, while
+                    # every attempt after succeeds instantly. This wait is the
+                    # actual fix for that pattern, not just the retry papering
+                    # over it.
+                    print("\nWaiting for the board to finish booting after the flash...")
+                    time.sleep(5)
+                    upload_stump_app(port, app_dir=resolved_app_dir)
+                else:
+                    print("\nSkipping app upload since flashing failed -- fix that first, then")
+                    print(f"retry the upload separately with: python3 provisioner.py --upload-app {port}")
+
+        if ask_yes_no("\nRun guided config wizard?", True):
+            profile, _ = config_wizard(board_type)
+            push_config_to_board(port, board_type, profile)
+
+            if board_type == "cam":
+                banner("FINDING THE NODE'S IP ADDRESS(ES)")
+                # Reset first, then wait for the real boot sequence. Querying
+                # straight after the config push would almost always miss:
+                # the new config.py has only just landed, and the addresses
+                # only exist once example_node.py has actually run its WiFi
+                # join. Resetting here means the wizard reports a real
+                # address instead of handing the technician homework.
+                print("Resetting the board so it boots with the new config...")
+                run(["mpremote", "connect", port, "reset"], timeout=15)
+                print("Waiting for boot (WiFi join, NTP sync, Reticulum startup)...")
+                time.sleep(12)
+                print("Querying the board for its current network state...")
+                addrs = get_stump_ip(port)
+                if addrs and (addrs.get("sta") or addrs.get("ap")):
+                    print()
+                    if addrs.get("sta"):
+                        print(f"LAN IP (from '{profile['wifi_ssid']}'): {addrs['sta']}")
+                        print(f"  -- reachable from anyone else on that same network:")
+                        print(f"     http://{addrs['sta']}/billboard")
+                    if addrs.get("ap"):
+                        print(f"Local hotspot IP: {addrs['ap']}")
+                        print(f"  -- connect a phone to the node's own 'Stump' Wi-Fi network,")
+                        print(f"     then browse to: http://{addrs['ap']}/billboard")
+                    if not addrs.get("sta"):
+                        print("\n(No LAN IP yet -- if this is right after flashing/config, power-cycle")
+                        print(" the board so example_node.py actually runs through its real WiFi join.)")
+                else:
+                    print("\nCouldn't confirm either address yet. That's expected if the board hasn't")
+                    print("been power-cycled since the config/upload above -- this build's WiFi join,")
+                    print(f"NTP sync, and Reticulum startup all happen in example_node.py's real boot")
+                    print(f"sequence, not something this query can fake. Reset the board, wait a few")
+                    print(f"seconds, then try: python3 provisioner.py --get-ip {port}")
+
+    ran_diagnostics = False
+    diag_passed = None
     if ask_yes_no("\nRun diagnostic test suite now?", True):
-        diagnostics(port, board_type)
+        diag_results = diagnostics(port, board_type)
+        ran_diagnostics = True
+        # Same pass/fail computation diagnostics() itself already printed
+        # -- recomputed here because its return value was previously
+        # discarded entirely, leaving the final banner below always
+        # claiming "Board is ready" even seconds after diagnostics had
+        # just printed "NOT CERTIFIED" for the exact same board. Real
+        # bug, not cosmetic: whoever's reading only the last few lines
+        # of a long run would see nothing but the false reassurance.
+        diag_passed = all(v for v in diag_results.values() if v is not None)
 
     banner("DONE")
-    print("Board is ready. Re-run with --diag PORT any time to re-certify.")
+    if ran_diagnostics and not diag_passed:
+        print("Board is NOT certified -- see the diagnostic summary above for what to")
+        print(f"fix, then re-run: python3 provisioner.py --diag {port}")
+    else:
+        print("Board is ready. Re-run with --diag PORT any time to re-certify.")
 
 
 # ---------------------------------------------------------------------------
@@ -2315,22 +2570,38 @@ def main():
             print("Usage: provisioner.py --diag PORT")
             sys.exit(1)
         port = args[idx + 1]
-        # board_type must be known, not left as None -- with neither
-        # "heltec" nor "cam" matching, diagnostics() would attempt BOTH
-        # board-specific tests regardless of what's actually connected,
-        # always spuriously failing whichever one doesn't apply.
+        # Now three genuinely meaningful choices, not two -- heltec_transport
+        # used to be deliberately left out here (its old MicroPython-based
+        # diagnostics weren't built yet), but now runs the same kind of
+        # RNode-family firmware as "heltec" and gets real, correct checks.
+        # Exact-label lookup, not substring matching against "Heltec" --
+        # that broke once before, the moment two Heltec-labeled choices
+        # existed in choose_board(); same fix applied here up front.
+        heltec_label = "Heltec V3 (Control Plane — RNS/LoRa mesh)"
+        heltec_transport_label = "Heltec V3 (Standalone Transport — microReticulum firmware)"
+        cam_label = "ESP32-S3-CAM (Data Plane — local vault + web)"
         board_choice = ask_choice(
             "What kind of board is this?",
-            ["Heltec V3 (Control Plane — RNS/LoRa mesh)", "ESP32-S3-CAM (Data Plane — local vault + web)"],
+            [heltec_label, heltec_transport_label, cam_label],
         )
-        board_type = "heltec" if "Heltec" in board_choice else "cam"
+        board_type_map = {heltec_label: "heltec", heltec_transport_label: "heltec_transport", cam_label: "cam"}
+        board_type = board_type_map[board_choice]
         diagnostics(port, board_type)
     elif "--wipe-sd" in args:
         idx = args.index("--wipe-sd")
         if idx + 1 >= len(args):
             print("Usage: provisioner.py --wipe-sd PORT")
             sys.exit(1)
-        wipe_sd_card(args[idx + 1])
+        # Explicitly confirmed here, not left to wipe_sd_card()'s own
+        # default-refuse behaviour for an unspecified board_type -- that
+        # default is the right safety net, but this flag's whole purpose
+        # is wiping a CAM's card (see the --help text above), so asking
+        # outright makes the intent explicit rather than accidentally
+        # correct because of how a keyword argument happens to default.
+        if ask_yes_no("This wipes an SD card -- only the CAM has one. Confirm this port is a CAM?", False):
+            wipe_sd_card(args[idx + 1], board_type="cam")
+        else:
+            print("Cancelled -- card untouched. Neither Heltec role has an SD card at all.")
     elif "--upload-app" in args:
         idx = args.index("--upload-app")
         if idx + 1 >= len(args):

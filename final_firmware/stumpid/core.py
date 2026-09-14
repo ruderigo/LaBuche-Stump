@@ -396,37 +396,17 @@ def set_mode(new_mode):
     return True
 
 
-# A live, operator-settable landing room for mesh peers -- unset (None)
-# by default, meaning today's exact behaviour: a mesh peer's first
-# message lands them in rrc.DEFAULT_ROOM ("main"), same as any web
-# visitor. Runtime-only, like a live AUTH_MODE change: it does not
-# rewrite config.py, so it reverts on next boot. That's deliberate,
-# matching set_mode()'s own reasoning -- this is an operational choice
-# an operator might want to try, rename, or turn back off while the
-# node is already running, not something that should need a reflash to
-# change or to undo.
-MESH_DEFAULT_ROOM = None
-
-
-def set_mesh_room(name):
-    """Sets or clears the mesh-peer landing room. name="" or name=None
-    clears it back to unset (today's behaviour). Returns the room's
-    clean slug on success, or None if the name was empty/invalid --
-    same clean-then-validate shape rrc.create_room() already uses, so
-    this can't produce a room name rrc.py itself would reject."""
-    global MESH_DEFAULT_ROOM
-    if not name:
-        MESH_DEFAULT_ROOM = None
-        return None
-    slug = rrc.clean_room(name)
-    if not slug:
-        return None
-    MESH_DEFAULT_ROOM = slug
-    return slug
-
-
 def mesh_landing_room(client_id):
-    """The room a mesh peer should land in on first contact.
+    """The room a mesh peer should land in on first contact: rrc.MESH_ROOM
+    ("#lxmf"), always -- not a name this module chooses or configures.
+    That room exists unconditionally now (seeded in rrc.py exactly like
+    #main), so there is nothing to set up first; a fresh, unconfigured
+    node already has it. Auth is secondary to this, not a precondition
+    for it -- stumpid's only remaining job here is the OPTIONAL gate
+    check below, which only ever matters if an operator has explicitly
+    tiered #lxmf with the existing, unmodified
+    /admin room lxmf <minted|hybrid> command. Untiered (the default),
+    this always returns rrc.MESH_ROOM, unconditionally, for everyone.
 
     Runs the SAME can_join_room() gate an explicit /join already goes
     through -- confirmed this has to happen here, not skipped, because
@@ -434,8 +414,8 @@ def mesh_landing_room(client_id):
     path from /join and would otherwise bypass a tiered mesh room's own
     protection entirely: a peer who never typed /join never hits
     stumpid's dispatch layer at all, so nothing was checking them
-    without this. Falls back to rrc.DEFAULT_ROOM (always open, by
-    definition) for anyone who doesn't qualify -- they can /auth and
+    without this. Falls back to rrc.DEFAULT_ROOM (#main, always open,
+    by definition) for anyone who doesn't qualify -- they can /auth and
     /join manually afterward if the room allows it.
 
     Returns (room, allowed, reason_code). reason_code is None when
@@ -445,11 +425,9 @@ def mesh_landing_room(client_id):
     actually-correct explanation instead of guessing which of the two
     gates fired.
     """
-    if MESH_DEFAULT_ROOM is None:
-        return rrc.DEFAULT_ROOM, True, None
-    ok, reason_code = can_join_room(client_id, MESH_DEFAULT_ROOM)
+    ok, reason_code = can_join_room(client_id, rrc.MESH_ROOM)
     if ok:
-        return MESH_DEFAULT_ROOM, True, None
+        return rrc.MESH_ROOM, True, None
     return rrc.DEFAULT_ROOM, False, reason_code
 
 
@@ -579,12 +557,30 @@ def can_join_room(client_id, room):
 
 def reset():
     """Clears all state. For tests -- every other stateful module in
-    this project has the equivalent (rrc.reset(), fservbot.core.reset())."""
-    global _loaded
+    this project has the equivalent (rrc.reset(), fservbot.core.reset()).
+
+    AUTH_MODE is re-derived from config.py, not hardcoded to "open" --
+    it genuinely can be provisioned as "hybrid" or "mandatory" by
+    default, and hardcoding the reset value to "open" would silently
+    discard that on every reset() call, which is a worse bug than the
+    one being fixed: not "forgot to reset it" but "resets it to the
+    wrong thing." Mirrors this module's own top-level fallback exactly,
+    so a fresh reset() matches what a fresh boot would actually produce.
+
+    There is no mesh-room state to clear here any more -- rrc.MESH_ROOM
+    is a fixed, always-present room owned by rrc.py itself (rrc.reset()
+    already restores it), not something this module tracks.
+    """
+    global _loaded, AUTH_MODE
     _pending.clear()
     _identities.clear()
     _verified_this_session.clear()
     _room_policy.clear()
+    try:
+        from config import AUTH_MODE as _cfg_mode
+        AUTH_MODE = _cfg_mode
+    except ImportError:
+        AUTH_MODE = "open"
     _loaded = False
 
 
