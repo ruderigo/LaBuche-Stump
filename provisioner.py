@@ -1680,13 +1680,47 @@ def config_wizard(board_type):
         print("\nWiFi Remote (Station mode) — this is what lets the CAM reach this")
         print("radio over the network instead of a USB cable. Required for the bridge.")
         if ask_yes_no("Configure WiFi Station mode on this Heltec now?", True):
-            profile["heltec_wifi"] = {
-                "ssid": ask("  WiFi network for the Heltec to join", ""),
-                "psk": ask("  WiFi password", ""),
-                "ip": ask("  Static IP for the Heltec (must match the CAM's\n"
-                          "    'Heltec Bridge' target_host)", "192.168.0.222"),
-                "netmask": ask("  Netmask", "255.255.255.0"),
-            }
+            # Made explicit after a real question about it: the CAM works
+            # completely standalone already (its own hotspot comes up
+            # regardless of any upstream WiFi -- see example_node.py's own
+            # graceful-degradation comment), and rnodeconf's WiFi target
+            # here is a genuinely plain SSID/password with no requirement
+            # that it be an external router. The CAM's own hotspot is a
+            # real, joinable network like any other, and it's open by
+            # design (captive_portal.py's setup_ap() docstring: "open, no
+            # password") -- so a Heltec CAN join it directly instead,
+            # making the pair fully self-contained with no router or
+            # internet at all. The one thing that has to be gotten right
+            # by hand otherwise: the CAM's own AP always sits at
+            # 192.168.4.1, a completely different range from this
+            # prompt's old default (192.168.0.222, written assuming a
+            # home router) -- asking outright here, instead of leaving
+            # that mismatch for someone to discover on their own, is the
+            # actual fix.
+            pairing = ask_choice(
+                "What will this Heltec connect to?",
+                ["An existing WiFi network (a router)",
+                 "A CAM's own hotspot directly (standalone pair, no router at all)"],
+            )
+            standalone_pair = pairing.startswith("A CAM's")
+            if standalone_pair:
+                print("\nThe CAM's own hotspot is open (no password) by design -- nothing")
+                print("to enter for that. Its own address is always 192.168.4.1, so this")
+                print("Heltec needs a DIFFERENT address in that same 192.168.4.x range.")
+                ssid = ask("  The CAM's hotspot name (its Node name, or custom SSID)", "")
+                psk = ""
+                default_ip = "192.168.4.2"
+            else:
+                ssid = ask("  WiFi network for the Heltec to join", "")
+                psk = ask("  WiFi password", "")
+                default_ip = "192.168.0.222"
+            ip = ask("  Static IP for the Heltec (must match the CAM's\n"
+                      "    'Heltec Bridge' target_host)", default_ip)
+            netmask = ask("  Netmask", "255.255.255.0")
+            profile["heltec_wifi"] = {"ssid": ssid, "psk": psk, "ip": ip, "netmask": netmask}
+            if standalone_pair:
+                print(f"\nRemember this address ({ip}) -- enter it as the 'Heltec Bridge IP'")
+                print("when you provision the CAM.")
         else:
             profile["heltec_wifi"] = None
 
@@ -1737,9 +1771,32 @@ def config_wizard(board_type):
                 "Include the AP's IP address in the hotspot name?", True)
             profile["ssid_name"] = ask("Custom hotspot name", node_name)
 
+        # Same explicit pairing question as the Heltec's own wizard branch
+        # above, and for the identical reason: this CAM's own hotspot is a
+        # real, joinable network the Heltec can connect to directly
+        # instead of a router, but its address (192.168.4.1) is a
+        # different range from this prompt's old default -- asking
+        # outright, rather than letting the two boards' provisioning runs
+        # silently assume different networks, is the actual fix.
+        print("\nIs the Heltec reaching this CAM through an existing WiFi network (a")
+        print("router), or connected directly to THIS CAM's own hotspot (a")
+        print("standalone pair, no router involved)?")
+        pairing = ask_choice(
+            "Heltec Bridge network setup",
+            ["Existing WiFi network (a router)",
+             "This CAM's own hotspot (standalone pair, no router)"],
+        )
+        standalone_pair = pairing.startswith("This CAM's")
+        default_bridge_ip = "192.168.4.2" if standalone_pair else "192.168.0.222"
+        if standalone_pair:
+            print("\nWhen you provision the Heltec, join it to THIS CAM's own hotspot name")
+            print("(its Node name / custom SSID -- open network, no password), with a")
+            print(f"static IP in the 192.168.4.x range. This CAM is always 192.168.4.1,")
+            print(f"so the Heltec needs a different address here -- suggested: {default_bridge_ip}")
+
         heltec_host = ask(
             "Heltec Bridge IP (the static IP set on the Heltec via\n"
-            "  'rnodeconf <port> -w STATION --ip ...')", "192.168.0.222"
+            "  'rnodeconf <port> -w STATION --ip ...')", default_bridge_ip
         )
         heltec_port = ask(
             "Heltec Bridge port (fixed by Reticulum's own protocol --\n"
@@ -1882,8 +1939,22 @@ def push_config_to_board(port, board_type, profile):
         if wifi and wifi.get("ssid"):
             print()
             print("Configuring WiFi Station mode on the Heltec...")
+            # rnodeconf's OWN documented convention (confirmed directly
+            # from markqvist -- the maintainer -- in a recent Reticulum
+            # discussion) is the LITERAL STRING "NONE" for "no PSK", not
+            # an empty string. These are not the same thing to most WiFi
+            # stacks: an empty-string PSK is a zero-length WPA2 key, and
+            # a station handed one will try to authenticate with it
+            # against an AP that isn't running WPA2 at all -- the CAM's
+            # own hotspot specifically, confirmed elsewhere in this file
+            # as open, no encryption whatsoever. That mismatch produces
+            # exactly "never associates, no handshake, no IP" -- not a
+            # loud error, just silence, which is what a real report from
+            # the field looked like after this code shipped with a plain
+            # "" here for the standalone-pairing case.
+            psk = wifi.get("psk") or "NONE"
             cmd = ["rnodeconf", port, "-w", "STATION",
-                   "--ssid", wifi["ssid"], "--psk", wifi.get("psk", "")]
+                   "--ssid", wifi["ssid"], "--psk", psk]
             if wifi.get("ip"):
                 cmd += ["--ip", wifi["ip"]]
             if wifi.get("netmask"):
@@ -1895,7 +1966,7 @@ def push_config_to_board(port, board_type, profile):
             else:
                 print("FAILED — see rnodeconf's own output above. The radio itself is")
                 print("still flashed; only the WiFi step didn't take. Retry manually with:")
-                print(f"  rnodeconf {port} -w STATION --ssid <ssid> --psk <pass> \\")
+                print(f"  rnodeconf {port} -w STATION --ssid <ssid> --psk <pass, or NONE for an open network> \\")
                 print(f"            --ip {wifi.get('ip', '192.168.0.222')} --nm {wifi.get('netmask', '255.255.255.0')}")
             return wok
         return True

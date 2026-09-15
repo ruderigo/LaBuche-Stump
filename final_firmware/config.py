@@ -7,8 +7,8 @@ from lora_boards import LORA_BOARDS
 
 # ---- Node settings ----
 WIFI_SSID = "Bob's Glitch"
-WIFI_PASS = "SalutComment"
-NODE_NAME = "ESP32s3"
+WIFI_PASS = 'SalutComment'
+NODE_NAME = 'LaBuche'
 
 # The walk-up hotspot's own name -- separate from NODE_NAME (the mesh
 # identity's display name) on purpose; these are different concerns.
@@ -39,7 +39,7 @@ SSID_INCLUDE_IP = False
 # The name the local greeter answers to on the web pages. Purely
 # cosmetic and per-node -- it has nothing to do with NODE_NAME above,
 # which is the identity mesh peers see.
-BOT_NAME = "BarKeep"
+BOT_NAME = 'Concierge'
 
 # Sent once to each mesh peer the first time they message this node.
 # Blank disables it entirely.
@@ -50,7 +50,7 @@ BOT_NAME = "BarKeep"
 # with a paragraph and do it again for the next three words. A greeting
 # on first contact says who this node is and what it offers; after that
 # the conversation is the point.
-MESH_GREETING = ""
+MESH_GREETING = 'Bonjour Hi! I am a bot called Concierge serving LaBuche! git/ruderigo/LaBuche-Stump Tire toi une buche!'
 MESH_GREETING_MAX = 200
 
 # How often this node announces its LXMF identity to the mesh, in
@@ -134,7 +134,7 @@ CONFIG = {
             "type": "WiFiSerialInterface",
             "name": "Heltec Bridge",
             "enabled": True,
-            "target_host": "192.168.0.222",
+            "target_host": '192.168.4.2',
             "target_port": 7633,
         },
 
@@ -153,5 +153,10 @@ SENSOR_HUB = ""
 # CREDIT_WEIGHTS is what an upload of each file class EARNS, and equally
 # what a download of it COSTS. Set every value to 1 for a flat
 # one-file-in-one-file-out economy; raise a class to make it scarcer.
-CREDITS_ENABLED = True
-CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
+CREDITS_ENABLED = False
+CREDIT_WEIGHTS = {'video': 3, 'music': 2, 'document': 1, 'other': 1}
+
+# ---- Plugin settings (added by the Provisioner) ----
+AUTH_ADMIN_PASSWORD = 'TeK'
+AUTH_MODE = 'open'
+FSERVBOT_OP_PASSWORD = 'TeK_Knoh'
