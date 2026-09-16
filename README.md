@@ -1,5 +1,5 @@
 # Project Stump — Beta A (Release)
-
+<img src="demo.gif" alt="demo" width="700">
 ![demo](demo.gif)
 
 An off-grid community node. A long-range encrypted mesh radio and a
