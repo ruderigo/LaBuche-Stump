@@ -177,6 +177,17 @@ STRINGS = {
         "es": "mensaje, o /help",
     },
     "rrc_send": {"fr": "Envoyer", "en": "Send", "es": "Enviar"},
+
+    "rrc_message_someone": {
+        "fr": "Écrire à quelqu'un",
+        "en": "Message someone",
+        "es": "Escribir a alguien",
+    },
+    "rrc_direct_messages": {
+        "fr": "Messages directs",
+        "en": "Direct Messages",
+        "es": "Mensajes directos",
+    },
     "rrc_you_are": {"fr": "tu es", "en": "you are", "es": "eres"},
     "rrc_not_sent": {
         "fr": "non envoyé — problème de connexion",
@@ -509,6 +520,80 @@ STRINGS = {
     },
     "files_credit_suffix": {"fr": "crédit", "en": "credit", "es": "crédito"},
 
+    "files_admin_password": {
+        "fr": "Mot de passe admin",
+        "en": "Admin password",
+        "es": "Contraseña de admin",
+    },
+
+    # ---- /admin -- no link anywhere points here; see
+    # barkeep._render_admin_login_page's own docstring for why. ----
+    "admin_header": {"fr": "Admin", "en": "Admin", "es": "Admin"},
+    "admin_wrong_password": {
+        "fr": "Mot de passe incorrect.",
+        "en": "Wrong password.",
+        "es": "Contraseña incorrecta.",
+    },
+    "admin_login_button": {"fr": "Connexion", "en": "Log in", "es": "Iniciar sesión"},
+    "admin_select_intro": {
+        "fr": "Coche les fichiers à supprimer, puis confirme une seule fois.",
+        "en": "Check the files to delete, then confirm once.",
+        "es": "Marca los archivos a eliminar y confirma una sola vez.",
+    },
+    "admin_delete_selected": {
+        "fr": "Supprimer la sélection",
+        "en": "Delete selected",
+        "es": "Eliminar selección",
+    },
+    "admin_deleted_notice": {
+        "fr": "{n} fichier(s) supprimé(s).",
+        "en": "{n} file(s) deleted.",
+        "es": "{n} archivo(s) eliminado(s).",
+    },
+
+    "admin_theme_header": {"fr": "Thème", "en": "Theme", "es": "Tema"},
+    "admin_theme_default": {"fr": "Défaut", "en": "Default", "es": "Predeterminado"},
+    "admin_theme_phosphor": {"fr": "Phosphore", "en": "Phosphor", "es": "Fósforo"},
+    "admin_theme_oled": {"fr": "OLED", "en": "OLED", "es": "OLED"},
+    "admin_theme_paper": {"fr": "Papier", "en": "Paper", "es": "Papel"},
+    "admin_theme_custom_intro": {
+        "fr": "Ou choisis une palette personnalisée :",
+        "en": "Or choose a custom palette:",
+        "es": "O elige una paleta personalizada:",
+    },
+    "admin_color_bg": {"fr": "Fond", "en": "Background", "es": "Fondo"},
+    "admin_color_panel": {"fr": "Panneau", "en": "Panel", "es": "Panel"},
+    "admin_color_text": {"fr": "Texte", "en": "Text", "es": "Texto"},
+    "admin_color_ember": {"fr": "Accent", "en": "Accent", "es": "Acento"},
+    "admin_color_border": {"fr": "Bordure", "en": "Border", "es": "Borde"},
+    "admin_save_palette": {
+        "fr": "Enregistrer la palette",
+        "en": "Save Custom Palette",
+        "es": "Guardar paleta",
+    },
+    "admin_reset_palette": {
+        "fr": "Réinitialiser la palette",
+        "en": "Reset Palette",
+        "es": "Restablecer paleta",
+    },
+    "admin_logo_header": {"fr": "Logo", "en": "Logo", "es": "Logo"},
+    "admin_save_logo": {
+        "fr": "Enregistrer le logo SVG",
+        "en": "Save SVG Logo",
+        "es": "Guardar logo SVG",
+    },
+    "admin_reset_logo": {
+        "fr": "Rétablir le logo par défaut",
+        "en": "Reset Default Logo",
+        "es": "Restablecer logo predeterminado",
+    },
+    "admin_hide_logo": {"fr": "Masquer le logo", "en": "Hide Logo", "es": "Ocultar logo"},
+    "admin_logo_reset_notice": {
+        "fr": "Recharge la page pour revoir le logo par défaut.",
+        "en": "Reload the page to see the default logo again.",
+        "es": "Recarga la página para ver de nuevo el logo predeterminado.",
+    },
+
     # ---- Tools page (technician-facing; kept English-light on purpose
     # since these are lower priority than the walk-up surfaces, but
     # translated for consistency now that the page renders per-request
@@ -523,21 +608,6 @@ STRINGS = {
         "fr": "Aucun outil installé sur ce nœud. Relance le Provisioner avec une carte SD en place pour les ajouter ici.",
         "en": "No tools installed on this node. Re-run the Provisioner with an SD card fitted to put them here.",
         "es": "No hay herramientas instaladas en este nodo. Vuelve a ejecutar el Provisioner con una tarjeta SD instalada para agregarlas aquí.",
-    },
-    "tools_flash_header": {
-        "fr": "Flasher une carte",
-        "en": "Flash a board",
-        "es": "Grabar una placa",
-    },
-    "tools_flash_intro": {
-        "fr": "Branche une carte ESP sur <b>cet ordinateur</b> et écris le micrologiciel depuis le navigateur. Chrome ou Edge sur ordinateur de bureau.",
-        "en": "Plug an ESP board into <b>this computer</b> and write firmware to it from the browser. Chrome or Edge on a desktop.",
-        "es": "Conecta una placa ESP a <b>esta computadora</b> y graba el firmware desde el navegador. Chrome o Edge en un escritorio.",
-    },
-    "tools_open_flasher": {
-        "fr": "Ouvrir le flasheur &rarr;",
-        "en": "Open the flasher &rarr;",
-        "es": "Abrir el grabador &rarr;",
     },
 
     # ---- Billboard page ----

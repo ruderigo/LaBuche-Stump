@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Rodrigo A. Gonzalez L. also known as ruderigo
+Copyright (c) 2026 Rodrigo
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,53 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+SCOPE: the MIT grant above covers this project's own code -- the contents of
+final_firmware/, provisioner.py, and everything else authored for Project
+Stump. It does NOT extend to any third-party firmware binary flashed onto a
+Heltec, or staged for the browser flasher, even when a copy of this file
+sits in the same /sd/tools/ folder as those binaries on a running node.
+Each third-party component below carries its own, separate license, stated
+next to it. If this file arrived in a folder alongside a firmware image, do
+not assume this license covers that image -- check its own license.
+
+---
+
+This project is built on third-party components under their own licenses:
+
+- microReticulum / uReticulum (MIT) -- https://github.com/varna9000/micropython-reticulum
+  A MicroPython port of the Reticulum protocol by Mark Qvist, independently
+  maintained and MIT-licensed on its own terms. Confirmed directly against
+  its current repository, not assumed: this is the one actually depended on
+  here, not markqvist/Reticulum below, and its MIT status doesn't depend on
+  or track that repository's own licensing history at all.
+- Reticulum protocol, originated by Mark Qvist -- https://github.com/markqvist/Reticulum
+  Referenced here for the protocol's origin, not as a licensed dependency of
+  this project. That repository itself relicensed away from MIT on 15 April
+  2025 (to a custom "Reticulum License" adding use restrictions); nothing in
+  this project incorporates code from it under that later license, or needs
+  to, since the actual dependency is the independently-licensed µReticulum
+  port above.
+- RNode Firmware CE (GPL-3.0) -- https://github.com/liberatedsystems/RNode_Firmware_CE
+  Flashed onto the Heltec Bridge role, used unmodified as a pre-built binary
+  from its own upstream releases -- never included as source in this
+  repository or in Stump_Beta_A.zip. This project's own code stays MIT
+  regardless, since nothing GPL-3.0 is combined into or distributed as part
+  of it; the Heltec simply runs someone else's separately-licensed firmware.
+  This is also the firmware catalog.json's own "rnode-heltec-v3" browser-
+  flasher entry names as its source, for staging via tools_payload/images/
+  -- that folder is empty today, but see the warning in its own README.txt
+  before ever placing a real binary obtained that way in it.
+- microReticulum_Firmware (GPL-3.0) -- https://github.com/attermann/microReticulum_Firmware
+  Same situation as RNode Firmware CE above, for the standalone Heltec
+  transport role specifically: `provisioner.py` invokes `rnodeconf
+  --autoinstall --fw-url` to pull this firmware directly from attermann's
+  own releases and flash it as-is. A fork of markqvist/RNode_Firmware with
+  the microReticulum C++ network stack integrated -- itself a different,
+  separate project from microReticulum/uReticulum above despite the
+  confusingly similar name; a C++ port by the same author (attermann),
+  Apache-2.0 licensed on its own, not directly used by this project at all.
+- esptool-js -- see esptool-js-LICENSE.txt, distributed alongside it in this
+  same tools folder

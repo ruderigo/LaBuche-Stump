@@ -54,6 +54,8 @@ assuming you know what "turn on hybrid" does.
 - [Standalone Heltec V3 transport role](#standalone-heltec-v3-transport-role)
 - [HTTP API](#http-api)
 - [Access control](#access-control)
+- [File storage](#file-storage)
+- [Direct messages](#direct-messages)
 - [Internationalization](#internationalization)
 - [The About page](#the-about-page)
 - [Plugins](#plugins)
@@ -62,6 +64,7 @@ assuming you know what "turn on hybrid" does.
 - [Testing](#testing)
 - [Verification status](#verification-status)
 - [Credits](#credits)
+- [Hidden features](#hidden-features)
 
 ---
 
@@ -186,7 +189,7 @@ technician has to copy the actual photos there. See `/about/img` in
 ## Repository layout
 
 ```
-final_firmware/              74 files hashed, 64 uploaded to a CAM (~1.3 MB)
+final_firmware/              75 files hashed, 64 uploaded to a CAM (~1.3 MB)
 ├── main.py                  CAM boot entry -- boots example_node.py via boot_common
 ├── boot_common.py           Shared retry-vs-give-up boot logic main.py delegates to
 ├── example_node.py          the real CAM boot sequence; wires everything together
@@ -357,21 +360,82 @@ on a newly-provisioned relay in the field.
 | GET | `/billboard` | Bulletin board page |
 | POST | `/post` | Add a notice; body `entry=<urlencoded>` |
 | GET | `/rrc` | RRC chat client |
-| GET | `/rrc/poll?room=&since=` | New room messages **and** private messages (JSON) |
+| GET | `/rrc/poll?room=&since=` | New room messages, private messages, and who's currently in the room (JSON) |
 | POST | `/rrc/send` | Send a chat line or `/command`; body is raw text |
-| POST | `/upload` | Upload a file; `X-Filename` header, raw body |
+| POST | `/upload` | Upload a file; `X-Filename` header, raw body. `507` if the card is over its capacity ceiling even after evicting the oldest shared files (see "File storage" below) |
 | GET | `/download?f=` | Download a file (streamed, with real filename) |
-| GET | `/files` | Browsable file listing |
+| GET | `/files` | Browsable file listing (no admin UI on this page — see "Access control" #4) |
+| GET | `/admin` | Password-only login; no link anywhere points here on purpose |
+| POST | `/admin` | Validates the password, shows a checkbox file list on success |
+| POST | `/admin/delete` | Batch-deletes checked files after re-validating the password for real |
 | GET | `/about` | About page — what Stump/Fireflies are, how to connect, hardware gallery |
 | GET | `/about/img?f=` | Serves a gallery image from `/sd/about/`, inline (no download prompt) |
-| GET | `/tools` | Technician tools page |
+| GET | `/tools` | Technician tools page — downloads only, no CLI instructions shown here (see below) |
 | GET | `/tool?f=` | Download a tool file |
-| GET | `/flash` | Browser-based board flasher (WebSerial) |
+| GET | `/flash` | Browser-based board flasher (WebSerial) — still live, no longer linked from `/tools` |
 | GET | `/fw?f=` | Firmware image / catalog for the flasher |
 | GET | `/lang?set=&next=` | Sets the requesting visitor's language, redirects back |
 
 Any unmatched path returns the BarKeep page with `200` — captive-portal
 detection depends on probe requests getting a real HTTP response.
+
+### What ends up in `/sd/tools/`, and why
+
+`provisioner.py`'s `install_tools_on_node()` pushes a few things onto
+the node's own SD card during provisioning, so a technician can walk
+up with nothing but a laptop and pull down what they need over HTTP
+instead of carrying a USB stick:
+
+- **`provisioner.py` itself** — the node hands back the exact version
+  it was provisioned with, so there's never doubt about whether a copy
+  pulled off the node matches what's actually running.
+- **`README.md`** — same reasoning, right next to it: the setup steps a
+  technician needs (`--check-tools`, the standalone Heltec transport
+  commands, everything else in this document) live in this file now,
+  pushed to the node instead of being duplicated as a shorter,
+  separately-maintained CLI snippet that used to sit directly on the
+  `/tools` page — one real source for those commands instead of two
+  that could quietly drift apart.
+- **`LICENSE`** — the MIT license this build ships under, so a copy
+  pulled off the node carries its actual terms with it, not just the
+  code. Named `LICENSE` with no extension deliberately, matching the
+  standard convention GitHub, package managers, and license scanners
+  all look for by that exact name.
+- **`Stump_Beta_A.zip`** — the full firmware source, built *fresh* from
+  the technician's own `final_firmware/` directory at push time rather
+  than copied from wherever their original download happened to land.
+  Built this way specifically so it can't go stale relative to what's
+  actually provisioned, and doesn't depend on the technician having
+  kept the original zip around after extracting it.
+- **The browser flasher's own assets** (`esptool-bundle.js`, its
+  licence, `catalog.json`, and any staged firmware images) — see
+  "Hidden features" at the end of this document for why this exists
+  but isn't linked from `/tools` anymore. Confirmed directly: this
+  folder holds no actual firmware images today, only a `README.txt`
+  with instructions for staging one. Worth knowing before ever
+  following those instructions for real: `catalog.json`'s own
+  `rnode-heltec-v3` entry names its source as the GPL-3.0-licensed
+  RNode Firmware CE releases. A `.bin` obtained that way and staged
+  here would make this node *convey* that GPL-3.0 object code over
+  `/fw?f=` and `/tool?f=` to anyone who downloads it — which is a
+  different thing from flashing it directly from a laptop, and GPL-3.0
+  §6 requires that conveyance be accompanied by the corresponding
+  source, or a written offer for it. Neither this document nor the
+  `LICENSE` pushed alongside it provides that; see the warning in
+  `tools_payload/images/README.txt` for what staging a real binary
+  there would actually require.
+
+All of it downloads from `/tools` via `/tool?f=`, streamed in 16KB
+chunks like every other file transfer in this project — confirmed
+directly for `Stump_Beta_A.zip` specifically, since at roughly 440KB
+it's by far the largest thing served from that route: hashed the
+actual streamed bytes against the source file's hash rather than just
+checking the response arrived, and confirmed the transfer happens in
+dozens of real chunks, never one large in-memory write.
+
+Best-effort like the rest of provisioning: a node with no SD card, or
+a technician's copy of `final_firmware/` gone missing, still finishes
+provisioning normally, it just can't hand these back.
 
 ---
 
@@ -454,6 +518,166 @@ mesh landing room existed.
 **Status: implemented and tested across all three global modes in the
 same test run, not yet exercised against a real mesh peer on real
 hardware.**
+
+### 4. The `/admin` page — file deletion and site customization
+
+A separate, narrower gate from the three above — not tied to
+`AUTH_MODE` or room tiers at all, and not part of `/files` anymore
+either. There is no admin UI, drawer, or delete link visible on any
+page a normal visitor sees. Everything in this section lives entirely
+at `GET /admin` — an address with no link pointing to it from anywhere
+in the visible UI, reachable only by typing it directly.
+
+**Deleting files.** `GET /admin` shows a password field only. A
+correct password shows every current file as a checkbox, with the
+password carried forward as a hidden field. Checking several files and
+submitting once deletes all of them together — `POST /admin/delete`
+re-validates the password for real rather than trusting the hidden
+field just because it arrived with the form, since anyone could POST
+there directly with a forged one.
+
+The password check reuses `stumpid.core.check_admin_password()`
+directly — the same function `/admin <password> ...` chat commands
+already use for mode/room-tier/meshroom, not a second, competing
+mechanism. It tries stumpid's own `AUTH_ADMIN_PASSWORD` first, falls
+back to fservbot's operator password (read live, not duplicated), and
+refuses outright — `403`, nothing touched — if neither plugin is
+installed at all.
+
+An earlier version of this put a collapsed drawer directly on `/files`
+— a dropdown, password field, and button all on one row, which
+overflowed its own container on narrower viewports, and needed a full
+password re-entry per file with nothing to select more than one at a
+time. Both problems came from the same root cause: admin controls
+living on a page every visitor already sees. Moving it to its own
+unlinked page removed both at once, not just the layout.
+
+**Theme and logo.** The same login also unlocks four theme presets
+(Default/Amber, Phosphor, OLED, Paper — CSS custom properties switched
+via a `[data-theme]` attribute), a five-color custom palette
+(background, panel, text, accent, border), and an SVG logo the default
+stump-cross-section mark can be replaced with, hidden, or restored.
+One login, not a second password prompt, since both are "things only
+an admin should touch."
+
+**Worth being precise about, because it's easy to assume otherwise for
+a "branding" feature: all of this is `localStorage`, not server-side.**
+Setting a theme or uploading a logo through `/admin` changes what *that
+one browser* sees on its own next visit — not what every other visitor
+sees. There is currently no way to make a theme or logo choice apply
+site-wide to everyone; that would mean writing the choice to the SD
+card and having every page read it back, which this deliberately
+doesn't do. If site-wide branding for every visitor is actually the
+goal here rather than a per-admin preference, that's a different,
+larger feature than what's built.
+
+An admin visiting `/admin` sees their own current custom colors and
+saved SVG pre-filled in the controls (read back from their own
+`localStorage`), not because the server remembers anything.
+
+An earlier version of this section's client-side JavaScript had a real
+bug worth noting since it's the kind that's easy to reintroduce:
+placeholder tokens for translated header text were substituted into
+positions still wrapped in the template's own leftover quote marks.
+French specifically broke the entire RRC chat page's script — not just
+the mistranslated string — because the French text for one of those
+headers contains an apostrophe, which closed the surrounding quote
+early and produced a genuine syntax error. English and Spanish
+happened to survive by accident, not correctness, since neither
+translation for those particular strings contains an apostrophe. Fixed
+by letting the JSON-encoded substitution provide its own quoting
+entirely, the same way `ROOM_INIT`/`NICK_INIT` already did correctly —
+verified by extracting the actual rendered script for all three
+languages and running a real JS syntax check on each, not just reading
+the diff. The same discipline was applied here: every string injected
+into the settings page's script is JSON-encoded, never hand-wrapped in
+quotes.
+
+**Status: every step tested through real HTTP dispatch or a real JS
+syntax check, not just read** — the login page shows no file content
+and no settings controls before authentication; a wrong password is
+refused (`403`) with nothing shown; a correct one shows both the file
+checkboxes and the settings controls together after one login; a
+genuine two-file batch delete removes exactly those two files and
+redirects back to `/admin`; `/admin/delete` called directly with a
+wrong password refuses even when the file list is valid; and the
+settings section's rendered script was extracted and syntax-checked
+for all three languages, confirming no leaked placeholders and no
+repeat of the quoting bug described above.
+
+---
+
+## File storage
+
+`/sd/shared/` — where visitor uploads land — is capped at **75% of the
+card's total capacity** (`fserv.MAX_SD_RATIO`), checked via
+`os.statvfs` before a single byte of an incoming upload is read, not
+after. `/sd/tools/`, `/sd/fw/`, and `/sd/about/` are never eligible for
+eviction under any circumstance — there's no code path in the eviction
+function that can reach them, not just a check that happens to exclude
+them.
+
+When an upload would push usage over that ceiling, the **oldest**
+shared files (by modification time) are removed one at a time — not a
+bulk clear — stopping the moment the incoming file fits. If evicting
+every shared file still isn't enough, the upload is refused with `507
+Insufficient Storage` rather than accepted onto a card that can't
+actually hold it.
+
+**Status: tested against a real filesystem with controlled file ages**
+— confirmed minimal eviction (stops at the first file removed once
+there's room, doesn't over-evict), confirmed the three protected
+directories are completely untouched, and confirmed the correct `507`
+refusal when even a full eviction isn't enough.
+
+---
+
+## Direct messages
+
+Two things worth knowing if you're touching this: how a conversation
+starts, and how long a DM survives.
+
+**Starting one.** `/rrc/poll` now includes who's currently in the room,
+and the RRC client renders it as a clickable "Message someone" list —
+clicking a name opens a thread the same way clicking an existing
+conversation in "Direct Messages" already did. Typing `/msg <nick>
+<text>` (or its `/m`/`/w` aliases) directly, without clicking anyone
+first, now works the same way too: the client recognizes that pattern
+and threads it identically. Before this, only the *second* message to
+someone landed in the thread view — the first one, sent via a typed
+`/msg`, printed as a plain command reply in the room log instead,
+since no thread existed yet to route it into. Both paths now land in
+the same place. Anyone who already has an open thread is excluded from
+"Message someone" — a real screenshot showed the same name appearing
+in both lists at once, which read as a duplicate rather than two
+different actions; someone already reachable from "Direct Messages"
+doesn't need a second entry whose only job is starting a conversation
+that already exists.
+
+**Retention.** DMs are in-memory only — the same architecture as every
+other piece of chat state in this project, cleared by a reboot with no
+SD-card path at all, never a special case that needed building. Beyond
+that, a DM is kept for **up to 72 hours since receipt**
+(`rrc.DM_TTL_SECONDS`), pruned on every send *and* every poll so a
+recipient's box gets cleaned up even if nobody messages them again.
+This time-based rule is checked first and given priority over
+`MAX_DMS_PER_USER` (raised to 60, purely as a safety ceiling for a
+flood of messages all arriving within the same 72 hours) — a message
+inside its window is never evicted just because other messages arrived
+after it, unlike the file-storage FIFO above, which exists specifically
+to make room by evicting the oldest.
+
+**Status: tested with controlled timestamps** — 45 messages within 72
+hours all survive where the old 30-message-only cap would have
+truncated them; the safety ceiling still catches a genuine flood,
+oldest-first; pruning fires correctly from both a new send and a bare
+poll. The client-side thread-routing fix, the "Message someone" /
+"Direct Messages" list headers (a real, hardcoded-English bug found
+after this shipped — neither was ever wired through i18n, so both
+stayed in English regardless of language), and the duplicate-exclusion
+fix were all tested by executing the actual extracted JavaScript
+against a mocked DOM, not just read — including reproducing the exact
+duplicate-listing scenario a screenshot caught.
 
 ---
 
@@ -646,7 +870,15 @@ actual dispatch, not mocks): the full `/auth` cycle; every room-tier
 scenario against every global `AUTH_MODE`, including the mesh landing
 room redirect confirmed identical across all three modes in the same
 test run; i18n table completeness and placeholder consistency across
-all three languages; the browser flasher's catalog-driven design.
+all three languages; the browser flasher's catalog-driven design;
+password-gated batch file deletion (wrong password, correct password,
+a real two-file batch delete, `/admin/delete` re-validating rather than
+trusting its own hidden field, and the admin plugin genuinely absent,
+all through real request dispatch);
+the file-storage eviction ceiling against a real filesystem with
+controlled file ages; DM retention against controlled timestamps; and
+the DM thread-routing fix by executing the actual client-side
+JavaScript against a mocked DOM, not just reading it.
 
 **Needs hardware.** Reticulum/LXMF in live operation with a real mesh
 peer exercising the landing-room redirect; real SD card mounting for
@@ -668,12 +900,69 @@ Python) a given deployed board actually loads.
   your deployed Heltec Bridge units were actually provisioned with via
   `rnodeconf` — an operational fact invisible from source. See its own
   section above.
+- Typing `/msg <nick> <text>` directly (not clicking a name first) is
+  echoed into a thread optimistically, before the server's own reply
+  confirms delivery — the client can't check the target nick exists in
+  advance. If it doesn't, the server's real "no one here called that"
+  reply still shows, alongside a thread that was opened for a message
+  that was never actually delivered. Clicking a name from the "Message
+  someone" list first doesn't have this gap at all.
+- The `--diag` Heltec Bridge check runs a plain TCP connect from
+  whatever computer is running `provisioner.py` — not from the CAM.
+  For a standalone-paired setup (the Heltec joined to the CAM's own
+  hotspot, a `192.168.4.x` address), that computer needs to be joined
+  to the CAM's own hotspot too, or the connection has no route to that
+  subnet at all and times out — reading as a dead bridge in the
+  diagnostic's plain PASS/FAIL output even when the bridge itself is
+  completely fine, confirmed directly against a real deployment. A
+  timeout specifically (not a refused connection) to a `192.168.4.x`
+  target now prints a specific note about this rather than the generic
+  "is the Heltec powered on" guidance, which was written assuming the
+  external-router case where the technician's computer and the Heltec
+  naturally share a network already.
 
 ---
 
 ## Credits
 
 Built on [µReticulum](https://github.com/varna9000/micropython-reticulum)
-(MIT), a MicroPython port of
-[Reticulum](https://github.com/markqvist/Reticulum). The Heltec runs
-[RNode Firmware CE](https://github.com/liberatedsystems/RNode_Firmware_CE).
+(MIT, independently maintained and licensed on its own terms), a MicroPython
+port of the Reticulum protocol originated by Mark Qvist. That protocol's own
+[reference repository](https://github.com/markqvist/Reticulum) relicensed
+away from MIT on 15 April 2025; nothing here depends on or incorporates code
+under that later license, since µReticulum is the actual, separately-licensed
+dependency.
+
+The Heltec Bridge role runs
+[RNode Firmware CE](https://github.com/liberatedsystems/RNode_Firmware_CE)
+(GPL-3.0), and the standalone Heltec transport role runs
+[microReticulum_Firmware](https://github.com/attermann/microReticulum_Firmware)
+(GPL-3.0, and — despite the similar name — a different project from
+µReticulum above, by a different author). Both are used as pre-built
+binaries pulled directly from their own upstream releases and flashed
+as-is; neither is included as source anywhere in this repository or in
+`Stump_Beta_A.zip`, so this project's own code remains MIT throughout —
+true today, and worth keeping true: see "What ends up in `/sd/tools/`"
+above for the one place that claim would need re-checking if it ever
+changes (staging a real firmware binary for the browser flasher).
+
+See `LICENSE` for this build's own terms and the full third-party list.
+
+---
+
+## Hidden features
+
+Two things exist fully in the code, still work if you know the URL,
+but are deliberately unlinked from the visible UI — not deleted,
+because the actual remove-vs-keep decision was left open for a future
+JIRA epic rather than made silently. Full detail, code locations, and
+what each decision would need, in `docs/HIDDEN_FEATURES.md`:
+
+- **`HF-001`** — the browser-based WebSerial flasher (`/flash`, `/fw`).
+  `/tools` briefly showed plain CLI steps in its place; those are gone
+  from the page too now, replaced by pushing `README.md` itself to the
+  node instead (see "What ends up in `/sd/tools/`" above).
+- **`HF-002`** — the "awaiting-slot" upload hash field. The field
+  itself is unrelated to the file-deletion feature documented above —
+  that's a separate capability that shipped since this entry was
+  written, and doesn't touch the awaiting-slot mechanism at all.

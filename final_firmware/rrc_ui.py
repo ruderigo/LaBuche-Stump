@@ -188,7 +188,7 @@ function render(m){
   line('&lt;<span class="nick">'+esc(m.nick)+'</span>&gt; '+esc(m.body), 'msg'+self);
 }
 
-function setRooms(list, here){
+function setRooms(list, here, users){
   var box=document.getElementById('rooms');
   box.innerHTML='';
   list.forEach(function(r){
@@ -200,10 +200,50 @@ function setRooms(list, here){
     d.onclick=function(){ viewingDM=null; send('/join '+r); };
     box.appendChild(d);
   });
+  renderUserList(users||[]);
   var dmBox=document.createElement('div');
   dmBox.id='dm-section';
   box.appendChild(dmBox);
   renderDMSidebar();
+}
+
+function renderUserList(users){
+  // "Select someone and DM them" -- clicking a name here calls the
+  // SAME openDM() the "Direct Messages" section below already uses to
+  // reopen an existing thread. That reuse is what makes the first
+  // message to someone land in the same place as every message after
+  // it: opening the thread FIRST (by clicking a name, here or there)
+  // means viewingDM is already set by the time anything is typed, so
+  // the plain-line-while-viewingDM path in send() handles it -- the
+  // same path a second or third message already went through. The
+  // separate fix in send() below covers the OTHER way to start a
+  // thread (typing /msg directly without clicking anyone first), so
+  // both roads into a conversation end up in the same place.
+  var here=document.getElementById('user-section');
+  if(here) here.remove();
+  var box=document.getElementById('rooms');
+  // Excludes both yourself AND anyone already in dmThreads -- confirmed
+  // from a real screenshot that showing the same name in both "Message
+  // someone" and "Direct Messages" at once reads as a duplicate, not
+  // two different actions. Someone you already have a thread with is
+  // reachable from that thread already; this list is specifically for
+  // starting a NEW one.
+  var others=(users||[]).filter(function(u){ return u!==nick && !dmThreads[u]; });
+  if(others.length===0) return;
+  var sec=document.createElement('div');
+  sec.id='user-section';
+  var hdr=document.createElement('div');
+  hdr.className='dm-header';
+  hdr.textContent=I18N_MESSAGE_SOMEONE;
+  sec.appendChild(hdr);
+  others.forEach(function(u){
+    var d=document.createElement('div');
+    d.className='dm-entry'+(viewingDM===u?' active':'');
+    d.textContent=u;
+    d.onclick=function(){ openDM(u); };
+    sec.appendChild(d);
+  });
+  box.appendChild(sec);
 }
 
 function renderDMSidebar(){
@@ -219,7 +259,7 @@ function renderDMSidebar(){
   if(senders.length===0) return;
   var hdr=document.createElement('div');
   hdr.className='dm-header';
-  hdr.textContent='Direct Messages';
+  hdr.textContent=I18N_DIRECT_MESSAGES;
   dmBox.appendChild(hdr);
   senders.sort().forEach(function(s){
     var unread=dmUnread[s]||0;
@@ -279,7 +319,7 @@ function poll(){
        else{ dmUnread[m.nick]=(dmUnread[m.nick]||0)+1; }
      });
      lastId=maxId;
-     if(d.rooms) setRooms(d.rooms, room); else renderDMSidebar();
+     if(d.rooms) setRooms(d.rooms, room, d.users); else renderDMSidebar();
      if(d.topic!==undefined) document.getElementById('topic').textContent=d.topic?('— '+d.topic):'';
      if(d.nick && d.nick!==nick){ nick=d.nick; document.getElementById('me').textContent=nick; }
      onPollOk();
@@ -316,6 +356,13 @@ function send(text){
   // "/msg <name>" every single line. A command (still starting with
   // /) is left alone and goes to the server exactly as typed.
   var isDMReply=(viewingDM && text.charAt(0)!=='/');
+  // Typing /msg (or its /m, /w aliases) directly is ALSO how a
+  // conversation starts, not just clicking a name in the sidebar first
+  // -- recognized here so that path lands in the same place too. Match
+  // mirrors rrc.py's own parsing exactly (arg.split(" ", 1) there,
+  // same nick-then-rest-of-line shape here) so what this recognizes as
+  // a DM is exactly what the server will actually treat as one.
+  var directMsgMatch=(!isDMReply) && text.match(/^\/(?:msg|m|w)\s+(\S+)\s+([\s\S]+)/i);
   var outgoing=isDMReply ? ('/msg '+viewingDM+' '+text) : text;
   fetch('/rrc/send',{method:'POST',body:outgoing})
    .then(function(r){return r.json();})
@@ -330,6 +377,28 @@ function send(text){
        var mine={id:0, nick:nick, body:text, kind:'dm'};
        box.push(mine);
        render(mine);
+     } else if(directMsgMatch){
+       var target=directMsgMatch[1], msgBody=directMsgMatch[2];
+       // The same two checks rrc.py's own /msg handling makes BEFORE
+       // even attempting send_dm (messaging yourself, an empty body)
+       // -- checked here too so this doesn't echo into a thread for a
+       // message the server never actually queued. What this can't
+       // check client-side is whether the target nick exists at all;
+       // the server's own reply (rendered below regardless) covers
+       // that one remaining case, so a bad nick still shows the real
+       // "no one here called that" answer even though the optimistic
+       // echo above already rendered.
+       if(target.toLowerCase()!==nick.toLowerCase() && msgBody.trim()){
+         openDM(target);
+         var box=dmThreads[target]=dmThreads[target]||[];
+         var mine={id:0, nick:nick, body:msgBody.trim(), kind:'dm'};
+         box.push(mine);
+         render(mine);
+       }
+       (d.replies||[]).forEach(function(t){
+         if(t==='__CLEAR__'){ log.innerHTML=''; return; }
+         line(esc(t),'local');
+       });
      } else {
        (d.replies||[]).forEach(function(t){
          if(t==='__CLEAR__'){ log.innerHTML=''; return; }
@@ -489,7 +558,9 @@ def render_page(room, nick, lang=None):
         lang = i18n.DEFAULT_LANG
     script = (SCRIPT
               .replace("ROOM_INIT", _js(room))
-              .replace("NICK_INIT", _js(nick)))
+              .replace("NICK_INIT", _js(nick))
+              .replace("I18N_MESSAGE_SOMEONE", _js(i18n.t("rrc_message_someone", lang)))
+              .replace("I18N_DIRECT_MESSAGES", _js(i18n.t("rrc_direct_messages", lang))))
     return (
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"

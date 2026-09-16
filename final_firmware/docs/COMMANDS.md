@@ -377,17 +377,22 @@ outside the RRC/stumpid gating system.
 | GET | `/` | BarKeep console |
 | POST | `/chat` | BarKeep command, raw text body |
 | GET | `/rrc` | RRC chat client |
-| GET | `/rrc/poll?room=&since=` | New messages, JSON |
+| GET | `/rrc/poll?room=&since=` | New messages, DMs, and who's in the room, JSON |
 | POST | `/rrc/send` | RRC chat line or `/command`, raw text body |
 | GET | `/billboard` | Bulletin board |
 | POST | `/post` | New notice, `entry=<urlencoded>` |
-| GET | `/files` | File listing |
-| POST | `/upload` | `X-Filename` header, raw body |
+| GET | `/files` | File listing (no admin UI here — see `/admin`) |
+| POST | `/upload` | `X-Filename` header, raw body; `507` if the card is over capacity even after evicting the oldest shared files |
 | GET | `/download?f=` | Streamed file download |
+| GET | `/admin` | Password-only login; no link anywhere points here |
+| POST | `/admin` | Validates the password, shows a checkbox file list on success |
+| POST | `/admin/delete` | Batch-deletes checked files, re-validates the password for real |
 | GET | `/about` | About page |
 | GET | `/about/img?f=` | Gallery image, served inline |
-| GET | `/tools` | Technician tools |
-| GET | `/flash` | Browser-based flasher |
+| GET | `/tools` | Technician tools — CLI provisioning steps |
+| GET | `/tool?f=` | Download a tool file |
+| GET | `/flash` | Browser-based flasher — still live, not linked from `/tools` anymore |
+| GET | `/fw?f=` | Firmware image / catalog for the flasher |
 | GET | `/lang?set=&next=` | Set language, redirect back |
 
 ---

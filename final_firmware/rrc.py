@@ -62,7 +62,17 @@ _next_id = [1]
 # broadcast surface, and anything posted to one reaches every poller
 # and (since rrc_mesh) the radio as well.
 _dms = {}
-MAX_DMS_PER_USER = 30
+# Safety-valve ceiling only, not the primary way a DM disappears --
+# that's DM_TTL_SECONDS above, checked first and given priority
+# everywhere this cap is also checked. This exists purely to bound RAM
+# if something floods a single recipient with more messages than
+# DM_TTL_SECONDS would naturally clear -- all arriving within the same
+# 72-hour window, which time-based pruning alone can't help with.
+# Raised from an earlier, tighter value now that time-based pruning is
+# doing the everyday work: normal use across a real 72-hour window,
+# from more than one sender, shouldn't run into a count ceiling that
+# was originally sized as the ONLY limit.
+MAX_DMS_PER_USER = 60
 
 # client_id -> {"nick", "room", "last_seen"}
 _users = {}
@@ -275,13 +285,44 @@ def find_client_by_nick(nick):
     return None
 
 
+DM_TTL_SECONDS = 72 * 3600   # DMs are kept up to 72 hours since receipt --
+                             # in-memory only, same as everything else in
+                             # this module: a power cycle clears _dms
+                             # (see reset() below) exactly like it clears
+                             # _rooms, there is no SD-card path for this
+                             # data at all. This constant is the ONLY
+                             # thing that removes a message before that.
+
+
+def _prune_dms(cid, now=None):
+    """Drops DMs in this recipient's box older than DM_TTL_SECONDS --
+    the PRIMARY retention rule, checked first and given priority over
+    the count-based ceiling below: a message inside its 72-hour window
+    is not evicted just because a burst of other messages arrived after
+    it, the way the file-storage FIFO would evict an old upload to make
+    room for a new one. Time decides what goes; count is only a
+    last-resort safety valve for the case time-based pruning alone
+    doesn't bound (a flood of messages all arriving within the same
+    72 hours), not the everyday mechanism -- MAX_DMS_PER_USER exists for
+    exactly that narrower case, not as the normal way DMs disappear.
+    """
+    box = _dms.get(cid)
+    if not box:
+        return
+    now = now if now is not None else time.time()
+    box[:] = [m for m in box if now - m["ts"] <= DM_TTL_SECONDS]
+
+
 def send_dm(from_nick, to_nick, body):
     """Queues a private message. Returns (ok, error_or_recipient_nick).
 
     Delivered by polling, same as room messages -- the recipient picks
-    it up on their next cycle. Bounded per recipient: someone who never
-    comes back must not accumulate messages forever on a board with
-    finite RAM, so the oldest are dropped rather than new ones refused.
+    it up on their next cycle. Bounded per recipient as a safety valve
+    only (see MAX_DMS_PER_USER and _prune_dms's own docstring for why
+    that's now secondary to the 72-hour rule): someone who never comes
+    back must not accumulate messages forever on a board with finite
+    RAM, so the oldest are dropped rather than new ones refused, but
+    only once time-based pruning alone hasn't kept the count down.
     """
     body = _clean(body, MAX_MESSAGE_LEN)
     if not body:
@@ -290,7 +331,9 @@ def send_dm(from_nick, to_nick, body):
     if cid is None:
         return False, "no one here called '%s' -- /names shows who is" % to_nick
     user = _users.get(cid)
-    msg = {"id": _next_id[0], "ts": time.time(), "nick": from_nick,
+    now = time.time()
+    _prune_dms(cid, now)
+    msg = {"id": _next_id[0], "ts": now, "nick": from_nick,
            "body": body, "kind": "dm"}
     _next_id[0] += 1
     box = _dms.setdefault(cid, [])
@@ -301,7 +344,17 @@ def send_dm(from_nick, to_nick, body):
 
 
 def dms_since(client_id, last_id):
-    """Private messages for this client newer than last_id."""
+    """Private messages for this client newer than last_id.
+
+    Also prunes this client's own box on the way -- polling is the one
+    thing every connected client does regularly regardless of whether
+    anyone is messaging them, so hooking the 72-hour cleanup in here
+    too (not just in send_dm) means a recipient who stops receiving new
+    DMs still gets their own expired ones cleared out on their next
+    poll, rather than that box sitting there until someone happens to
+    message them again -- which might be never.
+    """
+    _prune_dms(client_id)
     return [m for m in _dms.get(client_id, []) if m["id"] > last_id]
 
 

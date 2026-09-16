@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 
 # A distinct sentinel, not None -- _generate_config_py needs to tell
 # "this parameter wasn't passed, leave that config.py line untouched"
@@ -199,23 +200,24 @@ DEFAULT_CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
 #   [print(f'    {str(f.relative_to(\"final_firmware\"))!r}: {hashlib.sha256(f.read_bytes()).hexdigest()[:16]!r},')
 #    for f in sorted(Path('final_firmware').rglob('*')) if f.is_file()]"
 EXPECTED_FILE_HASHES = {
-    "barkeep.py": "f9ce7b2342bc4108",
+    "barkeep.py": "542e5b3ee090b89f",
     "billboard.py": "0802a1334a6012c3",
     "boot_common.py": "d1f60dd4434752bf",
     "captive_portal.py": "8c2a0ee90cdc1e04",
     "config.py": "40524df2178b7afe",
     "docs/CLIENT_QUICKSTART.md": "22f09055cb4c65f1",
-    "docs/COMMANDS.md": "6eed8b61909899a0",
+    "docs/COMMANDS.md": "4735cd01e77cdbd0",
+    "docs/HIDDEN_FEATURES.md": "1a530af86fb36e05",
     "example_node.py": "e9c4849ce755a3f2",
     "flasher_ui.py": "f0af338707d46d25",
-    "fserv.py": "adaf199fa3e985e4",
+    "fserv.py": "ea51245f3481c84e",
     "fservbot/README.md": "4ab77b9e51dd5edc",
     "fservbot/__init__.py": "f164090d81312df8",
     "fservbot/core.py": "18ed35f2e0710d37",
     "fservbot/install.py": "8d6f5e5870ce5437",
     "fservbot/plugin.json": "bc8aca2fefb8b9e7",
     "fservbot/templates.py": "120b25ba5d326958",
-    "i18n.py": "c4f43a1c98617ae1",
+    "i18n.py": "b42f91fb2c6b9877",
     "lib/bz2_fast_xtensawin.mpy": "ac55d9eda2126432",
     "lib/ed25519_fast_xtensawin.mpy": "96e74dac45f91687",
     "lib/ed25519_iram.mpy": "96e74dac45f91687",
@@ -224,9 +226,9 @@ EXPECTED_FILE_HASHES = {
     "node_common.py": "e1e748a3283da2f4",
     "peripherals/__init__.py": "d2bdac4de6de79de",
     "peripherals/adc_reader.py": "50a393bfa61641d4",
-    "rrc.py": "7e426d7389bcf6bd",
+    "rrc.py": "afff9f4da003f317",
     "rrc_mesh.py": "f981f4669737a96e",
-    "rrc_ui.py": "b6be27b07a1c10b3",
+    "rrc_ui.py": "e533c3dc5a5b009a",
     "stumpid/README.md": "da60b797b09855c3",
     "stumpid/__init__.py": "83462abf471caca1",
     "stumpid/core.py": "d7f755af8f6b5494",
@@ -235,7 +237,7 @@ EXPECTED_FILE_HASHES = {
     "tools_payload/flasher/catalog.json": "8dc38061d6bf49a3",
     "tools_payload/flasher/esptool-bundle.js": "ef7d5a237d3f273e",
     "tools_payload/flasher/esptool-js-LICENSE.txt": "1c25f29242785d63",
-    "tools_payload/images/README.txt": "9894095091770e4e",
+    "tools_payload/images/README.txt": "10dbf1ed3e3eee26",
     "urns/__init__.py": "4a83ee3f5cd42ca4",
     "urns/buffer.py": "b1da1d0723340421",
     "urns/bz2dec.py": "8149a39deee822c2",
@@ -1476,6 +1478,34 @@ def upload_stump_app(port, app_dir=None):
     return all_ok
 
 
+def _build_firmware_zip(dest_path, source_dir):
+    """Builds Stump_Beta_A.zip fresh from source_dir (final_firmware/,
+    the SAME directory this run of provisioner.py is already using for
+    everything else) rather than requiring the technician to have kept
+    their original downloaded zip around. Two things that matters
+    follow from building it fresh instead of copying a stale file:
+    it can never go stale relative to what's actually being
+    provisioned, and it doesn't fail outright just because the
+    original zip was deleted after extracting -- final_firmware/ is
+    the one thing that has to exist anyway for provisioning to work at
+    all.
+
+    Uses zipfile directly rather than shelling out to a zip binary --
+    this runs on whatever OS the technician's laptop happens to be,
+    and a zip command isn't guaranteed to exist there (Windows without
+    WSL or Git Bash, notably).
+
+    Same top-level layout as the zip shipped for download (a
+    final_firmware/ directory at the archive root), so extracting the
+    copy pulled back off a node reproduces exactly the folder
+    structure a fresh download would.
+    """
+    with zipfile.ZipFile(dest_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in sorted(source_dir.rglob("*")):
+            if f.is_file():
+                zf.write(f, arcname=str(Path("final_firmware") / f.relative_to(source_dir)))
+
+
 def install_tools_on_node(port):
     """Copies this Provisioner onto the node's SD card.
 
@@ -1526,20 +1556,89 @@ def install_tools_on_node(port):
 
     installed, failed = [], []
 
-    def push(src, dest, label):
+    def push(src, dest, label, timeout=180):
         if not Path(src).is_file():
             return
         # exec + fs cp in ONE invocation so the mount is still live when
         # the copy runs.
         ok, out = run(["mpremote", "connect", port, "exec", MOUNT,
-                       "fs", "cp", str(src), dest], timeout=180)
+                       "fs", "cp", str(src), dest], timeout=timeout)
         if ok:
             installed.append(label)
         else:
-            failed.append((label, out.strip().splitlines()[-1][:70] if out.strip() else "no output"))
+            # "command timed out: <the whole mpremote invocation>" is
+            # run()'s own message on a real subprocess timeout -- and
+            # since MOUNT is itself a multi-line Python snippet embedded
+            # in that command, splitlines()[-1] on it doesn't land on
+            # anything resembling an error, it lands on whatever
+            # fragment of the command happened to follow the last
+            # newline. Confirmed directly: this is EXACTLY what produced
+            # the garbled "fs cp /var/folders/.../tmpXXXX/St" a real
+            # failed run reported -- the truncated tail of the command
+            # itself, not a description of what went wrong. Detected and
+            # given a real message instead of extracting a "last line"
+            # that was never a line describing an error in the first
+            # place.
+            if out.startswith("command timed out"):
+                reason = "timed out after %ds" % timeout
+            elif out.strip():
+                reason = out.strip().splitlines()[-1][:70]
+            else:
+                reason = "no output"
+            failed.append((label, reason))
 
     if me.is_file():
         push(me, ":/sd/tools/provisioner.py", "provisioner.py")
+
+    # Same reasoning as provisioner.py itself: the node hands back
+    # exactly the reference doc it was provisioned with, rather than a
+    # technician needing to remember to keep a separate copy on hand.
+    # README.md sits right next to provisioner.py in every download,
+    # same as final_firmware/ does -- best-effort like everything else
+    # here, a missing README.md still lets the rest of this function
+    # proceed normally.
+    readme = here / "README.md"
+    if readme.is_file():
+        push(readme, ":/sd/tools/README.md", "README.md")
+
+    # Same reasoning again: whoever ends up with a copy of this build
+    # off the node gets the actual license it ships under, not just the
+    # code. Named LICENSE (no extension) to match the standard,
+    # tool-recognized convention (GitHub, package managers, and license
+    # scanners all look for this exact name) rather than LICENSE.md or
+    # LICENSE.txt.
+    license_file = here / "LICENSE"
+    if license_file.is_file():
+        push(license_file, ":/sd/tools/LICENSE", "LICENSE")
+
+    # The full firmware source, built fresh rather than copied from
+    # wherever the technician's original download happened to land --
+    # see _build_firmware_zip's own docstring for why that's the right
+    # call here. Best-effort like everything else in this function: a
+    # zip-building failure (a permissions issue on the temp dir, say)
+    # is recorded and skipped, never lets an exception end the whole
+    # provisioning run over a file this secondary.
+    fw_dir = here / "final_firmware"
+    if fw_dir.is_dir():
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                zip_path = Path(tmpdir) / "Stump_Beta_A.zip"
+                _build_firmware_zip(zip_path, fw_dir)
+                # A real run timed out pushing this at the same 180s
+                # every other, much smaller tool push uses -- confirmed
+                # directly, this is genuinely just a bigger file (well
+                # over double esptool-bundle.js, the next largest thing
+                # pushed here) taking a real SD card write longer than
+                # that budget, not a hung command. Printed up front
+                # since a silent multi-minute wait reads as a hang
+                # otherwise -- the other pushes are fast enough that
+                # nobody's watched the clock on them before now.
+                size_kb = zip_path.stat().st_size // 1024
+                print(f"  Copying Stump_Beta_A.zip ({size_kb} KB) onto the SD card --")
+                print("  this one's bigger than the other tools, give it a minute...")
+                push(zip_path, ":/sd/tools/Stump_Beta_A.zip", "Stump_Beta_A.zip", timeout=600)
+        except Exception as e:
+            failed.append(("Stump_Beta_A.zip", str(e)[:70]))
 
     payload = here / "final_firmware" / "tools_payload"
     if not payload.is_dir():
@@ -1560,7 +1659,15 @@ def install_tools_on_node(port):
     if installed:
         print("  Installed: " + ", ".join(installed))
         print("  Tools at   http://<node>/files")
-        print("  Flasher at http://<node>/flash")
+        # Only claimed if the flasher's own assets are actually among
+        # what got installed -- this used to print unconditionally
+        # whenever ANYTHING installed, including a run where
+        # esptool-bundle.js never made it on at all (no tools_payload
+        # folder found, printed and confirmed directly above this very
+        # line). Telling someone the flasher is ready right next to a
+        # warning that it isn't was a real, self-contradicting bug.
+        if "esptool-bundle.js" in installed:
+            print("  Flasher at http://<node>/flash")
     for label, why in failed:
         print("  Could not copy %s: %s" % (label, why))
     return bool(installed)
@@ -2404,8 +2511,30 @@ def diagnostics(port, board_type=None, interactive=True):
                 print(f"  OK — {host}:{bport} accepting connections.")
             else:
                 print(f"  FAILED: {host}:{bport} — {detail}")
-                print("  Check: is the Heltec powered on, on the same network, and still in")
-                print("  WiFi Station mode? Confirm with: rnodeconf <heltec-port> --info")
+                # A timeout specifically to a 192.168.4.x address is a
+                # DIFFERENT failure than "the bridge is actually down":
+                # this probe runs from the technician's own laptop, not
+                # from the CAM, and 192.168.4.x is the CAM's own
+                # standalone hotspot range (see the standalone-pairing
+                # wizard flow). A timeout there is the exact signature
+                # of THIS COMPUTER having no route to that subnet at
+                # all -- not joined to the CAM's own hotspot right now
+                # -- which reads identically to a real outage in this
+                # test's plain PASS/FAIL output despite being a
+                # completely different, much more common situation.
+                # Confirmed directly: a real, working bridge reported
+                # exactly this failure when the laptop running the
+                # diagnostic wasn't on that network, and passed the
+                # moment it joined.
+                if detail == "timeout" and host.startswith("192.168.4."):
+                    print("  This looks like a standalone-pair setup (the CAM's own")
+                    print("  hotspot, not an external router). A timeout to a 192.168.4.x")
+                    print("  address usually means THIS COMPUTER isn't joined to that")
+                    print("  hotspot right now -- join it the same way the Heltec did,")
+                    print("  then re-run this check, before assuming the bridge is down.")
+                else:
+                    print("  Check: is the Heltec powered on, on the same network, and still in")
+                    print("  WiFi Station mode? Confirm with: rnodeconf <heltec-port> --info")
 
     banner("DIAGNOSTIC SUMMARY")
     for k, v in results.items():
@@ -2454,7 +2583,18 @@ def _probe_bridge(host, port, timeout=5):
     connect answers the question this test is actually for ("is the
     radio reachable on the network at all"), and injecting bytes into a
     live RNode's host connection could desync a session the node is
-    genuinely using. Returns (ok, detail)."""
+    genuinely using. Returns (ok, detail).
+
+    Distinguishes a timeout from every other connection failure
+    explicitly, rather than returning whatever text the exception
+    happens to carry -- a timeout means nothing ever answered at all
+    (the OS had nowhere to even send the packet), which reads
+    completely differently from a refused connection (the subnet WAS
+    reachable, just nothing listening on that port). The caller uses
+    this distinction directly: a timeout to a 192.168.4.x address is
+    the signature of the PROBING COMPUTER not being on that network,
+    not of the bridge itself being down.
+    """
     import socket as _socket
     s = None
     try:
@@ -2462,6 +2602,8 @@ def _probe_bridge(host, port, timeout=5):
         s.settimeout(timeout)
         s.connect((host, port))
         return True, "connected"
+    except _socket.timeout:
+        return False, "timeout"
     except OSError as e:
         return False, str(e)
     finally:

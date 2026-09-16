@@ -70,6 +70,14 @@ ABOUT_DIR = SD_MOUNT + "/about"
 LEDGER_FILE = SD_MOUNT + "/fserv_ledger.json"
 AWAITING_FILE = SD_MOUNT + "/fserv_awaiting.json"
 
+# The ceiling storage stays under, as a fraction of the card's total
+# capacity -- not "keep N bytes free", which stops making sense the
+# moment someone swaps in a card of a different size. 75% leaves real
+# headroom on any card: room for the ledger/awaiting JSON files, the
+# filesystem's own bookkeeping, and enough slack that eviction (below)
+# is never fighting the FAT allocator over the last few blocks.
+MAX_SD_RATIO = 0.75
+
 # Credit weight per file class -- now operator-configurable via config.py
 # rather than edited here. The fallbacks below keep this module working
 # standalone (and keep an older config.py without these settings from
@@ -309,10 +317,102 @@ def _list_files():
         return []
 
 
+def get_storage_stats():
+    """(total_bytes, free_bytes, used_ratio) for the SD card, straight
+    from the filesystem via os.statvfs -- not a sum of known file sizes,
+    which would miss filesystem overhead and anything not tracked here.
+    Confirmed directly against a real statvfs() call that MicroPython's
+    tuple follows the standard POSIX layout this uses: s[0]=f_bsize,
+    s[2]=f_blocks (total), s[3]=f_bfree (free).
+
+    Returns (0, 0, 1.0) on any failure -- deliberately the FULLEST
+    possible reading, not the emptiest. This return value feeds
+    make_room_fifo()'s capacity check below; on a genuine statvfs
+    failure (no card, unmounted, a transient I/O error), reporting
+    "completely full" makes that check refuse new uploads and fall
+    through to a clear error, instead of "completely empty", which
+    would make it wave every upload through onto a card it couldn't
+    actually confirm has room."""
+    try:
+        s = os.statvfs(SD_MOUNT)
+        bsize = s[0]
+        total = bsize * s[2]
+        free = bsize * s[3]
+        used = total - free
+        return (total, free, used / total if total > 0 else 1.0)
+    except Exception:
+        return (0, 0, 1.0)
+
+
+def make_room_fifo(incoming_length):
+    """Evicts the OLDEST files in SHARED_DIR (by mtime), one at a time,
+    until incoming_length fits under MAX_SD_RATIO of total card
+    capacity -- or returns False if it can't be made to fit even after
+    removing every shared file.
+
+    Only ever touches SHARED_DIR. TOOLS_DIR, FW_DIR, and ABOUT_DIR are
+    never even listed here, let alone eligible for removal -- there is
+    no code path in this function that can reach them, not just a
+    check that happens to exclude them. A technician's tools, firmware
+    images, and the About page's own gallery must never be silently
+    deleted just because visitors filled the shared folder.
+
+    Never raises: a listing or stat failure on one file is skipped
+    (that file simply can't be evicted this pass) rather than aborting
+    the whole eviction attempt over one bad entry.
+    """
+    total, free, _ = get_storage_stats()
+    if total == 0:
+        return False   # no card / couldn't read it -- get_storage_stats() already logged nothing, nothing safe to promise here
+    used = total - free
+    max_allowed = int(total * MAX_SD_RATIO)
+    if used + incoming_length <= max_allowed:
+        return True
+
+    try:
+        names = os.listdir(SHARED_DIR)
+    except OSError:
+        return False
+
+    entries = []
+    for name in names:
+        path = SHARED_DIR + "/" + name
+        try:
+            st = os.stat(path)
+            entries.append((st[8], st[6], path))   # (mtime, size, path)
+        except OSError:
+            continue
+    entries.sort(key=lambda e: e[0])   # oldest mtime first
+
+    for mtime, size, path in entries:
+        try:
+            os.remove(path)
+        except OSError:
+            continue
+        used -= size
+        if used + incoming_length <= max_allowed:
+            return True
+
+    return False
+
+
+def delete_file(filename):
+    """Removes one file from SHARED_DIR by name. Safe to call with a
+    name that doesn't exist or already isn't there -- returns False
+    rather than raising, since the caller (an admin delete action)
+    wants a clean yes/no, not an exception to catch."""
+    try:
+        os.remove(SHARED_DIR + "/" + filename)
+        return True
+    except OSError:
+        return False
+
+
 
 # NOTE: no HTTP server here either -- same reason as billboard.py.
 # barkeep.py owns port 80 and calls this module's storage/credit
 # functions (mount_sd, stream_to_file, drain, credit_cost, credit_add,
-# credit_balance, guess_class, _list_files, _awaiting, _save_json)
-# directly. Keeping a second copy of the upload/download handler here
-# meant fixes landed in one file and rotted in the other.
+# credit_balance, guess_class, _list_files, _awaiting, _save_json,
+# get_storage_stats, make_room_fifo, delete_file) directly. Keeping a
+# second copy of the upload/download handler here meant fixes landed
+# in one file and rotted in the other.

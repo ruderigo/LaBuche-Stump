@@ -43,6 +43,27 @@ STYLE = """
   --bg:#1b1512; --panel:#2a2119; --ember:#d97a3a; --ember-bright:#f0a050;
   --text:#ecdfc8; --muted:#9c8d76; --border:#493c2e;
 }
+/* Theme presets -- [data-theme] on <html>, set by the startup script in
+   _page() from localStorage. Absent entirely (the default amber look
+   above, :root's own values) unless a visitor or the admin has chosen
+   something else. --muted isn't mentioned in the original spec's four
+   preset definitions, so each one below picks a --muted that actually
+   reads against its own --bg/--panel rather than leaving warm amber
+   tan sitting on, say, pure black -- the .sub class uses --muted for
+   secondary text on every page, so leaving it untouched would be a
+   visible, real inconsistency, not a harmless gap. */
+[data-theme='phosphor']{
+  --bg:#0d140e; --panel:#142217; --ember:#33ff66; --ember-bright:#5cff85;
+  --text:#d0f0d6; --muted:#5c8f68; --border:#1f3b25;
+}
+[data-theme='oled']{
+  --bg:#000000; --panel:#121212; --ember:#4da6ff; --ember-bright:#80bfff;
+  --text:#f0f0f0; --muted:#8a8a8a; --border:#2a2a2a;
+}
+[data-theme='paper']{
+  --bg:#f5f2eb; --panel:#e8e3d5; --ember:#a84814; --ember-bright:#c25b1f;
+  --text:#2c2825; --muted:#7a7264; --border:#d0c8b6;
+}
 *{box-sizing:border-box;}
 body{
   background:var(--bg); color:var(--text);
@@ -364,7 +385,47 @@ def _home_tiles(lang):
 def _page(body):
     return ("<!DOCTYPE html><html><head><meta name='viewport' "
              "content='width=device-width, initial-scale=1'>"
-             "<style>" + STYLE + "</style></head><body>" + body + "</body></html>")
+             "<style>" + STYLE + "</style>"
+             "<script>" + _THEME_STARTUP_SCRIPT + "</script>"
+             "</head><body>" + body + "</body></html>")
+
+
+# Runs before body content renders, so a returning visitor's chosen
+# theme/logo apply immediately rather than flashing default styling
+# first. Wrapped in try/catch per localStorage access -- private
+# browsing mode can make localStorage throw outright rather than just
+# return null on some browsers, and a malformed stump_custom_colors
+# value (hand-edited devtools, an old format from a future version)
+# would otherwise take the whole page down over a cosmetic preference.
+# Logo swapping/hiding waits for DOMContentLoaded since #site-logo
+# doesn't exist yet at this point in <head>; the theme variables don't
+# need that wait, since CSS custom properties apply to <html> whether
+# or not <body> has rendered.
+_THEME_STARTUP_SCRIPT = """
+(function(){
+  try {
+    var t = localStorage.getItem('stump_theme');
+    if (t === 'custom') {
+      var c = JSON.parse(localStorage.getItem('stump_custom_colors') || '{}');
+      for (var k in c) document.documentElement.style.setProperty(k, c[k]);
+    } else if (t) {
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  } catch (e) {}
+  try {
+    var customSvg = localStorage.getItem('stump_custom_svg');
+    var hidden = localStorage.getItem('stump_logo_hidden') === '1';
+    if (customSvg || hidden) {
+      window.addEventListener('DOMContentLoaded', function(){
+        var el = document.getElementById('site-logo');
+        if (!el) return;
+        if (customSvg) el.innerHTML = customSvg;
+        if (hidden) el.style.display = 'none';
+      });
+    }
+  } catch (e) {}
+})();
+"""
 
 
 def _url_encode(s):
@@ -462,7 +523,21 @@ def _process_command(text, identifier, lang):
 def _render_chat_page(lang):
     you_label = i18n.t("home_you_label", lang)
     return (
-        "<pre>" + BARKEEP_ART + "</pre>"
+        # Restored to the original ASCII art by request after real
+        # testing -- the concentric-ring SVG this held before read as
+        # a target/bullseye rather than the tree-stump cross-section it
+        # was meant to be, and the person who's actually looked at it
+        # in a browser wanted the original back. The #site-logo wrapper
+        # stays: an admin who DOES want a custom SVG can still set one
+        # from /admin, which replaces this element's content the exact
+        # same way regardless of what's inside it by default. No
+        # forced inline style here either -- the existing pre{} rule
+        # already colors and sizes this correctly (color:var(--ember),
+        # monospace, proper line-height); the SVG-specific fill/
+        # max-width/display rules that were here don't mean anything
+        # applied to text and would have squeezed the art oddly if
+        # they'd stuck around.
+        "<div id='site-logo'><pre>" + BARKEEP_ART + "</pre></div>"
         "<h1>Stump</h1>"
         + _lang_switcher(lang, "/") +
         "<p class='sub'>" + i18n.t("barkeep_greeting", lang, bot_name=_esc_name(BOT_NAME)) + "</p>"
@@ -478,7 +553,7 @@ def _render_chat_page(lang):
         "<p class='sub' style='margin-top:0;'>" + i18n.t("home_bring_something", lang) + "</p>"
         "<input type='file' id='upfile'>"
         "<div class='row'>"
-        "<input id='uphash' placeholder='" + i18n.t("home_awaiting_hash", lang) + "'>"
+        "<input id='uphash' style='display:none' value=''>"
         "<button onclick='doUpload()'>" + i18n.t("home_upload_button", lang) + "</button>"
         "</div>"
         "<p id='upstatus'><small></small></p>"
@@ -577,12 +652,237 @@ def _human_size(n):
     return "%.1f MB" % (n / (1024 * 1024))
 
 
+def _check_admin_pw(pw):
+    """True if pw unlocks admin actions on this node -- the one real
+    check, reused by every admin-gated route rather than each one
+    duplicating the same soft-import. Delegates entirely to
+    stumpid.core.check_admin_password (fail-closed, falls back to
+    fservbot's operator password -- see that function's own docstring).
+    Soft-imported the same way rrc_mesh.py already does for stumpid:
+    an admin route must still exist and correctly refuse on a node
+    where the plugin isn't installed at all, not crash with an
+    ImportError."""
+    try:
+        import stumpid.core as _stumpid
+        return _stumpid.check_admin_password(pw)
+    except ImportError:
+        return False
+
+
+def _render_admin_login_page(lang, error=False):
+    """The ONLY way to reach file deletion now -- no link, no nav tile,
+    no button anywhere in the visible UI points here. Reachable only by
+    typing the address directly, which is the point: the drawer this
+    replaced sat on /files where every visitor saw it exist, even
+    collapsed, and a wrong password there had to be re-typed once per
+    file. This page asks for the password exactly once regardless of
+    how many files get selected next.
+    """
+    err = "<p class='sub' style='color:var(--ember-bright);'>" + i18n.t("admin_wrong_password", lang) + "</p>" if error else ""
+    return (
+        "<h1>" + i18n.t("admin_header", lang) + "</h1>"
+        + err +
+        "<form method='POST' action='/admin' class='row'>"
+        "<input type='password' name='admin_pass' placeholder='"
+        + i18n.t("files_admin_password", lang) + "' autofocus>"
+        "<button type='submit'>" + i18n.t("admin_login_button", lang) + "</button>"
+        "</form>"
+    )
+
+
+def _render_admin_file_list_page(lang, names, pw):
+    """Shown only after a correct password. The password travels
+    forward as a hidden field on the SAME simple, stateless pattern
+    this whole project already uses everywhere else (no sessions, no
+    cookies) -- re-validated for real by /admin/delete when the form
+    comes back, never trusted just because it arrived in a hidden
+    field. One password entry covers selecting as many files as
+    wanted; the batch submits together as a single delete.
+
+    Also carries theme and logo customization -- unrelated to file
+    deletion, but gated behind the same login rather than a second
+    password prompt, since both are "things only an admin should
+    change" and asking twice would be the exact kind of friction the
+    /admin redesign was built to remove. Shown regardless of whether
+    there are any files to delete, unlike the checkbox list below.
+    """
+    if not names:
+        file_section = "<p class='sub'>" + i18n.t("files_none_yet", lang) + "</p>"
+    else:
+        items = "".join(
+            "<li><label><input type='checkbox' name='f' value='" + _url_encode(n) + "'> "
+            + billboard._esc(n) + "</label></li>"
+            for n in names
+        )
+        file_section = (
+            "<form method='POST' action='/admin/delete'>"
+            "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+            "<div class='panel'><ul class='files'>" + items + "</ul></div>"
+            "<button type='submit'>" + i18n.t("admin_delete_selected", lang) + "</button>"
+            "</form>"
+        )
+
+    return (
+        "<h1>" + i18n.t("admin_header", lang) + "</h1>"
+        "<p class='sub'>" + i18n.t("admin_select_intro", lang) + "</p>"
+        + file_section
+        + _render_admin_settings_section(lang)
+    )
+
+
+def _render_admin_settings_section(lang):
+    """Theme presets, a custom color palette, and SVG logo controls --
+    all of it client-side, persisted in the ADMIN'S OWN BROWSER via
+    localStorage, not written to the server or the SD card anywhere.
+    Worth being direct about since it's easy to assume otherwise for a
+    'branding' feature: setting a theme or logo here changes what this
+    one browser sees on its own next visit. It does not change what
+    any other visitor sees, and there is currently no way to make a
+    theme or logo choice apply site-wide to everyone -- that would be
+    server-side storage, which this deliberately isn't.
+    """
+    return (
+        "<h2 class='sub'>" + i18n.t("admin_theme_header", lang) + "</h2>"
+        "<div class='panel'>"
+        "<div class='row'>"
+        "<button type='button' onclick=\"stumpSetTheme('default')\">" + i18n.t("admin_theme_default", lang) + "</button>"
+        "<button type='button' onclick=\"stumpSetTheme('phosphor')\">" + i18n.t("admin_theme_phosphor", lang) + "</button>"
+        "<button type='button' onclick=\"stumpSetTheme('oled')\">" + i18n.t("admin_theme_oled", lang) + "</button>"
+        "<button type='button' onclick=\"stumpSetTheme('paper')\">" + i18n.t("admin_theme_paper", lang) + "</button>"
+        "</div>"
+        "<p class='sub'>" + i18n.t("admin_theme_custom_intro", lang) + "</p>"
+        "<div class='row'>"
+        "<label>" + i18n.t("admin_color_bg", lang) + " <input type='color' id='stump-c-bg' value='#1b1512'></label>"
+        "<label>" + i18n.t("admin_color_panel", lang) + " <input type='color' id='stump-c-panel' value='#2a2119'></label>"
+        "<label>" + i18n.t("admin_color_text", lang) + " <input type='color' id='stump-c-text' value='#ecdfc8'></label>"
+        "<label>" + i18n.t("admin_color_ember", lang) + " <input type='color' id='stump-c-ember' value='#d97a3a'></label>"
+        "<label>" + i18n.t("admin_color_border", lang) + " <input type='color' id='stump-c-border' value='#493c2e'></label>"
+        "</div>"
+        "<div class='row'>"
+        "<button type='button' onclick='stumpSaveCustomPalette()'>" + i18n.t("admin_save_palette", lang) + "</button>"
+        "<button type='button' onclick='stumpResetPalette()'>" + i18n.t("admin_reset_palette", lang) + "</button>"
+        "</div>"
+        "</div>"
+
+        "<h2 class='sub'>" + i18n.t("admin_logo_header", lang) + "</h2>"
+        "<div class='panel'>"
+        "<textarea id='stump-svg-input' rows='6' placeholder='<svg ...>...</svg>' "
+        "style='width:100%;font-family:ui-monospace,monospace;font-size:.8rem;'></textarea>"
+        "<div class='row'>"
+        "<button type='button' onclick='stumpSaveSvgLogo()'>" + i18n.t("admin_save_logo", lang) + "</button>"
+        "<button type='button' onclick='stumpResetLogo()'>" + i18n.t("admin_reset_logo", lang) + "</button>"
+        "<button type='button' onclick='stumpHideLogo()'>" + i18n.t("admin_hide_logo", lang) + "</button>"
+        "</div>"
+        "</div>"
+
+        "<script>" + _ADMIN_SETTINGS_SCRIPT.replace(
+            "I18N_LOGO_RESET_NOTICE",
+            json.dumps(i18n.t("admin_logo_reset_notice", lang)).replace("</", "<\\/")
+        ) + "</script>"
+    )
+
+
+# All four stumpSet*/stumpSave*/stumpReset* functions are plain globals,
+# not wrapped in an IIFE -- they're referenced from onclick= attributes
+# on this same page, which need them reachable on window.
+_ADMIN_SETTINGS_SCRIPT = """
+(function(){
+  try {
+    var saved = JSON.parse(localStorage.getItem('stump_custom_colors') || '{}');
+    var map = {'--bg':'stump-c-bg','--panel':'stump-c-panel','--text':'stump-c-text','--ember':'stump-c-ember','--border':'stump-c-border'};
+    for (var k in map) {
+      if (saved[k]) { var el = document.getElementById(map[k]); if (el) el.value = saved[k]; }
+    }
+    var svg = localStorage.getItem('stump_custom_svg');
+    if (svg) { var ta = document.getElementById('stump-svg-input'); if (ta) ta.value = svg; }
+  } catch (e) {}
+})();
+
+function stumpSetTheme(t){
+  try {
+    localStorage.removeItem('stump_custom_colors');
+    document.documentElement.removeAttribute('style');
+    if (t === 'default') {
+      localStorage.removeItem('stump_theme');
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      localStorage.setItem('stump_theme', t);
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  } catch (e) {}
+}
+
+function stumpSaveCustomPalette(){
+  try {
+    var colors = {
+      '--bg': document.getElementById('stump-c-bg').value,
+      '--panel': document.getElementById('stump-c-panel').value,
+      '--text': document.getElementById('stump-c-text').value,
+      '--ember': document.getElementById('stump-c-ember').value,
+      '--border': document.getElementById('stump-c-border').value
+    };
+    localStorage.setItem('stump_custom_colors', JSON.stringify(colors));
+    localStorage.setItem('stump_theme', 'custom');
+    document.documentElement.removeAttribute('data-theme');
+    for (var k in colors) document.documentElement.style.setProperty(k, colors[k]);
+  } catch (e) {}
+}
+
+function stumpResetPalette(){
+  try {
+    localStorage.removeItem('stump_custom_colors');
+    localStorage.removeItem('stump_theme');
+    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.removeAttribute('style');
+  } catch (e) {}
+}
+
+function stumpSaveSvgLogo(){
+  try {
+    var svg = document.getElementById('stump-svg-input').value;
+    if (!svg.trim()) return;
+    localStorage.setItem('stump_custom_svg', svg);
+    localStorage.removeItem('stump_logo_hidden');
+    var el = document.getElementById('site-logo');
+    if (el) { el.innerHTML = svg; el.style.display = ''; }
+  } catch (e) {}
+}
+
+function stumpResetLogo(){
+  try {
+    localStorage.removeItem('stump_custom_svg');
+    localStorage.removeItem('stump_logo_hidden');
+    var ta = document.getElementById('stump-svg-input');
+    if (ta) ta.value = '';
+  } catch (e) {}
+  // A page reload, not a DOM patch here -- the default mark is server-
+  // rendered HTML in _render_chat_page, not something this page (the
+  // admin settings page, a different page entirely) has a copy of to
+  // restore from client-side.
+  alert(I18N_LOGO_RESET_NOTICE);
+}
+
+function stumpHideLogo(){
+  try {
+    localStorage.setItem('stump_logo_hidden', '1');
+    var el = document.getElementById('site-logo');
+    if (el) el.style.display = 'none';
+  } catch (e) {}
+}
+"""
+
+
 def _render_files_page(lang):
     """A real page for the shelf, not just a chat reply.
 
     The file list previously existed only as a BarKeep command, which
     meant finding a download required knowing to type 'files' first.
     On a kiosk with no keyboard in reach that is close to unusable.
+
+    No admin/delete UI on this page at all -- that lives entirely at
+    /admin now, a page with no link pointing to it anywhere, reachable
+    only by typing the address directly. See _render_admin_page()'s own
+    docstring for why.
     """
     if not fserv.sd_ok:
         rows = "<p class='sub'>" + i18n.t("files_no_card", lang) + "</p>"
@@ -656,12 +956,7 @@ def _render_tools_page(lang):
         "<h1>" + i18n.t("tools_header", lang) + "</h1>"
         + _lang_switcher(lang, "/tools") +
         "<p class='sub'>" + i18n.t("tools_intro", lang) + "</p>"
-        + listing +
-        "<h2 class='sub'>" + i18n.t("tools_flash_header", lang) + "</h2>"
-        "<p class='sub'>" + i18n.t("tools_flash_intro", lang) + "</p>"
-        "<div class='panel'>"
-        "<p><a href='/flash'>" + i18n.t("tools_open_flasher", lang) + "</a></p>"
-        "</div>"
+        + listing
         + _nav(lang, "home", "files", "chat", "about")
     )
 
@@ -883,6 +1178,14 @@ MIME_TYPES = {
 
 
 def _mime_for(filename):
+    # A handful of real, well-known filenames genuinely have no
+    # extension at all -- LICENSE specifically, the standard,
+    # tool-recognized name GitHub/package managers/license scanners all
+    # look for. Without this, it fell through to
+    # application/octet-stream and downloaded as an anonymous binary
+    # blob instead of the plain text it actually is.
+    if filename.upper() in ("LICENSE", "LICENCE"):
+        return "text/plain"
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     return MIME_TYPES.get(ext, "application/octet-stream")
 
@@ -1052,6 +1355,68 @@ async def _handle(reader, writer):
             billboard._append_entry(entry, identifier)
             await writer.awrite("HTTP/1.1 303 See Other\r\nLocation: /billboard\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
 
+        elif method == "GET" and path.startswith("/admin"):
+            # No link anywhere points here on purpose -- see
+            # _render_admin_login_page's own docstring.
+            await _send(writer, "200 OK", _page(_render_admin_login_page(i18n.get_lang(identifier))))
+
+        elif method == "POST" and path.startswith("/admin") and not path.startswith("/admin/delete"):
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            pw = ""
+            for kv in body.decode().split("&"):
+                if kv.startswith("admin_pass="):
+                    pw = billboard._url_decode(kv[11:])
+            lang = i18n.get_lang(identifier)
+            if not _check_admin_pw(pw):
+                await _send(writer, "403 Forbidden", _page(_render_admin_login_page(lang, error=True)))
+            else:
+                names = fserv._list_files() if fserv.sd_ok else []
+                await _send(writer, "200 OK", _page(_render_admin_file_list_page(lang, names, pw)))
+
+        elif method == "POST" and path.startswith("/admin/delete"):
+            # Re-validates the password for real -- it arrived as a
+            # hidden field on the page above, which is convenient, not
+            # trustworthy: anyone could POST here directly with a
+            # forged or empty one, so this checks it exactly as
+            # strictly as the login step did, not just checks it was
+            # present. Every checked box arrives as a repeated f=...
+            # field with the SAME name, one occurrence per file --
+            # collected into a list here rather than the earlier
+            # single-file parsing pattern that only ever kept the last
+            # match, since a batch is the whole point of this route.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            pw = ""
+            fnames = []
+            for kv in body.decode().split("&"):
+                if kv.startswith("f="):
+                    fnames.append(_clean_filename(billboard._url_decode(kv[2:])))
+                elif kv.startswith("admin_pass="):
+                    pw = billboard._url_decode(kv[11:])
+            if not _check_admin_pw(pw):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                deleted_count = 0
+                for fname in fnames:
+                    if fname and fserv.delete_file(fname):
+                        deleted_count += 1
+                # Re-renders the file list directly instead of
+                # redirecting to /admin -- a 303 there lands on the
+                # bare login form (that's what GET /admin always shows),
+                # giving zero visible confirmation that anything
+                # happened. A real deletion succeeding and then bouncing
+                # back to an empty password prompt reads exactly like
+                # "the delete doesn't work", confirmed directly against
+                # a real test report. The password is already validated
+                # at this point in the handler, so there's no reason to
+                # make the admin type it a second time just to see the
+                # file is actually gone.
+                lang = i18n.get_lang(identifier)
+                names = fserv._list_files() if fserv.sd_ok else []
+                notice = "<p class='sub'>" + i18n.t("admin_deleted_notice", lang, n=deleted_count) + "</p>"
+                await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
+
         elif method == "GET" and path.startswith("/rrc/poll"):
             # Poll for new messages. The client sends the highest id it
             # already has, so only genuinely new lines come back rather
@@ -1084,6 +1449,15 @@ async def _handle(reader, writer):
                 # they share the message-id sequence so the client's
                 # existing since/lastId bookkeeping covers both.
                 "dms": rrc.dms_since(identifier, since_id),
+                # Who's actually in this room right now -- lets the
+                # client offer "select someone to DM" instead of
+                # requiring the exact nick typed blind into /msg. Sent
+                # every poll (not just when it changes): cheap, already
+                # pruned server-side by users_in_room's own
+                # _prune_users call, and simpler than a second
+                # changed-since check for a list this short (MAX_USERS
+                # is 40).
+                "users": rrc.users_in_room(actual),
             }
             await _send(writer, "200 OK", json.dumps(payload), "application/json")
 
@@ -1212,6 +1586,20 @@ async def _handle(reader, writer):
                 await _send(writer, "503 Service Unavailable", "No card in the slot right now.", "text/plain")
             elif length <= 0:
                 await _send(writer, "400 Bad Request", "Empty upload.", "text/plain")
+            elif not fserv.make_room_fifo(length):
+                # Checked (and, if needed, evicted the oldest shared
+                # files to make room) BEFORE reading a single byte of
+                # the body -- same reasoning as the checks above it:
+                # rejecting after the fact would still mean the upload
+                # had to arrive first. TOOLS_DIR/FW_DIR/ABOUT_DIR are
+                # never eligible for eviction (see make_room_fifo's own
+                # docstring), so this can still legitimately fail on a
+                # card that's genuinely full even after clearing every
+                # shared file -- that's a real "no room" answer, not a
+                # bug.
+                await fserv.drain(reader, length)
+                await _send(writer, "507 Insufficient Storage",
+                            "Card capacity exceeded (75% threshold limit).", "text/plain")
             else:
                 table = fserv._awaiting()
                 is_slot = bool(hash_hex) and hash_hex in table and not table[hash_hex]["fulfilled"]
