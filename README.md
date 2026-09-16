@@ -1,6 +1,6 @@
 # Project Stump — Beta A (Release)
 
-<img width="800" height="812" alt="demo" src="https://github.com/user-attachments/assets/422008be-ebc4-40ca-84c6-2a20bb925418" />
+![demo](demo.gif)
 
 An off-grid community node. A long-range encrypted mesh radio and a
 local high-bandwidth server, deliberately kept on separate hardware.
@@ -601,11 +601,35 @@ and no settings controls before authentication; a wrong password is
 refused (`403`) with nothing shown; a correct one shows both the file
 checkboxes and the settings controls together after one login; a
 genuine two-file batch delete removes exactly those two files and
-redirects back to `/admin`; `/admin/delete` called directly with a
-wrong password refuses even when the file list is valid; and the
-settings section's rendered script was extracted and syntax-checked
-for all three languages, confirming no leaked placeholders and no
-repeat of the quoting bug described above.
+re-renders the updated file list directly with a "N file(s) deleted"
+notice (not a redirect to the bare login form — see the real,
+confirmed bug directly below for exactly why that distinction matters
+in practice); `/admin/delete` called directly with a wrong password
+refuses even when the file list is valid; and the settings section's
+rendered script was extracted and syntax-checked for all three
+languages, confirming no leaked placeholders and no repeat of the
+quoting bug described above.
+
+A real, reported bug found after this shipped: the admin password
+travels forward as a hidden field, HTML-escaped for safe embedding --
+but the escaping function only covered `&`, `<`, `>`, and double
+quotes, not the single quote every attribute in this codebase is
+actually delimited with (`value='...'`). A password containing an
+apostrophe closed that attribute early, silently truncating the value
+a browser would submit back on the delete request -- which then failed
+re-validation with a `403`, correctly refusing to delete anything, but
+with nothing about the failure obviously visible to someone who just
+sees the file still sitting there after "the flow." Confirmed directly
+against a real admin password containing an apostrophe: the rendered
+HTML broke exactly as predicted, and simulating precisely what a
+browser does (HTML-decode the attribute at parse time, URL-encode the
+decoded value at submit time) reproduced the exact 403-with-no-deletion
+symptom. Fixed by escaping both quote characters, not just one -- the
+one general-purpose HTML-escaping function this project has, used in
+ten places across three files, all of which write single-quoted
+attributes. Verified the fix with the same real-password-with-apostrophe
+simulation (now deletes correctly) and confirmed an ordinary password
+with no special characters is completely unaffected.
 
 ---
 
