@@ -521,7 +521,14 @@ def _process_command(text, identifier, lang):
 
 
 def _render_chat_page(lang):
-    you_label = i18n.t("home_you_label", lang)
+    # Escaped, not just embedded raw, even though today's three
+    # translations ("Toi"/"You"/"Tú") happen to contain nothing that
+    # would break the surrounding single-quoted JS string below --
+    # that's exactly the assumption that just failed for a different
+    # string in this same script block (see the real, confirmed bug
+    # this line sits next to), so this stays escaped on the same
+    # principle even though it isn't broken today.
+    you_label = billboard._esc(i18n.t("home_you_label", lang))
     return (
         # Restored to the original ASCII art by request after real
         # testing -- the concentric-ring SVG this held before read as
@@ -554,20 +561,46 @@ def _render_chat_page(lang):
         "<input type='file' id='upfile'>"
         "<div class='row'>"
         "<input id='uphash' style='display:none' value=''>"
-        "<button onclick='doUpload()'>" + i18n.t("home_upload_button", lang) + "</button>"
+        "<button id='upbtn' onclick='doUpload()'>" + i18n.t("home_upload_button", lang) + "</button>"
         "</div>"
         "<p id='upstatus'><small></small></p>"
         "</div>"
+        # doUpload() below: three real, reported gaps fixed together --
+        # no .catch() on the fetch() chain meant any failure on the
+        # server's side of this request (the actual exception source is
+        # fixed in fserv.py/barkeep.py, but this is the client's own
+        # last line of defense against any OTHER cause too, network
+        # failure included) left the promise rejecting with nothing to
+        # handle it: the status line stuck on "Sending..." forever, no
+        # success shown and no error either, indistinguishable from the
+        # upload having silently failed even when the file itself made
+        # it onto the card intact. Disabling #upbtn for the duration
+        # also stops a second, overlapping upload from a repeated or
+        # impatient click, since nothing here queues or cancels one
+        # already in flight. Clearing the file input once a response
+        # actually arrives (success or a server-side error message,
+        # either counts) is itself a visible sign something happened,
+        # independent of whatever text the response carries.
         "<script>"
         "function doUpload(){"
         "  var file=document.getElementById('upfile').files[0];"
         "  if(!file){return;}"
         "  var hash=document.getElementById('uphash').value;"
         "  var status=document.getElementById('upstatus');"
-        "  status.innerHTML='<small>" + i18n.t("home_sending", lang) + "</small>';"
+        "  var btn=document.getElementById('upbtn');"
+        "  btn.disabled=true;"
+        "  status.innerHTML='<small>" + billboard._esc(i18n.t("home_sending", lang)) + "</small>';"
         "  fetch('/upload',{method:'POST',headers:{'X-Filename':file.name,'X-Hash':hash},body:file})"
         "    .then(function(r){return r.text();})"
-        "    .then(function(t){status.innerHTML='<small>'+t+'</small>';});"
+        "    .then(function(t){"
+        "      status.innerHTML='<small>'+t+'</small>';"
+        "      document.getElementById('upfile').value='';"
+        "      btn.disabled=false;"
+        "    })"
+        "    .catch(function(){"
+        "      status.innerHTML='<small>" + billboard._esc(i18n.t("home_upload_error", lang)) + "</small>';"
+        "      btn.disabled=false;"
+        "    });"
         "}"
         "function sendMsg(){"
         "  var input=document.getElementById('in');"
@@ -710,7 +743,7 @@ def _render_admin_file_list_page(lang, names, pw):
         file_section = "<p class='sub'>" + i18n.t("files_none_yet", lang) + "</p>"
     else:
         items = "".join(
-            "<li><label><input type='checkbox' name='f' value='" + _url_encode(n) + "'> "
+            "<li><label><input type='checkbox' name='f' value='" + billboard._esc(n) + "'> "
             + billboard._esc(n) + "</label></li>"
             for n in names
         )
@@ -726,7 +759,62 @@ def _render_admin_file_list_page(lang, names, pw):
         "<h1>" + i18n.t("admin_header", lang) + "</h1>"
         "<p class='sub'>" + i18n.t("admin_select_intro", lang) + "</p>"
         + file_section
+        + _render_admin_billboard_section(lang, pw)
         + _render_admin_settings_section(lang)
+    )
+
+
+def _render_admin_billboard_section(lang, pw):
+    """Moderation for the walk-up bulletin board -- added on request,
+    specifically for removing something inappropriate rather than
+    waiting up to 72 hours for BILLBOARD_TTL_SECONDS to age it out on
+    its own. Same password-gated pattern as file deletion above: one
+    hidden field carries the already-validated password forward,
+    checked again for real by /admin/delete_post rather than trusted
+    just because it arrived with the form.
+
+    Each post is identified by its own timestamp (see
+    billboard.delete_entry's own docstring for why that's a reasonable
+    identifier here without adding a separate ID field to the storage
+    format), carried as the checkbox's value -- HTML-escaped for safe
+    embedding, not URL-encoded, the same fix that corrected the file
+    checkboxes after a real double-encoding bug there.
+
+    Calls billboard._prune_and_write() first, with no new entry, purely
+    to guarantee every entry has a REAL, stored timestamp before any
+    checkbox is built. Without this, a post that predates the
+    auto-purge feature and hasn't been through a prune pass yet (the
+    board's very first admin visit after upgrading, before anyone has
+    posted since) reads back from _read_entries() with ts=None --
+    which rendered as a checkbox value='None', and deleting it always
+    silently failed: delete_entry() can only ever match a stored line
+    with a real, three-field timestamp, and an old, never-pruned entry
+    is still stored as its original two-field line with no timestamp
+    at all. Confirmed directly: that exact sequence reproduced "0
+    deleted" with the entry still present, matching a real report.
+    Pruning here first means _read_entries() right after always sees
+    the same freshly-stamped timestamp that gets written to disk, so
+    the two can never disagree.
+    """
+    billboard._prune_and_write()
+    entries = billboard._read_entries()
+    if not entries:
+        return (
+            "<h2 class='sub'>" + i18n.t("admin_billboard_header", lang) + "</h2>"
+            "<p class='sub'>" + i18n.t("billboard_nothing_yet", lang) + "</p>"
+        )
+    items = "".join(
+        "<li><label><input type='checkbox' name='ts' value='" + billboard._esc(str(ts)) + "'> "
+        + billboard._esc(text) + " <small>&mdash; " + billboard._esc(sig) + "</small></label></li>"
+        for sig, text, ts in reversed(entries)
+    )
+    return (
+        "<h2 class='sub'>" + i18n.t("admin_billboard_header", lang) + "</h2>"
+        "<form method='POST' action='/admin/delete_post'>"
+        "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+        "<div class='panel'><ul class='files'>" + items + "</ul></div>"
+        "<button type='submit'>" + i18n.t("admin_delete_selected", lang) + "</button>"
+        "</form>"
     )
 
 
@@ -1374,6 +1462,50 @@ async def _handle(reader, writer):
                 names = fserv._list_files() if fserv.sd_ok else []
                 await _send(writer, "200 OK", _page(_render_admin_file_list_page(lang, names, pw)))
 
+        elif method == "POST" and path.startswith("/admin/delete_post"):
+            # Must come BEFORE the /admin/delete branch below --
+            # "/admin/delete_post".startswith("/admin/delete") is True,
+            # so without this ordering the broader check would catch
+            # these requests first and try to delete files named after
+            # timestamps that don't exist, silently doing nothing.
+            # Confirmed directly before writing this rather than
+            # assumed: a startswith-based router means more specific
+            # paths always have to come first.
+            #
+            # Same re-validation discipline as file deletion: the
+            # password arrived as a hidden field, convenient but not
+            # trustworthy on its own, so it's checked here exactly as
+            # strictly as everywhere else that accepts one. Timestamps
+            # arrive the same repeated-field way filenames do for a
+            # batch file delete -- one ts=... occurrence per checked
+            # post, collected into a list rather than only keeping the
+            # last match.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            pw = ""
+            timestamps = []
+            for kv in body.decode().split("&"):
+                if kv.startswith("ts="):
+                    timestamps.append(billboard._url_decode(kv[3:]))
+                elif kv.startswith("admin_pass="):
+                    pw = billboard._url_decode(kv[11:])
+            if not _check_admin_pw(pw):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                deleted_count = 0
+                for ts_str in timestamps:
+                    if ts_str and billboard.delete_entry(ts_str):
+                        deleted_count += 1
+                # Same reasoning as the file-delete route: re-render
+                # the updated admin page directly rather than redirect
+                # to the bare /admin login, so a successful delete is
+                # immediately visible instead of looking like nothing
+                # happened.
+                lang = i18n.get_lang(identifier)
+                names = fserv._list_files() if fserv.sd_ok else []
+                notice = "<p class='sub'>" + i18n.t("admin_post_deleted_notice", lang, n=deleted_count) + "</p>"
+                await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
+
         elif method == "POST" and path.startswith("/admin/delete"):
             # Re-validates the password for real -- it arrived as a
             # hidden field on the page above, which is convenient, not
@@ -1615,19 +1747,43 @@ async def _handle(reader, writer):
                                  "Upload interrupted (" + str(written) + " of " +
                                  str(length) + " bytes) — nothing was kept. Try again.",
                                  "text/plain")
-                elif is_slot:
-                    # Only mark the slot fulfilled once the bytes are
-                    # actually on disk -- marking it earlier would burn a
-                    # one-shot slot on an upload that never completed.
-                    table[hash_hex]["fulfilled"] = True
-                    fserv._save_json(fserv.AWAITING_FILE, table)
-                    await _send(writer, "200 OK", "Delivered to your awaiting slot.", "text/plain")
                 else:
-                    credited = fserv.credit_add(identifier, fserv.credit_cost(fname))
-                    if fserv.CREDITS_ENABLED:
-                        msg = "Uploaded. Your balance: " + str(credited)
-                    else:
-                        msg = "Uploaded. Thanks for bringing something."
+                    # The file itself is already safely on disk at this
+                    # point -- stream_to_file succeeded. Everything from
+                    # here on is bookkeeping (marking a slot fulfilled,
+                    # updating the credit ledger), and _save_json's own
+                    # fix already stops a write failure there from
+                    # raising -- but this try/except is a second,
+                    # independent layer specifically so that ANY future
+                    # exception in this bookkeeping, not just the one
+                    # already fixed, still can't turn a real, completed
+                    # upload into a response the client never receives.
+                    # Confirmed as a real, reported bug without this:
+                    # barkeep.py's own outer exception handler logs an
+                    # uncaught error server-side but was never built to
+                    # send a response for one this deep, so the file
+                    # could be genuinely, successfully written while the
+                    # browser's fetch() just hangs -- no success, no
+                    # error, nothing, indistinguishable from the upload
+                    # having failed outright.
+                    try:
+                        if is_slot:
+                            # Only mark the slot fulfilled once the bytes
+                            # are actually on disk -- marking it earlier
+                            # would burn a one-shot slot on an upload
+                            # that never completed.
+                            table[hash_hex]["fulfilled"] = True
+                            fserv._save_json(fserv.AWAITING_FILE, table)
+                            msg = "Delivered to your awaiting slot."
+                        else:
+                            credited = fserv.credit_add(identifier, fserv.credit_cost(fname))
+                            if fserv.CREDITS_ENABLED:
+                                msg = "Uploaded. Your balance: " + str(credited)
+                            else:
+                                msg = "Uploaded. Thanks for bringing something."
+                    except Exception as e:
+                        print("[barkeep] upload bookkeeping failed (file already saved):", e)
+                        msg = "Uploaded, but couldn't update your balance/slot record."
                     await _send(writer, "200 OK", msg, "text/plain")
 
         elif method == "GET" and path.startswith("/download"):

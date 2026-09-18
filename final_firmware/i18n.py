@@ -488,6 +488,11 @@ STRINGS = {
         "es": "Código de espera (opcional)",
     },
     "home_sending": {"fr": "Envoi…", "en": "Sending...", "es": "Enviando…"},
+    "home_upload_error": {
+        "fr": "échec de l'envoi — problème de connexion. réessaie.",
+        "en": "upload failed — connection problem. try again.",
+        "es": "error al subir — problema de conexión. intenta de nuevo.",
+    },
 
     # ---- Billboard ----
     "billboard_shelf_empty": {
@@ -549,6 +554,16 @@ STRINGS = {
         "fr": "{n} fichier(s) supprimé(s).",
         "en": "{n} file(s) deleted.",
         "es": "{n} archivo(s) eliminado(s).",
+    },
+    "admin_post_deleted_notice": {
+        "fr": "{n} message(s) supprimé(s).",
+        "en": "{n} post(s) deleted.",
+        "es": "{n} mensaje(s) eliminado(s).",
+    },
+    "admin_billboard_header": {
+        "fr": "Babillard",
+        "en": "Billboard",
+        "es": "Tablón",
     },
 
     "admin_theme_header": {"fr": "Thème", "en": "Theme", "es": "Tema"},

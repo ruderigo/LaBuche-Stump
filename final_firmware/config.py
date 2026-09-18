@@ -50,7 +50,7 @@ BOT_NAME = 'Concierge'
 # with a paragraph and do it again for the next three words. A greeting
 # on first contact says who this node is and what it offers; after that
 # the conversation is the point.
-MESH_GREETING = 'Bonjour Hi! I am Concierge on the Stump! An off-grid community node. A long-range encrypted mesh radio and a local high-bandwidth server, deliberately kept on separate hardware.'
+MESH_GREETING = 'Testing testing bonjour hi!'
 MESH_GREETING_MAX = 200
 
 # How often this node announces its LXMF identity to the mesh, in

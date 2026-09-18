@@ -136,8 +136,30 @@ def _load_json(path, default):
 
 
 def _save_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f)
+    """Writes data as JSON. Returns True/False rather than letting a
+    write failure propagate -- confirmed as a real, reported bug
+    without this: an upload's actual bytes could already be safely on
+    disk (stream_to_file finished fine) and the credit-ledger rewrite
+    right after it is what threw (a card at or near capacity, or any
+    other transient I/O hiccup), uncaught, all the way out through
+    barkeep.py's own outer exception handler -- which logs the error
+    server-side but was never designed to send a response for an
+    exception this deep, so the client got nothing back at all: no
+    success, no error, just a connection that closed with no HTTP
+    response. Paired with the client's fetch() having no .catch() of
+    its own (fixed alongside this), that combination left the upload
+    UI showing "Sending..." forever with zero indication anything had
+    gone wrong -- indistinguishable from the upload having silently
+    failed even when the file itself made it onto the card intact.
+    Every caller here already treats "couldn't persist this" as
+    recoverable rather than fatal to the surrounding request."""
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f)
+        return True
+    except OSError as e:
+        print("[fserv] failed to save", path, "--", e)
+        return False
 
 
 def _ledger():

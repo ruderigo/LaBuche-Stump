@@ -1,8 +1,6 @@
 # Project Stump — Beta A (Release)
 
-<p align="center">
-  <img src="demo.gif" alt="Project Stump Demo" width="500">
-</p>
+![demo](demo.gif)
 
 An off-grid community node. A long-range encrypted mesh radio and a
 local high-bandwidth server, deliberately kept on separate hardware.
@@ -59,6 +57,7 @@ assuming you know what "turn on hybrid" does.
 - [HTTP API](#http-api)
 - [Access control](#access-control)
 - [File storage](#file-storage)
+- [Billboard](#billboard)
 - [Direct messages](#direct-messages)
 - [Internationalization](#internationalization)
 - [The About page](#the-about-page)
@@ -523,7 +522,7 @@ mesh landing room existed.
 same test run, not yet exercised against a real mesh peer on real
 hardware.**
 
-### 4. The `/admin` page — file deletion and site customization
+### 4. The `/admin` page — file deletion, billboard moderation, and site customization
 
 A separate, narrower gate from the three above — not tied to
 `AUTH_MODE` or room tiers at all, and not part of `/files` anymore
@@ -555,6 +554,92 @@ password re-entry per file with nothing to select more than one at a
 time. Both problems came from the same root cause: admin controls
 living on a page every visitor already sees. Moving it to its own
 unlinked page removed both at once, not just the layout.
+
+**Deleting billboard posts.** Added on request, for removing something
+inappropriate without waiting up to 72 hours for the Billboard
+section's own auto-purge to age it out. The same login shows every
+current post as a checkbox (newest first) with enough of its text to
+identify it; `POST /admin/delete_post` re-validates the password the
+same strict way `/admin/delete` does, and calls
+`billboard.delete_entry()` for each one checked.
+
+Each post is identified by its own timestamp rather than a separate ID
+field added just for this — confirmed directly that MicroPython's
+`str(float(x))` round-trips exactly for real timestamps here, so
+comparing as strings (never re-parsing to float) sidesteps any
+formatting mismatch risk. `/admin/delete_post` had to be placed
+*before* the existing `/admin/delete` check in the router, not after —
+`"/admin/delete_post".startswith("/admin/delete")` is `True`, so a
+router matching by prefix means the more specific path always has to
+come first, or the broader, older check catches it instead and tries
+to delete files named after timestamps that don't exist.
+
+A real, reported bug found after this shipped: a post made *before*
+the auto-purge feature existed, and never touched by a prune pass
+since (a board's first admin visit after upgrading, before anyone had
+posted again to trigger one), reads back from `_read_entries()` with
+no timestamp at all — its stored line genuinely has only two fields,
+never three. That rendered as a checkbox with `value='None'`, and
+deleting it always silently failed: `delete_entry()` can only match a
+stored line that actually has three fields including a real
+timestamp, and a never-pruned old entry doesn't have one to match
+against. The delete request would succeed, report "0 message(s)
+deleted", and leave the post sitting there — the exact same *symptom*
+as the double-encoding bug that hit file deletion earlier, but a
+different cause underneath. Fixed by having the admin page trigger a
+prune pass (with no new post to add) before it ever reads the entries
+to build checkboxes from — every post gets a real, stored timestamp
+stamped onto it before the admin ever sees a checkbox, so what's
+displayed and what's on disk can never disagree. Confirmed directly by
+reproducing the exact old-format, never-pruned scenario end to end
+(the entry used to be genuinely undeletable; it now deletes correctly)
+and re-confirming the already-working, already-timestamped case is
+completely unaffected.
+
+That same fix immediately introduced a second, more serious bug of its
+own, also real and reported: selecting one post and deleting it
+emptied the *entire* board. `_prune_and_write()` computes `now` once
+per call and, before this, reused that exact value verbatim for every
+untimestamped entry it stamped in that same call — so several old
+posts landed on the *identical* timestamp instead of merely close
+ones. `delete_entry()` identifies a post by timestamp alone, with no
+separate ID field (see its own docstring for that reasoning), so
+"delete the post at this timestamp" matched and removed every post
+sharing it — one checkbox, whole board gone. Confirmed directly by
+reproducing it exactly: three distinct old posts, one admin page load,
+all three landing on one shared value, one checkbox deleting all
+three.
+
+Fixed in two layers, not one. First, the actual cause: each
+untimestamped entry stamped within the same `_prune_and_write()` call
+now gets a distinct, microsecond-scale offset from `now` rather than
+the bare, shared value — unique for identification purposes while
+staying "now" for everything that reads it (the 72-hour TTL check,
+display order). Second, independent of that fix and kept regardless:
+`delete_entry()` now only ever removes the *first* line it finds
+matching a given timestamp, never every line that matches — the
+original code had no such limit, which is what let one match turn into
+three removals. If some other, not-yet-anticipated cause ever produces
+a collision again, one checkbox can now only ever remove one post,
+never silently take out everything sharing its identifier with it.
+Confirmed directly both ways: the exact reported scenario now deletes
+exactly one and leaves the other two, and a timestamp collision forced
+directly (bypassing the fixed stamping logic entirely, standing in for
+any future cause this hasn't anticipated either) still only ever
+removes one of the two colliding posts, never both.
+
+Checked whether the file-deletion flow above shares the same flaw,
+since both now identify what to delete from a value carried in a
+checkbox. It doesn't, structurally: a file is deleted by
+`os.remove(SHARED_DIR + "/" + filename)` — the filesystem itself
+guarantees two files can never share a name in the same directory, so
+there is no "computed value that can collide" step for files the way
+a timestamp is computed and can coincide for posts. Each checked
+filename maps to exactly one real, distinct path; there is nothing
+equivalent to fix there. Re-ran the full existing file-deletion test
+suite alongside this fix to confirm that conclusion holds against the
+real code, not just the reasoning above — no changes needed, and none
+made.
 
 **Theme and logo.** The same login also unlocks four theme presets
 (Default/Amber, Phosphor, OLED, Paper — CSS custom properties switched
@@ -607,10 +692,17 @@ re-renders the updated file list directly with a "N file(s) deleted"
 notice (not a redirect to the bare login form — see the real,
 confirmed bug directly below for exactly why that distinction matters
 in practice); `/admin/delete` called directly with a wrong password
-refuses even when the file list is valid; and the settings section's
+refuses even when the file list is valid; the settings section's
 rendered script was extracted and syntax-checked for all three
 languages, confirming no leaked placeholders and no repeat of the
-quoting bug described above.
+quoting bug described above; and billboard moderation was tested the
+same way — a real post shown as a checkbox on the admin page, its
+exact timestamp extracted from the rendered HTML and submitted back
+precisely the way a browser would, confirming only the targeted post
+is removed and the others survive untouched, a wrong password on
+`/admin/delete_post` correctly refusing while the post survives, and
+`/admin/delete` (files) confirmed unaffected by adding the new route
+next to it.
 
 A real, reported bug found after this shipped: the admin password
 travels forward as a hidden field, HTML-escaped for safe embedding --
@@ -632,6 +724,32 @@ ten places across three files, all of which write single-quoted
 attributes. Verified the fix with the same real-password-with-apostrophe
 simulation (now deletes correctly) and confirmed an ordinary password
 with no special characters is completely unaffected.
+
+A second, related but distinct bug, reported after the first fix
+shipped: deleting a real file with a space in its name (`IMG_0005_2
+copy.jpg`) reported success but deleted nothing. Root cause this time
+wasn't escaping but double encoding -- each checkbox's `value`
+attribute was being *pre* URL-encoded (`IMG_0005_2%20copy.jpg`) before
+ever reaching the browser. A browser encodes whatever's actually in a
+field at submit time regardless, so the already-encoded `%` character
+got encoded a second time, and the server's single decode pass landed
+on `IMG_0005_2%20copy.jpg` -- still not the real filename, so nothing
+matched on disk and the delete silently did nothing while reporting
+`0 file(s) deleted`, not an error. Confirmed precisely by simulating
+the same real browser encode-at-submit behavior the apostrophe fix's
+own test used, tracing the exact string through each step. Fixed by
+no longer pre-encoding the checkbox value at all -- form field values
+are plain text; the browser's own submission logic is what URL-encodes
+them, exactly once, and the server's existing decode step was already
+correct for that single round of encoding. The five other places this
+project already uses URL-encoding (`/download?f=`, `/tool?f=`,
+`/about/img?f=`, and similar real `href`/`src` links) were checked and
+left untouched, since those are genuine URLs a browser navigates to
+directly rather than a form field it re-encodes -- the two cases need
+opposite handling, and only the checkbox case had it backwards.
+Verified with the literal reported filename, and with a batch delete
+mixing spaced and plain filenames together, confirming only the
+selected files are removed and nothing else.
 
 ---
 
@@ -657,6 +775,161 @@ actually hold it.
 there's room, doesn't over-evict), confirmed the three protected
 directories are completely untouched, and confirmed the correct `507`
 refusal when even a full eviction isn't enough.
+
+**A real, reported bug: uploads that appeared to just silently not
+work.** Not a problem with the storage logic above — the actual file
+transfer (`stream_to_file`) was, and stayed, solid the whole time. The
+break was one step later. `CREDITS_ENABLED` defaults to `True`, so
+every single upload rewrites the entire credit ledger to the SD card
+through `_save_json()`, and that function had no exception handling at
+all. A write failure there — a card at or near the 75% ceiling above,
+or any other transient I/O hiccup — raised straight through
+`credit_add()`, through the `/upload` route, uncaught, out to
+`barkeep.py`'s own outer exception handler. That handler logs the
+error server-side but was never built to send a response for a
+failure this deep — it just closes the connection with nothing sent
+back. The file could be genuinely, successfully sitting on the card at
+that exact moment, and the client would still receive nothing at all:
+no success, no error. Made worse by a second, independent gap on the
+client side — the upload button's own `fetch()` chain had no
+`.catch()` — so the visible result was the status line stuck on
+"Sending..." forever, indistinguishable from the upload having failed
+outright even when it hadn't.
+
+Fixed at three layers, not one. `_save_json()` now catches a write
+failure and returns `True`/`False` instead of raising — confirmed its
+other two callers (`credit_add()`, `mark_awaiting()`) already treat a
+failed save as non-fatal and proceed regardless, so neither needed to
+change. The `/upload` route's own post-write bookkeeping (marking a
+slot fulfilled, adding credit) is now wrapped in its own `try`/`except`
+too, independent of the fix above — specifically so ANY future
+exception there, not just this one, still ends in a real response
+("Uploaded, but couldn't update your balance/slot record.") instead of
+nothing. And the upload button's JS gained the missing `.catch()`
+(showing a clear connection-problem message and re-enabling the
+button rather than leaving it stuck), a disabled state for the
+duration of the request (guarding against a second, overlapping
+upload from an impatient repeat click), and clears the picked file
+once a response actually arrives, success or not, as a visible sign
+something happened.
+
+**Status: tested at every layer, not just the one that was broken** —
+a genuine ledger-write failure forced directly confirms the client
+still receives a real `200 OK` and the file is genuinely saved despite
+it; the existing ordinary-upload, empty-upload, no-SD-card, and
+awaiting-slot-fulfillment paths were all re-run afterward to confirm
+none of them regressed from the restructuring; and the client-side fix
+was tested against a real DOM (via jsdom) executing the actual
+extracted JavaScript, covering both a normal successful upload (button
+disabled then re-enabled, file input cleared) and a simulated network
+failure (a clear error shown, button re-enabled, not stuck).
+
+**That fix immediately broke uploading completely, on the default
+language, for a much worse reason.** Real, reported symptom: no
+"Sending..." at all anymore, no network request even attempted,
+clicking Envoyer did visibly nothing. The new French translation added
+for the fix above — *"échec de l'envoi — problème de connexion.
+réessaie."* — has an apostrophe in *l'envoi*, and it was embedded
+directly into a single-quoted JavaScript string literal with no
+escaping at all. On the French page (the default language) that
+apostrophe closes the string early and the entire `<script>` block on
+the home page fails to parse as JavaScript — not just `doUpload()`,
+but `sendMsg()` and the Enter-key-to-send listener too, since all three
+live in that one script tag. This is the exact same bug class this
+project has hit once before (see the RRC client's own DM sidebar
+headers, fixed the same way, earlier in this document) — a translation
+containing an apostrophe breaking a JS string it was never escaped
+for — reintroduced here because the new strings this fix added went in
+the same unescaped way the *existing* `BOT_NAME` value on this exact
+page had already been fixed against, without applying that same
+lesson to what was new.
+
+Confirmed precisely, not guessed: rendered the actual French page,
+loaded it into a real DOM, and clicked the real, rendered upload
+button rather than calling `doUpload()` directly — reproducing a
+`ReferenceError: doUpload is not defined` and, underneath it, the
+literal `SyntaxError` from the malformed script. Fixed by escaping
+every dynamic string this page's script block embeds — the same
+HTML-entity escaping (`&#39;` for an apostrophe, decoded back to a
+normal apostrophe once it lands in `innerHTML`) already used for
+`BOT_NAME` on this identical page, applied now to `home_sending`,
+`home_upload_error`, and `home_you_label` as well, rather than a
+narrower fix to only the one string that happened to break first.
+Audited every other `<script>` block in the firmware for the same
+unescaped-i18n pattern afterward — the admin settings script and the
+RRC client both already use proper JSON-based JS-escaping, and the
+theme-startup and About-page scripts embed no translated text at all —
+confirming this was the one instance, not the first of several.
+
+**Status: reproduced and fixed against the real rendered page, not a
+synthetic one** — the broken French page confirmed genuinely
+unparseable before the fix (both the click's `ReferenceError` and the
+underlying `SyntaxError` from the malformed script), the same fixed
+page confirmed working after it (a real click on the real button
+correctly reaches `fetch('/upload', ...)` with the right filename and
+headers), the network-failure `.catch()` path re-confirmed to display
+correctly with the apostrophe intact and readable, and English and
+Spanish (never broken, since neither of those two translations
+happened to contain an apostrophe) re-confirmed unaffected — plus
+`sendMsg()` and the Enter-key listener, broken as collateral damage by
+the same failed parse despite neither being touched directly,
+confirmed working again as a consequence of the same fix.
+
+---
+
+## Billboard
+
+Same retention model as Direct messages below, applied on request to a
+genuinely different kind of storage: DMs are in-memory and vanish on
+reboot by architecture; billboard posts are appended to a persistent
+file (SD card, or internal flash with no card fitted) that, before
+this, grew forever with no pruning at all. `MAX_ENTRIES_SHOWN` already
+existed, but it only ever limited what the `/billboard` page displays
+— the underlying file kept every post ever made, unbounded, even
+though only the newest 50 were ever shown.
+
+Auto-purge isn't the only way a post disappears — see "The `/admin`
+page" above for manually removing something inappropriate without
+waiting on the 72-hour window below.
+
+A post is now kept for **up to 72 hours since it was made**
+(`billboard.BILLBOARD_TTL_SECONDS`), checked first and given priority
+over a separate, larger storage ceiling
+(`MAX_ENTRIES_STORED`, 150) that exists purely as a safety valve for a
+flood of posts all arriving within the same 72 hours — the identical
+relationship `rrc.py`'s own `DM_TTL_SECONDS` has with `MAX_DMS_PER_USER`,
+applied here on request. Pruning runs on every new post, rewriting the
+storage file to a temp file and renaming over the original — a rewrite
+has a real window where the file could be left empty or half-written
+if power drops mid-write, which a plain append never risked; the
+rename is atomic on the filesystems this runs on, so the live file is
+never observably incomplete.
+
+Posts written before this shipped have no timestamp at all — the
+storage format only ever recorded a signature and the text. Rather
+than treat that as either "ageless, keep forever" or "unknown, delete
+on sight" (which would have wiped an existing board's entire history
+the moment anyone posted again after upgrading), an untimestamped post
+is treated as posted right now the first time it's seen, and stamped
+with a real timestamp going forward — a fresh 72-hour window from the
+upgrade point, not instant deletion of whatever was already there.
+
+**Status: tested against a real, temporary file, not mocked** — a
+plain round-trip confirms posts are stored with a real timestamp; an
+old-format post with no timestamp at all survives a prune and is
+stamped with one close to the exact moment it was first re-read, not
+deleted; a post older than 72 hours is genuinely removed on the next
+prune while one just inside the window survives; 80 posts made within
+the window all survive in storage even though the display still only
+shows 50, confirming the two limits are independent; and a real,
+found-through-testing off-by-one — reaching the storage ceiling
+exactly, then posting one more, used to leave the file one entry over
+the ceiling, since the original design pruned by time *before*
+appending without re-checking the count *after* — is fixed by pruning
+and appending in a single pass, the same way `rrc.py`'s own
+`send_dm()` re-checks its count after appending rather than only
+before. Confirmed directly at that exact boundary: at the ceiling,
+one more post, storage stays at the ceiling, not one over.
 
 ---
 
@@ -706,6 +979,56 @@ stayed in English regardless of language), and the duplicate-exclusion
 fix were all tested by executing the actual extracted JavaScript
 against a mocked DOM, not just read — including reproducing the exact
 duplicate-listing scenario a screenshot caught.
+
+**Leaving a DM back to the same room.** Three real, reported symptoms
+— a duplicate DM thread for the same person, DM content appearing to
+persist into `#main`, and a confusing "you're already in #main" right
+after closing a DM — turned out to share one root cause, plus a
+genuinely separate second bug.
+
+*The shared root cause*: opening a DM never changes which room the
+server has you in — DMs are a parallel channel, not a room switch, by
+design (see "Starting one" above). But clicking a room in the sidebar
+to leave a DM view always sent `/join <room>` unconditionally, even
+for the room the server already had you in the whole time. The server
+correctly replied `join_already` ("you're already in #room") — true,
+but confusing right after closing a DM — and because the log-clearing
+logic only ever fired on an *actual* room change (`d.room!==room`,
+never true here since the room never changed), that reply landed
+straight on top of whatever the DM thread had left sitting in the log,
+which is what made DM content look like it was persisting into
+`#main`. Fixed by having the room-click handler check whether the
+clicked room is the one the server already has the client in: if so,
+exiting DM view is now purely a local change — clear the log directly,
+no `/join` sent at all, so `join_already` can never fire from this
+path. A genuine switch to a *different* room still sends `/join`
+exactly as before, confirmed directly with a real DOM test.
+
+That fix also closes a second issue found while testing it: messages
+that arrive in `#main` while a DM is open are correctly skipped from
+rendering (so they don't leak into the DM thread), but `lastId` still
+silently advances past them — before this, returning to `#main`
+would permanently miss them, since the next poll only asks for
+messages newer than an `lastId` that had already passed them by.
+Leaving a DM now restores `lastId` to what it was *before* the DM was
+opened, so the next poll correctly re-fetches and shows everything
+that arrived in the meantime — confirmed directly by reproducing that
+exact scenario.
+
+*The separate bug*: `rrc.py`'s own nick lookup
+(`find_client_by_nick()`) is deliberately case-insensitive, so a DM
+to `BOB` still reaches a user registered as `Bob` — but the client's
+`dmThreads` object is a plain JS object keyed by whatever string was
+actually typed. Typing `/msg BOB hello` keyed the sent side `"BOB"`,
+while Bob's own reply arrived with his real, registered nick `"Bob"`
+and landed in a *separate* `dmThreads` entry — one conversation split
+across two sidebar rows, which is exactly what "duplicate DM" looks
+like. Fixed by resolving a typed target against the current, known
+user list (case-insensitively, matching the server's own resolution)
+before ever using it as a `dmThreads` key, falling back to the typed
+text unresolved only if no current match exists. Confirmed directly:
+typing a wrong-case name now resolves to the one real thread, and a
+reply from that person lands in the same thread rather than a new one.
 
 ---
 
@@ -948,6 +1271,82 @@ Python) a given deployed board actually loads.
   "is the Heltec powered on" guidance, which was written assuming the
   external-router case where the technician's computer and the Heltec
   naturally share a network already.
+- `--diag`'s serial bridge and SD card checks both run `mpremote`
+  against the board's USB port from the technician's computer, same as
+  the Heltec Bridge check above runs a TCP connect from that same
+  computer rather than the CAM. If the board was just power-cycled (or
+  the technician just switched their own Wi-Fi to the CAM's own hotspot
+  to satisfy the bridge check above), the USB-CDC serial device can
+  take a moment to fully settle on the host OS, and `mpremote` reports
+  this as "failed to access PORT (it may be in use by another
+  program)" — a connectivity failure, not evidence about the SD card
+  at all. This used to be misdiagnosed: any SD card check failure,
+  including this one, triggered "Card looks unusable as-is. Wipe and
+  reformat it now?" — a real, reported case where a board's SD card had
+  already passed a genuine check minutes earlier, and the *only* thing
+  that had changed was the technician's own network switching to reach
+  the Heltec Bridge, not anything about the card. `sd_card_status()`
+  now distinguishes a connectivity failure (mpremote couldn't even
+  reach the board, or `fserv.py` isn't uploaded so `import fserv`
+  itself failed — the pre-existing fallback message already
+  anticipated that case) from a genuine one (the board actually ran
+  `fserv.mount_sd()` and it genuinely returned `False`) — the wipe
+  prompt is offered only for the latter now. Confirmed directly against
+  the exact reported error text: a connectivity failure now prints
+  guidance about closing whatever else has the port open instead of
+  offering to wipe, while a real, board-reported mount failure still
+  offers the wipe prompt exactly as before.
+- `--diag` has a fifth check, `cam_online`, added after a real report
+  of a fully working, visitor-serving node where the four checks above
+  still added up to "NOT CERTIFIED" purely because of a laptop-side USB
+  port issue (see the `sd_card_status` note directly above) that had
+  nothing to do with the device. None of `serial_bridge`, `sd_card`,
+  `radio`, or `heltec_bridge` actually confirm the one thing a real
+  visitor experiences: that the CAM's own HTTP server is up and
+  answering correctly. `cam_online` does, with a plain HTTP GET against
+  the CAM's own hotspot address (always up at that fixed address
+  regardless of what else the CAM does or doesn't join) and a check
+  that the response genuinely looks like this project's own BarKeep
+  page, not just that something answered.
+
+  This does **not** turn a "NOT CERTIFIED" verdict into "CERTIFIED" —
+  `serial_bridge` and `sd_card` still matter for whether *this
+  computer* can reconfigure the board over USB serial later, a
+  genuinely separate concern from whether it works for a visitor
+  today, and silently hiding one behind the other would just be the
+  same kind of misleading conclusion in the opposite direction. Instead,
+  when the verdict is "NOT CERTIFIED" and `cam_online` specifically
+  passed, a clarifying note is added directly beneath it, saying
+  plainly that the web server is confirmed live and visitors are
+  unaffected, while naming what's actually still unconfirmed (USB
+  reconfiguration from this laptop) rather than leaving the technician
+  to guess whether "NOT CERTIFIED" means the node is actually broken.
+
+  Confirmed directly by reproducing the exact reported scenario end to
+  end: `serial_bridge`/`sd_card` failing with the port-busy signature,
+  `heltec_bridge` and `cam_online` both passing, and the resulting
+  summary correctly staying "NOT CERTIFIED" while adding the clarifying
+  note underneath it — plus the failure case (wrong or no response from
+  192.168.4.1), the skip case for both Heltec roles (neither runs a web
+  server), and the full-success case confirming the note only ever
+  appears when it's actually needed, never alongside a clean
+  "CERTIFIED FOR FIELD DEPLOYMENT."
+- Both network-dependent checks (`heltec_bridge`, `cam_online`) now
+  retry for up to 65 seconds before giving up, added after a real
+  report of both failing on a genuinely healthy node simply because
+  `--diag` ran immediately after a reboot — a real, measured boot time
+  of close to a minute for the CAM's own WiFi join, AP bring-up, and
+  HTTP server start, none of which `serial_bridge`/`sd_card` wait on
+  since MicroPython's own REPL over USB is available far earlier in
+  the boot sequence than the network stack is. Retrying is free when
+  the board is already fully up — the first attempt just succeeds
+  immediately, confirmed directly by testing that case adds no
+  measurable delay at all — and only actually waits when the board
+  genuinely isn't ready yet, printing a countdown so the run doesn't
+  look hung. A check that's genuinely, persistently down still reports
+  FAIL after the full 65 seconds — confirmed directly rather than
+  assumed — this closes a real false-failure window, it doesn't mask
+  real ones.
 
 ---
 

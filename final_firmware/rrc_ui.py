@@ -152,8 +152,21 @@ var log=document.getElementById('log');
 // per recipient (rrc.py's _dms). Grouping by sender, tracking unread
 // counts, and remembering which thread is currently open all happen
 // here, not on the board.
-var dmThreads={}, dmUnread={}, viewingDM=null;
+var dmThreads={}, dmUnread={}, viewingDM=null, lastIdBeforeDM=null;
 var inp=document.getElementById('in');
+// The most recent user list from a poll, in each person's own
+// server-registered case. find_client_by_nick() on the server is
+// deliberately case-insensitive (so a DM to "BOB" still reaches
+// "Bob"), but dmThreads here is a plain object keyed by whatever
+// string was actually used -- typing "/msg BOB hello" would key the
+// sent side "BOB" while Bob's own reply arrives with m.nick "Bob",
+// splitting one conversation into two separate sidebar entries.
+// Resolving a typed target against this list before using it as a key
+// keeps both sides of a conversation under the one case Bob actually
+// registered with. Confirmed directly: without this, typing a
+// different case than someone's real nick reproduces exactly that
+// split-thread symptom.
+var knownUsers=[];
 
 // Escapes the five characters that matter in HTML. The previous
 // version set textContent on a throwaway div and read back innerHTML,
@@ -189,15 +202,46 @@ function render(m){
 }
 
 function setRooms(list, here, users){
+  knownUsers=users||[];
   var box=document.getElementById('rooms');
   box.innerHTML='';
   list.forEach(function(r){
     var d=document.createElement('div');
     d.textContent='#'+r;
     if(!viewingDM && r===here) d.className='active';
-    // Clicking a room always exits DM view, back to normal chat --
-    // the two are mutually exclusive display modes, never both at once.
-    d.onclick=function(){ viewingDM=null; send('/join '+r); };
+    // Clicking a room the server already has you in -- true for EVERY
+    // room click while viewing a DM, since opening one never actually
+    // changes your room server-side -- used to still send /join
+    // unconditionally. The server correctly replied "you're already in
+    // #room" (join_already in rrc.py), which is true but confusing
+    // right after leaving a DM, and because the log-clearing below only
+    // ever triggered on an ACTUAL room change (never true here), that
+    // reply landed straight on top of whatever the DM thread had left
+    // in the log -- confirmed as the real, reported cause of DM
+    // content appearing to persist into #main. Exiting DM view back to
+    // the SAME room is purely a local display change now: clear the
+    // log directly, restore lastId to what it was before the DM opened
+    // (advanced silently by messages that arrived and were correctly
+    // skipped from rendering while viewingDM was set, but never
+    // actually shown -- restoring it re-fetches them on the next poll
+    // instead of leaving them permanently missed), and re-poll, with no
+    // /join sent to the server at all. A genuine room change (r is
+    // NOT the one the server already has you in) still sends /join
+    // exactly as before.
+    d.onclick=function(){
+      var wasViewingDM=!!viewingDM;
+      viewingDM=null;
+      if(r===room){
+        if(wasViewingDM){
+          log.innerHTML='';
+          if(lastIdBeforeDM!==null){ lastId=lastIdBeforeDM; lastIdBeforeDM=null; }
+          renderDMSidebar();
+          poll();
+        }
+      } else {
+        send('/join '+r);
+      }
+    };
     box.appendChild(d);
   });
   renderUserList(users||[]);
@@ -272,6 +316,11 @@ function renderDMSidebar(){
 }
 
 function openDM(sender){
+  // Only remember lastId the FIRST time DM view is entered (not on
+  // every switch between two open threads) -- so #main round-trips
+  // back to whatever lastId was before ANY DM was opened, not
+  // whichever thread happened to be open most recently.
+  if(!viewingDM){ lastIdBeforeDM=lastId; }
   viewingDM=sender;
   dmUnread[sender]=0;
   log.innerHTML='';
@@ -379,6 +428,21 @@ function send(text){
        render(mine);
      } else if(directMsgMatch){
        var target=directMsgMatch[1], msgBody=directMsgMatch[2];
+       // Resolve the typed target against the current, known user list
+       // to the SAME case that person actually registered with --
+       // matching rrc.py's own find_client_by_nick, which is
+       // deliberately case-insensitive server-side. Without this,
+       // typing "/msg BOB hello" keys this client's own dmThreads
+       // "BOB", but Bob's own reply arrives with m.nick "Bob" (his
+       // real, registered case) and lands in a SEPARATE dmThreads
+       // entry -- one conversation split into two sidebar rows,
+       // confirmed directly as a real, reported duplicate-DM symptom.
+       // Falls back to the typed text unresolved if no current match
+       // exists (an unknown or since-departed nick) -- the server's
+       // own reply below still covers that case correctly either way.
+       for(var i=0;i<knownUsers.length;i++){
+         if(knownUsers[i].toLowerCase()===target.toLowerCase()){ target=knownUsers[i]; break; }
+       }
        // The same two checks rrc.py's own /msg handling makes BEFORE
        // even attempting send_dm (messaging yourself, an empty body)
        // -- checked here too so this doesn't echo into a thread for a

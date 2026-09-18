@@ -185,7 +185,7 @@ def _describe_folder(path):
     return "OK (%s)" % v
 
 
-REQUIRED_TOOLS = ["esptool.py", "mpremote", "rnodeconf"]
+REQUIRED_TOOLS = ["esptool", "mpremote", "rnodeconf"]
 
 # Mirrors fserv.py's own fallback weights -- shown as the pre-filled
 # defaults in the wizard, so pressing Enter through the custom prompts
@@ -200,8 +200,8 @@ DEFAULT_CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
 #   [print(f'    {str(f.relative_to(\"final_firmware\"))!r}: {hashlib.sha256(f.read_bytes()).hexdigest()[:16]!r},')
 #    for f in sorted(Path('final_firmware').rglob('*')) if f.is_file()]"
 EXPECTED_FILE_HASHES = {
-    "barkeep.py": "542e5b3ee090b89f",
-    "billboard.py": "0802a1334a6012c3",
+    "barkeep.py": "a67486f0dd0f7cfc",
+    "billboard.py": "a351fc95e0ffdf0c",
     "boot_common.py": "d1f60dd4434752bf",
     "captive_portal.py": "8c2a0ee90cdc1e04",
     "config.py": "40524df2178b7afe",
@@ -210,14 +210,14 @@ EXPECTED_FILE_HASHES = {
     "docs/HIDDEN_FEATURES.md": "1a530af86fb36e05",
     "example_node.py": "e9c4849ce755a3f2",
     "flasher_ui.py": "f0af338707d46d25",
-    "fserv.py": "ea51245f3481c84e",
+    "fserv.py": "88a2722727eed728",
     "fservbot/README.md": "4ab77b9e51dd5edc",
     "fservbot/__init__.py": "f164090d81312df8",
     "fservbot/core.py": "18ed35f2e0710d37",
     "fservbot/install.py": "8d6f5e5870ce5437",
     "fservbot/plugin.json": "bc8aca2fefb8b9e7",
     "fservbot/templates.py": "120b25ba5d326958",
-    "i18n.py": "b42f91fb2c6b9877",
+    "i18n.py": "4e8a737716401af6",
     "lib/bz2_fast_xtensawin.mpy": "ac55d9eda2126432",
     "lib/ed25519_fast_xtensawin.mpy": "96e74dac45f91687",
     "lib/ed25519_iram.mpy": "96e74dac45f91687",
@@ -228,7 +228,7 @@ EXPECTED_FILE_HASHES = {
     "peripherals/adc_reader.py": "50a393bfa61641d4",
     "rrc.py": "afff9f4da003f317",
     "rrc_mesh.py": "f981f4669737a96e",
-    "rrc_ui.py": "e533c3dc5a5b009a",
+    "rrc_ui.py": "0438e18394467c08",
     "stumpid/README.md": "da60b797b09855c3",
     "stumpid/__init__.py": "83462abf471caca1",
     "stumpid/core.py": "d7f755af8f6b5494",
@@ -1272,7 +1272,17 @@ def flash_cam_micropython(port, firmware_path=None):
     firmware_path = str(resolved)
 
     print("Erasing flash...")
-    ok, out = run(["esptool.py", "--port", port, "erase_flash"], timeout=120)
+    # esptool v5 renamed every underscore-style command/option to hyphens
+    # (erase_flash -> erase-flash, write_flash -> write-flash below, and
+    # the esptool.py entry point itself deprecated in favor of plain
+    # esptool) -- confirmed directly against a real flash run and against
+    # esptool's own v5 migration guide, which states this covers ALL
+    # commands and options, not just this one. The old spellings still
+    # work today (that's why a real run using them succeeded, just with
+    # deprecation warnings on every line), but esptool's own warning says
+    # the .py suffix specifically will be removed entirely in a future
+    # major release -- worth fixing now rather than after that.
+    ok, out = run(["esptool", "--port", port, "erase-flash"], timeout=120)
     print(out.strip())
     if not ok:
         # "No serial data received" / "Failed to connect" almost always
@@ -1284,7 +1294,7 @@ def flash_cam_micropython(port, firmware_path=None):
             if new_port:
                 port = new_port          # everything below must use the NEW port
                 print(f"\nRetrying erase on {port} ...")
-                ok, out = run(["esptool.py", "--port", port, "erase_flash"], timeout=120)
+                ok, out = run(["esptool", "--port", port, "erase-flash"], timeout=120)
                 print(out.strip())
         if not ok:
             print("FAILED at erase step.")
@@ -1295,7 +1305,7 @@ def flash_cam_micropython(port, firmware_path=None):
 
     print("Writing MicroPython image...")
     ok, out = run(
-        ["esptool.py", "--port", port, "--baud", "460800", "write_flash", "-z", "0x0", firmware_path],
+        ["esptool", "--port", port, "--baud", "460800", "write-flash", "-z", "0x0", firmware_path],
         timeout=180,
     )
     print(out.strip())
@@ -2304,6 +2314,21 @@ def sd_card_status(port):
     the first place. fserv.mount_sd() only reports a bool, not a reason,
     so unlike the old build this can only distinguish mounted/not --
     still real signal, just less detailed than before.
+
+    Returns (ok, msg, genuine_card_failure). That third value is the
+    real fix here: "FAIL:" only ever appears in msg when the board
+    itself actually ran fserv.mount_sd() and it returned False -- a
+    real, board-reported statement about the card. Every OTHER way
+    this can fail (mpremote couldn't even reach the port at all,
+    fserv.py isn't uploaded so the import itself raised, a timeout)
+    says nothing whatsoever about the card's actual state, confirmed
+    directly against a real report: "mpremote: failed to access PORT
+    (it may be in use by another program)" reached this function's old
+    single ok/msg return with no way to tell it apart from a genuine
+    "the card won't mount" -- and the caller offered to wipe a card
+    that, for all this function actually knows, is completely fine.
+    genuine_card_failure is only ever True in the one case where
+    offering that prompt is actually justified.
     """
     snippet = (
         "import fserv\n"
@@ -2313,10 +2338,10 @@ def sd_card_status(port):
     ok, out = run(["mpremote", "connect", port, "exec", snippet], timeout=20)
     out = out.strip()
     if "OK:" in out:
-        return True, out.split("OK:", 1)[1].strip()
+        return True, out.split("OK:", 1)[1].strip(), False
     if "FAIL:" in out:
-        return False, out.split("FAIL:", 1)[1].strip()
-    return False, out or "no response from board (is fserv.py uploaded to it?)"
+        return False, out.split("FAIL:", 1)[1].strip(), True
+    return False, out or "no response from board (is fserv.py uploaded to it?)", False
 
 
 def wipe_sd_card(port, skip_confirmation=False, board_type=None):
@@ -2421,7 +2446,7 @@ def diagnostics(port, board_type=None, interactive=True):
     # pre-built, non-MicroPython firmware as the "heltec" role, reached
     # the same way rnodeconf reaches that one: the radio test below is
     # this role's real check, same as "heltec"'s.
-    print("[1/4] Serial bridge test...")
+    print("[1/5] Serial bridge test...")
     if board_type in ("heltec", "heltec_transport"):
         print("  SKIPPED — this board runs standalone Reticulum/RNode-family")
         print("  firmware, not MicroPython; mpremote has nothing to connect to")
@@ -2440,24 +2465,45 @@ def diagnostics(port, board_type=None, interactive=True):
     # even reaches a false "card looks unusable" prompt in the first
     # place, rather than relying on the wipe function's own refusal as
     # the only line of defence.
-    print("[2/4] SD card storage test...")
+    print("[2/5] SD card storage test...")
     if board_type in ("heltec", "heltec_transport"):
         print("  SKIPPED — neither Heltec role has an SD card.")
         results["sd_card"] = None
     else:
-        ok, msg = sd_card_status(port)
+        ok, msg, genuine_card_failure = sd_card_status(port)
         results["sd_card"] = ok
         if ok:
             print(f"  OK — {msg}")
-        else:
+        elif genuine_card_failure:
+            # The board itself ran fserv.mount_sd() and it genuinely
+            # returned False -- a real, board-reported statement about
+            # this card specifically, which is the one case offering a
+            # destructive wipe is actually justified.
             print(f"  FAILED: {msg}")
             if interactive:
                 do_wipe = ask_yes_no("  Card looks unusable as-is. Wipe and reformat it now?", False)
                 if do_wipe:
                     if wipe_sd_card(port, skip_confirmation=True, board_type=board_type):
-                        ok2, msg2 = sd_card_status(port)
+                        ok2, msg2, _ = sd_card_status(port)
                         results["sd_card"] = ok2
                         print(f"  Re-check after wipe: {'OK' if ok2 else 'FAILED'} — {msg2}")
+        else:
+            # mpremote couldn't even reach the board to ask -- this says
+            # nothing about whether the card is actually fine. Offering
+            # a wipe here would be exactly the misdiagnosis a real
+            # report caught directly: "mpremote: failed to access PORT
+            # (it may be in use by another program)" is a connectivity
+            # problem, most often something else on this computer still
+            # holding the port open (another provisioner run, a serial
+            # monitor, a terminal left attached from an earlier step) --
+            # not evidence the SD card needs reformatting. No wipe
+            # prompt at all in this branch; the fix is closing whatever
+            # else has the port, not touching the card.
+            print(f"  FAILED (could not reach the board to check): {msg}")
+            print("  This is a connection problem, not necessarily a card problem --")
+            print("  close any other program that might have this port open (another")
+            print("  provisioner run, a serial monitor, mpremote left connected in")
+            print("  another terminal) and re-run --diag before considering a wipe.")
 
     # 3. Radio TX/RX -- meaningful for any board actually running
     # RNode-family firmware. heltec_transport now does (standalone
@@ -2466,7 +2512,7 @@ def diagnostics(port, board_type=None, interactive=True):
     # custom MicroPython stack instead, where rnodeconf --info had
     # nothing real to check; that's no longer the case now that the
     # underlying firmware is genuinely RNode-family.
-    print("[3/4] Radio TX/RX test...")
+    print("[3/5] Radio TX/RX test...")
     if board_type == "cam":
         print("  SKIPPED — the CAM has no radio of its own; it reaches the mesh through the Heltec Bridge (tested separately below).")
         results["radio"] = None
@@ -2491,7 +2537,7 @@ def diagnostics(port, board_type=None, interactive=True):
     # though heltec_transport is now RNode-family firmware too -- this
     # role has no bridge relationship to any CAM at all, standalone
     # means standalone.
-    print("[4/4] Heltec Bridge reachability...")
+    print("[4/5] Heltec Bridge reachability...")
     if board_type == "heltec_transport":
         print("  SKIPPED — this role has no CAM<->Heltec bridge relationship at all;")
         print("  it's a standalone relay, not a bridge target. This check reads an")
@@ -2505,7 +2551,9 @@ def diagnostics(port, board_type=None, interactive=True):
             results["heltec_bridge"] = None
         else:
             host, bport = bridge_target
-            ok, detail = _probe_bridge(host, bport)
+            ok, detail = _retry_while_booting(
+                lambda: _probe_bridge(host, bport), label="the Heltec Bridge"
+            )
             results["heltec_bridge"] = ok
             if ok:
                 print(f"  OK — {host}:{bport} accepting connections.")
@@ -2536,12 +2584,78 @@ def diagnostics(port, board_type=None, interactive=True):
                     print("  Check: is the Heltec powered on, on the same network, and still in")
                     print("  WiFi Station mode? Confirm with: rnodeconf <heltec-port> --info")
 
+    # 5. CAM web server reachability -- a genuinely independent signal
+    # from the four checks above: none of them confirm the thing a
+    # visitor actually experiences, that the CAM's own HTTP server is
+    # up and answering requests correctly. Added after a real report of
+    # a fully working, visitor-serving node still showing
+    # serial_bridge/sd_card as FAIL from a laptop-side USB port issue
+    # that had nothing to do with the device itself (see the summary's
+    # own clarifying note below for why this doesn't just get papered
+    # over into a blanket PASS). Runs a plain HTTP GET against the
+    # CAM's own hotspot address, always up at this fixed address
+    # regardless of what else the CAM does or doesn't join -- the same
+    # standalone-hotspot design this whole project already relies on
+    # for the Heltec Bridge check above -- and confirms the response
+    # actually looks like this project's own BarKeep page, not just
+    # that something answered on port 80.
+    print("[5/5] CAM web server reachability...")
+    if board_type != "cam":
+        print("  SKIPPED — this checks the CAM's own web server specifically;")
+        print("  neither Heltec role runs one.")
+        results["cam_online"] = None
+    else:
+        def _check_cam_http():
+            import urllib.request
+            try:
+                with urllib.request.urlopen("http://192.168.4.1/", timeout=8) as resp:
+                    body = resp.read(4096).decode("utf-8", "replace")
+            except Exception as e:
+                return False, "error", str(e)
+            if "Stump" in body:
+                return True, "ok", None
+            return False, "wrong_content", None
+
+        ok, kind, detail = _retry_while_booting(_check_cam_http, label="the CAM's web server")
+        results["cam_online"] = ok
+        if ok:
+            print("  OK — 192.168.4.1 answered with the real BarKeep page.")
+        elif kind == "wrong_content":
+            print("  FAILED — something answered on 192.168.4.1, but the response")
+            print("  doesn't look like this project's own page.")
+        else:
+            print(f"  FAILED: {detail}")
+            print("  Needs THIS COMPUTER joined to the CAM's own hotspot -- same")
+            print("  requirement, and often the same cause, as the Heltec Bridge")
+            print("  check above if you haven't joined it yet.")
+
     banner("DIAGNOSTIC SUMMARY")
     for k, v in results.items():
         label = "SKIPPED" if v is None else ("PASS" if v else "FAIL")
         print(f"  {k:<15} {label}")
     all_relevant_passed = all(v for v in results.values() if v is not None)
-    print("\nCERTIFIED FOR FIELD DEPLOYMENT" if all_relevant_passed else "\nNOT CERTIFIED — resolve failures above before deploying.")
+    if all_relevant_passed:
+        print("\nCERTIFIED FOR FIELD DEPLOYMENT")
+    else:
+        print("\nNOT CERTIFIED — resolve failures above before deploying.")
+        # A meaningfully better-informed response than just repeating
+        # the failures above: if the node's own web server is confirmed
+        # live and answering correctly right now, visitors are
+        # unaffected by whatever else failed, even though this run
+        # isn't fully certified. serial_bridge and sd_card specifically
+        # matter for RECONFIGURING this board from THIS computer later
+        # -- a real, separate concern from whether it currently works
+        # for anyone walking up to it. Silently turning this into a
+        # blanket PASS would hide that distinction rather than explain
+        # it, which is its own kind of misleading in the opposite
+        # direction from the report this check exists to address.
+        if results.get("cam_online") is True:
+            print("\nNote: the CAM's own web server IS confirmed live and answering")
+            print("requests correctly right now (checked directly, not inferred) --")
+            print("visitors are unaffected by whatever failed above. What's actually")
+            print("unconfirmed is whether THIS COMPUTER can reconfigure this board")
+            print("over USB serial later, a separate concern from whether it works")
+            print("for anyone using it today.")
     return results
 
 
@@ -2575,6 +2689,45 @@ def _read_bridge_target_from_config():
     except Exception:
         pass
     return None
+
+
+def _retry_while_booting(fn, max_wait=65, interval=5, label=""):
+    """Calls fn() (a zero-arg callable returning a tuple whose first
+    element is a success bool) repeatedly until it succeeds or max_wait
+    seconds have passed, returning the last result either way.
+
+    Exists specifically for the two network-dependent diagnostic checks
+    (Heltec Bridge reachability, CAM web server reachability) -- both
+    depend on the CAM having finished its real boot sequence (WiFi
+    join, AP bring-up, HTTP server start), which a real report measured
+    at close to a full minute, not the few seconds mpremote's own
+    serial checks need. Running --diag immediately after a fresh flash
+    or a deliberate reboot, as the main flow already does right after
+    upload/config, was failing these two specific checks purely because
+    they ran before the board had gotten there yet -- a false failure
+    from the tool's own timing, not a real problem with the board.
+
+    max_wait=65 specifically to comfortably clear that measured ~60s
+    boot time with a small margin, not an arbitrary round number.
+    Retrying is harmless when the board is already fully up: the first
+    attempt just succeeds immediately and this returns without ever
+    sleeping, so this adds no meaningful delay to the common case where
+    --diag runs well after boot has already finished.
+    """
+    import time as _time
+    deadline = _time.time() + max_wait
+    attempt = 0
+    while True:
+        attempt += 1
+        result = fn()
+        if result[0]:
+            return result
+        if _time.time() >= deadline:
+            return result
+        remaining = int(deadline - _time.time())
+        print(f"  Not ready yet (attempt {attempt}) -- {label} can take close to a")
+        print(f"  minute after a fresh boot. Retrying for up to {remaining}s more...")
+        _time.sleep(interval)
 
 
 def _probe_bridge(host, port, timeout=5):
@@ -2657,7 +2810,7 @@ def interactive_wizard():
         # Preflight: resolve local file dependencies (firmware tree,
         # firmware image) up front, before touching the board at all. Catches
         # a wrong working-directory/layout as a friendly prompt right away
-        # instead of after erase_flash has already run.
+        # instead of after erase-flash has already run.
         resolved_app_dir = None
         if board_type == "cam":
             banner("PREFLIGHT — CHECKING LOCAL FILE LOCATIONS")
