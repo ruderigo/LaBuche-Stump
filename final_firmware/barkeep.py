@@ -445,9 +445,35 @@ def _url_encode(s):
 
 
 def _clean_filename(name):
-    """Same defensive filtering fserv.py's own upload handler already
-    applies -- no path traversal, no quote-breaking."""
+    """No path traversal, no quote-breaking, and -- a real, reported
+    bug -- no FAT32/exFAT-reserved characters either.
+
+    The SD card these files land on is FAT32/exFAT. Confirmed directly
+    against a real FAT32 filesystem image, not assumed: a filename
+    containing a colon (a real screenshot's own default name --
+    "screenshot 2026.12:18pm EST.png") fails to write at the
+    filesystem level outright, while the identical name with the colon
+    removed writes successfully. stream_to_file()'s open(dest, "wb")
+    would raise on a name like that, and its own except already turns
+    that into a real 500 response -- but from the browser's side, a
+    request that fails this early and this completely is
+    indistinguishable from the connection itself never having worked
+    at all: no partial response, nothing in the console, nothing in
+    the network tab, just a silent, unexplained failure. Given real
+    filenames come from whatever device and OS a visitor's browser or
+    phone happened to generate them on -- none of which know or care
+    that this specific board's storage is FAT32/exFAT -- sanitizing
+    every character that filesystem actually reserves, not just the
+    two this originally handled, is what makes upload robust to a name
+    like that instead of asking every visitor to rename their file
+    first. `<>:\\|?*` are the same reserved set FAT32/exFAT (and,
+    since they share it, Windows) has always disallowed; control
+    characters are invalid there regardless of what produced them.
+    """
     name = name.replace("/", "_").replace("..", "_").replace("'", "").replace('"', "")
+    for ch in "<>:\\|?*":
+        name = name.replace(ch, "_")
+    name = "".join(c for c in name if ord(c) >= 32)
     return name.strip()
 
 

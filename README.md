@@ -1,8 +1,6 @@
 # Project Stump — Beta A (Release)
 
-<p align="center">
-  <img src="demo.gif" alt="Project Stump Demo" width="500">
-</p>
+![demo](demo.gif)
 
 An off-grid community node. A long-range encrypted mesh radio and a
 local high-bandwidth server, deliberately kept on separate hardware.
@@ -877,6 +875,51 @@ happened to contain an apostrophe) re-confirmed unaffected — plus
 the same failed parse despite neither being touched directly,
 confirmed working again as a consequence of the same fix.
 
+**A third, real, reported upload failure, once the above two were both
+fixed: certain files still wouldn't upload at all, with nothing in the
+browser's console and no request even visible in the Network tab.**
+Traced through curl first, bypassing the browser entirely to separate
+"server problem" from "browser problem" — a plain-named file uploaded
+perfectly over curl, proving the server and this whole request path
+were sound. The actual difference turned out to be the filename
+itself: `screenshot 2026.12:18pm EST.png` failed every time; renaming
+it to `test.png` with nothing else changed worked immediately.
+
+The SD card these files land on is FAT32/exFAT, and that filesystem
+reserves a specific set of characters — `< > : " / \ | ? *` — that it
+will not accept in a filename at all. `_clean_filename()` already
+handled two of those (quotes, forward slash) but not the rest,
+including the colon in that screenshot's own default name.
+`stream_to_file()`'s `open(dest, "wb")` fails outright on a name like
+that, which its own `except` already turns into a real `500` — but
+from the browser's side, a request that fails this early and this
+completely, on real hardware, is indistinguishable from the connection
+having never worked at all: no partial response, nothing in the
+console, nothing in the Network tab. Confirmed directly against a real
+FAT32 filesystem image, not assumed or looked up: installed
+`dosfstools`/`mtools` and wrote the exact reported filename to an
+actual FAT32 volume — it fails to write, exit code 1, the file never
+appears; the same name with the colon replaced writes successfully on
+the first attempt and is genuinely present afterward. Real filenames
+come from whatever device and OS a visitor's phone or laptop happened
+to generate them on, none of which know or care that this specific
+board's storage is FAT32/exFAT, so sanitizing the complete reserved
+set is what makes upload robust to a name like that rather than
+requiring every visitor to rename their file first, the way this one
+had to be worked around here.
+
+**Status: verified against the real filesystem constraint, not a
+guess about what "probably" isn't allowed** — the exact reported
+filename confirmed to fail against a real, mounted-via-`mtools` FAT32
+image before the fix, and the sanitized result of the fix confirmed to
+write successfully to that same real image afterward; the full upload
+request re-run end to end with the exact reported filename, landing
+correctly on disk with a `200 OK`; every character in the reserved set
+individually confirmed sanitized, not just the one that was reported;
+and the existing upload test suite (plain filenames, spaces, empty
+uploads, no SD card, awaiting-slot fulfillment, apostrophes and
+quotes) re-run afterward to confirm none of it regressed.
+
 ---
 
 ## Billboard
@@ -1108,7 +1151,26 @@ Everything is in `config.py`. The Provisioner writes it.
 WIFI_SSID = "network to join"
 WIFI_PASS = "password"
 NODE_NAME = "ESP32s3"               # mesh identity display name
+```
 
+`WIFI_SSID`/`WIFI_PASS` join an **external, upstream router** — a
+separate, optional connection from the CAM's own hotspot below, mainly
+for the Heltec Bridge role's own need to reach the LAN (`needs_wifi()`
+in `example_node.py` gates whether this runs at all). The address that
+connection gets — from that router's own DHCP, something like
+`192.168.0.x` — is exactly as reachable as any other device on that
+same router's network, and no further: only from devices also joined
+to it, never from a different Wi-Fi network, even one in the same
+building. This isn't configurable or fixable in firmware — it's what a
+private, router-assigned address is, the same reason two houses' own
+`192.168.1.1` routers can't see each other. The CAM's own hotspot
+(`SSID_NAME` below, fixed at `192.168.4.1`) has no such dependency: it
+comes up regardless of whether this upstream connection exists at all,
+which is why it's the reliable way to reach the device — join it
+directly rather than relying on whatever network happens to also have
+DHCP-assigned it a reachable address at the moment.
+
+```python
 SSID_NAME = None                    # None = "LaBuche-Stump.web.app"; or a custom string
 SSID_INCLUDE_IP = False             # only meaningful with a custom SSID_NAME -- see below
 
@@ -1260,26 +1322,47 @@ Python) a given deployed board actually loads.
   reply still shows, alongside a thread that was opened for a message
   that was never actually delivered. Clicking a name from the "Message
   someone" list first doesn't have this gap at all.
-- The `--diag` Heltec Bridge check runs a plain TCP connect from
-  whatever computer is running `provisioner.py` — not from the CAM.
-  For a standalone-paired setup (the Heltec joined to the CAM's own
-  hotspot, a `192.168.4.x` address), that computer needs to be joined
-  to the CAM's own hotspot too, or the connection has no route to that
-  subnet at all and times out — reading as a dead bridge in the
-  diagnostic's plain PASS/FAIL output even when the bridge itself is
-  completely fine, confirmed directly against a real deployment. A
-  timeout specifically (not a refused connection) to a `192.168.4.x`
-  target now prints a specific note about this rather than the generic
-  "is the Heltec powered on" guidance, which was written assuming the
-  external-router case where the technician's computer and the Heltec
-  naturally share a network already.
+- `--diag` used to include a Heltec Bridge reachability check and a
+  CAM web server reachability check as automated steps — both removed
+  on request after they kept producing new false-failure modes despite
+  several rounds of fixing them (a timeout that only meant this laptop
+  wasn't on the CAM's own hotspot at the moment the check ran; a boot
+  sequence taking close to a minute so an immediate check failed on a
+  perfectly healthy board; a router reboot silently reassigning the
+  very LAN IP being probed). Each fix made the automation more correct
+  without making it simpler, and every failure mode was something a
+  person glancing at a loaded page would resolve in seconds — an
+  automated probe from a laptop that may or may not be on the right
+  network at the exact moment it runs is inherently less reliable here
+  than a human checking directly. `--diag` (CAM role only) now ends
+  with a plain instruction instead: power-cycle the board, then
+  confirm it yourself by browsing to either its LAN IP (found with
+  `--get-ip`) or its own hotspot at `192.168.4.1` — either one loading
+  the BarKeep page confirms the board is up and serving requests
+  correctly. `serial_bridge` and `sd_card` are unaffected and still run
+  as automated checks; the diagnostic suite is now three steps for
+  every role instead of five for the CAM.
+- `provisioner.py`'s own terminal output now bolds and colors exactly
+  the information a technician needs to walk away remembering — the
+  discovered LAN/AP IPs (`--get-ip`, and the wizard's own post-config
+  address lookup, both now sharing one formatting helper instead of
+  drifting into two different layouts for the same data) and the
+  final CERTIFIED (green)/NOT CERTIFIED (yellow) verdict — added
+  directly prompted by a real mixup this session: an IP address
+  needed again later (after a router reboot silently reassigned it)
+  got lost in a wall of otherwise-identical plain text the same way
+  any other line of output would. Gated on `sys.stdout.isatty()`, so
+  these are only ever emitted when a real terminal is on the other
+  end to render the raw ANSI codes — piping this output to a file or
+  a log gets plain text, confirmed directly rather than assumed.
 - `--diag`'s serial bridge and SD card checks both run `mpremote`
   against the board's USB port from the technician's computer, same as
-  the Heltec Bridge check above runs a TCP connect from that same
-  computer rather than the CAM. If the board was just power-cycled (or
-  the technician just switched their own Wi-Fi to the CAM's own hotspot
-  to satisfy the bridge check above), the USB-CDC serial device can
-  take a moment to fully settle on the host OS, and `mpremote` reports
+  the now-removed Heltec Bridge check used to run a TCP connect from
+  that same computer rather than the CAM. If the board was just
+  power-cycled (or the technician just switched their own Wi-Fi to the
+  CAM's own hotspot to confirm connectivity manually, per the point
+  above), the USB-CDC serial device can take a moment to fully settle
+  on the host OS, and `mpremote` reports
   this as "failed to access PORT (it may be in use by another
   program)" — a connectivity failure, not evidence about the SD card
   at all. This used to be misdiagnosed: any SD card check failure,
@@ -1298,57 +1381,6 @@ Python) a given deployed board actually loads.
   guidance about closing whatever else has the port open instead of
   offering to wipe, while a real, board-reported mount failure still
   offers the wipe prompt exactly as before.
-- `--diag` has a fifth check, `cam_online`, added after a real report
-  of a fully working, visitor-serving node where the four checks above
-  still added up to "NOT CERTIFIED" purely because of a laptop-side USB
-  port issue (see the `sd_card_status` note directly above) that had
-  nothing to do with the device. None of `serial_bridge`, `sd_card`,
-  `radio`, or `heltec_bridge` actually confirm the one thing a real
-  visitor experiences: that the CAM's own HTTP server is up and
-  answering correctly. `cam_online` does, with a plain HTTP GET against
-  the CAM's own hotspot address (always up at that fixed address
-  regardless of what else the CAM does or doesn't join) and a check
-  that the response genuinely looks like this project's own BarKeep
-  page, not just that something answered.
-
-  This does **not** turn a "NOT CERTIFIED" verdict into "CERTIFIED" —
-  `serial_bridge` and `sd_card` still matter for whether *this
-  computer* can reconfigure the board over USB serial later, a
-  genuinely separate concern from whether it works for a visitor
-  today, and silently hiding one behind the other would just be the
-  same kind of misleading conclusion in the opposite direction. Instead,
-  when the verdict is "NOT CERTIFIED" and `cam_online` specifically
-  passed, a clarifying note is added directly beneath it, saying
-  plainly that the web server is confirmed live and visitors are
-  unaffected, while naming what's actually still unconfirmed (USB
-  reconfiguration from this laptop) rather than leaving the technician
-  to guess whether "NOT CERTIFIED" means the node is actually broken.
-
-  Confirmed directly by reproducing the exact reported scenario end to
-  end: `serial_bridge`/`sd_card` failing with the port-busy signature,
-  `heltec_bridge` and `cam_online` both passing, and the resulting
-  summary correctly staying "NOT CERTIFIED" while adding the clarifying
-  note underneath it — plus the failure case (wrong or no response from
-  192.168.4.1), the skip case for both Heltec roles (neither runs a web
-  server), and the full-success case confirming the note only ever
-  appears when it's actually needed, never alongside a clean
-  "CERTIFIED FOR FIELD DEPLOYMENT."
-- Both network-dependent checks (`heltec_bridge`, `cam_online`) now
-  retry for up to 65 seconds before giving up, added after a real
-  report of both failing on a genuinely healthy node simply because
-  `--diag` ran immediately after a reboot — a real, measured boot time
-  of close to a minute for the CAM's own WiFi join, AP bring-up, and
-  HTTP server start, none of which `serial_bridge`/`sd_card` wait on
-  since MicroPython's own REPL over USB is available far earlier in
-  the boot sequence than the network stack is. Retrying is free when
-  the board is already fully up — the first attempt just succeeds
-  immediately, confirmed directly by testing that case adds no
-  measurable delay at all — and only actually waits when the board
-  genuinely isn't ready yet, printing a countdown so the run doesn't
-  look hung. A check that's genuinely, persistently down still reports
-  FAIL after the full 65 seconds — confirmed directly rather than
-  assumed — this closes a real false-failure window, it doesn't mask
-  real ones.
 
 ---
 

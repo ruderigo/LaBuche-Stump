@@ -200,7 +200,7 @@ DEFAULT_CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
 #   [print(f'    {str(f.relative_to(\"final_firmware\"))!r}: {hashlib.sha256(f.read_bytes()).hexdigest()[:16]!r},')
 #    for f in sorted(Path('final_firmware').rglob('*')) if f.is_file()]"
 EXPECTED_FILE_HASHES = {
-    "barkeep.py": "a67486f0dd0f7cfc",
+    "barkeep.py": "0b00081654e0b631",
     "billboard.py": "a351fc95e0ffdf0c",
     "boot_common.py": "d1f60dd4434752bf",
     "captive_portal.py": "8c2a0ee90cdc1e04",
@@ -518,6 +518,41 @@ def banner(text):
     print("\n" + "=" * 70)
     print(text)
     print("=" * 70)
+
+
+# Color/bold terminal output for exactly the things a technician needs
+# to walk away remembering -- IP addresses, the certification verdict,
+# the manual-check instruction below -- not decoration everywhere.
+# Added on request, directly prompted by a real mixup this session:
+# an IP address technicians needed to reference again later (after a
+# router reboot reassigned it) got lost in a wall of plain text the
+# same way any of the surrounding print() output would. Gated on
+# isatty() -- these are raw ANSI escape codes, meaningless and
+# actively ugly if this output is ever piped to a file or a log
+# rather than read directly in a terminal, so they're only emitted
+# when there's an actual terminal on the other end to render them.
+def _tty():
+    return sys.stdout.isatty()
+
+
+def _ansi(text, code):
+    return f"\033[{code}m{text}\033[0m" if _tty() else text
+
+
+def bold(text):
+    return _ansi(text, "1")
+
+
+def green(text):
+    return _ansi(text, "1;32")
+
+
+def yellow(text):
+    return _ansi(text, "1;33")
+
+
+def cyan(text):
+    return _ansi(text, "1;36")
 
 
 def ask(prompt, default=None):
@@ -2266,6 +2301,27 @@ def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, helt
     return "".join(out)
 
 
+def _print_discovered_addrs(addrs, wifi_ssid=None):
+    """Prints the board's discovered LAN/AP addresses -- shared by
+    --get-ip and the wizard's own post-config address lookup, so both
+    render this the same way rather than drifting into two different
+    formats for the same data. Bold and colored deliberately: this is
+    exactly the information a technician needs to walk away
+    remembering, and a real, reported mixup this session (an IP that
+    changed after a router reboot, needed again later) showed how
+    easily that gets lost in a wall of otherwise-identical plain text.
+    """
+    if addrs.get("sta"):
+        label = f" (from '{wifi_ssid}')" if wifi_ssid else ""
+        print(bold(f"LAN IP{label}: ") + bold(green(addrs["sta"])))
+        print("  -- reachable from anyone else on that same network:")
+        print("     " + cyan(f"http://{addrs['sta']}/billboard"))
+    if addrs.get("ap"):
+        print(bold("AP IP (node's own hotspot): ") + bold(green(addrs["ap"])))
+        print("  -- connect a phone to the node's own 'Stump' Wi-Fi network,")
+        print("     then browse to: " + cyan(f"http://{addrs['ap']}/billboard"))
+
+
 def get_stump_ip(port, retries=3, retry_delay=2):
     """
     Asks the CAM board directly for its current network addresses --
@@ -2446,7 +2502,7 @@ def diagnostics(port, board_type=None, interactive=True):
     # pre-built, non-MicroPython firmware as the "heltec" role, reached
     # the same way rnodeconf reaches that one: the radio test below is
     # this role's real check, same as "heltec"'s.
-    print("[1/5] Serial bridge test...")
+    print("[1/3] Serial bridge test...")
     if board_type in ("heltec", "heltec_transport"):
         print("  SKIPPED — this board runs standalone Reticulum/RNode-family")
         print("  firmware, not MicroPython; mpremote has nothing to connect to")
@@ -2465,7 +2521,7 @@ def diagnostics(port, board_type=None, interactive=True):
     # even reaches a false "card looks unusable" prompt in the first
     # place, rather than relying on the wipe function's own refusal as
     # the only line of defence.
-    print("[2/5] SD card storage test...")
+    print("[2/3] SD card storage test...")
     if board_type in ("heltec", "heltec_transport"):
         print("  SKIPPED — neither Heltec role has an SD card.")
         results["sd_card"] = None
@@ -2512,9 +2568,10 @@ def diagnostics(port, board_type=None, interactive=True):
     # custom MicroPython stack instead, where rnodeconf --info had
     # nothing real to check; that's no longer the case now that the
     # underlying firmware is genuinely RNode-family.
-    print("[3/5] Radio TX/RX test...")
+    print("[3/3] Radio TX/RX test...")
     if board_type == "cam":
-        print("  SKIPPED — the CAM has no radio of its own; it reaches the mesh through the Heltec Bridge (tested separately below).")
+        print("  SKIPPED — the CAM has no radio of its own; it reaches the mesh")
+        print("  through the Heltec Bridge (confirm that connection manually below).")
         results["radio"] = None
     else:
         # port is positional for rnodeconf, not a --port flag (its own
@@ -2526,108 +2583,36 @@ def diagnostics(port, board_type=None, interactive=True):
             print("  Note: responded, but doesn't show Device mode: TNC -- worth confirming")
             print(f"  with: rnodeconf {port} --info")
 
-    # 4. Heltec Bridge reachability -- the TCP/KISS link the CAM<->Heltec
-    # architecture depends on. Meaningless for a standalone transport
-    # role: it reads bridge_target from config.py (the CAM's own
-    # config) and probes whatever address happens to be THERE --
-    # confirmed this can return a completely unrelated "OK" if some
-    # other, already-deployed Heltec Bridge happens to be reachable on
-    # the network, regardless of whether it has anything to do with the
-    # specific board plugged in right now. Still irrelevant here even
-    # though heltec_transport is now RNode-family firmware too -- this
-    # role has no bridge relationship to any CAM at all, standalone
-    # means standalone.
-    print("[4/5] Heltec Bridge reachability...")
-    if board_type == "heltec_transport":
-        print("  SKIPPED — this role has no CAM<->Heltec bridge relationship at all;")
-        print("  it's a standalone relay, not a bridge target. This check reads an")
-        print("  unrelated config.py value and would test the wrong thing entirely.")
-        results["heltec_bridge"] = None
-    else:
-        bridge_target = _read_bridge_target_from_config()
-        if bridge_target is None:
-            print("  SKIPPED — couldn't read the bridge target from config.py")
-            print("  (run the config wizard first, or check the firmware folder).")
-            results["heltec_bridge"] = None
-        else:
-            host, bport = bridge_target
-            ok, detail = _retry_while_booting(
-                lambda: _probe_bridge(host, bport), label="the Heltec Bridge"
-            )
-            results["heltec_bridge"] = ok
-            if ok:
-                print(f"  OK — {host}:{bport} accepting connections.")
-            else:
-                print(f"  FAILED: {host}:{bport} — {detail}")
-                # A timeout specifically to a 192.168.4.x address is a
-                # DIFFERENT failure than "the bridge is actually down":
-                # this probe runs from the technician's own laptop, not
-                # from the CAM, and 192.168.4.x is the CAM's own
-                # standalone hotspot range (see the standalone-pairing
-                # wizard flow). A timeout there is the exact signature
-                # of THIS COMPUTER having no route to that subnet at
-                # all -- not joined to the CAM's own hotspot right now
-                # -- which reads identically to a real outage in this
-                # test's plain PASS/FAIL output despite being a
-                # completely different, much more common situation.
-                # Confirmed directly: a real, working bridge reported
-                # exactly this failure when the laptop running the
-                # diagnostic wasn't on that network, and passed the
-                # moment it joined.
-                if detail == "timeout" and host.startswith("192.168.4."):
-                    print("  This looks like a standalone-pair setup (the CAM's own")
-                    print("  hotspot, not an external router). A timeout to a 192.168.4.x")
-                    print("  address usually means THIS COMPUTER isn't joined to that")
-                    print("  hotspot right now -- join it the same way the Heltec did,")
-                    print("  then re-run this check, before assuming the bridge is down.")
-                else:
-                    print("  Check: is the Heltec powered on, on the same network, and still in")
-                    print("  WiFi Station mode? Confirm with: rnodeconf <heltec-port> --info")
-
-    # 5. CAM web server reachability -- a genuinely independent signal
-    # from the four checks above: none of them confirm the thing a
-    # visitor actually experiences, that the CAM's own HTTP server is
-    # up and answering requests correctly. Added after a real report of
-    # a fully working, visitor-serving node still showing
-    # serial_bridge/sd_card as FAIL from a laptop-side USB port issue
-    # that had nothing to do with the device itself (see the summary's
-    # own clarifying note below for why this doesn't just get papered
-    # over into a blanket PASS). Runs a plain HTTP GET against the
-    # CAM's own hotspot address, always up at this fixed address
-    # regardless of what else the CAM does or doesn't join -- the same
-    # standalone-hotspot design this whole project already relies on
-    # for the Heltec Bridge check above -- and confirms the response
-    # actually looks like this project's own BarKeep page, not just
-    # that something answered on port 80.
-    print("[5/5] CAM web server reachability...")
-    if board_type != "cam":
-        print("  SKIPPED — this checks the CAM's own web server specifically;")
-        print("  neither Heltec role runs one.")
-        results["cam_online"] = None
-    else:
-        def _check_cam_http():
-            import urllib.request
-            try:
-                with urllib.request.urlopen("http://192.168.4.1/", timeout=8) as resp:
-                    body = resp.read(4096).decode("utf-8", "replace")
-            except Exception as e:
-                return False, "error", str(e)
-            if "Stump" in body:
-                return True, "ok", None
-            return False, "wrong_content", None
-
-        ok, kind, detail = _retry_while_booting(_check_cam_http, label="the CAM's web server")
-        results["cam_online"] = ok
-        if ok:
-            print("  OK — 192.168.4.1 answered with the real BarKeep page.")
-        elif kind == "wrong_content":
-            print("  FAILED — something answered on 192.168.4.1, but the response")
-            print("  doesn't look like this project's own page.")
-        else:
-            print(f"  FAILED: {detail}")
-            print("  Needs THIS COMPUTER joined to the CAM's own hotspot -- same")
-            print("  requirement, and often the same cause, as the Heltec Bridge")
-            print("  check above if you haven't joined it yet.")
+    # Heltec Bridge reachability and CAM web server reachability used to
+    # be automated steps 4 and 5 here. Both removed on request after
+    # repeatedly producing false failures that had nothing to do with
+    # whether the board actually worked: a timeout that only meant this
+    # laptop wasn't on the CAM's own hotspot at the moment the check
+    # ran, a boot sequence that takes close to a minute so an immediate
+    # check failed even on a healthy board, and a router reboot that
+    # silently reassigned the LAN IP being probed. Each fix made the
+    # automation more correct but not simpler, and every one of them
+    # was a real, reported confusion a human glancing at a loaded page
+    # would have resolved in seconds. A person checking "does the page
+    # load" is faster and more reliable here than a laptop-side probe
+    # that depends on network conditions the check itself can't see or
+    # control -- this replaces both with exactly that instruction
+    # rather than automating around their failure modes further.
+    if board_type == "cam":
+        banner("CONFIRM CONNECTIVITY MANUALLY")
+        print("Power-cycle the board, then check it yourself -- this is the one")
+        print("piece of this suite a person confirms faster and more reliably")
+        print("than an automated probe from a laptop that may or may not be on")
+        print("the right network at the exact moment it happens to run:")
+        print()
+        print(bold("  LAN IP:") + " join the same network the board is on, then browse to")
+        print("    its address -- find it with:")
+        print("    " + cyan(f"python3 provisioner.py --get-ip {port}"))
+        print(bold("  AP IP:") + "  join the board's own hotspot, then browse to")
+        print("    " + cyan("http://192.168.4.1/"))
+        print()
+        print("Either one loading the BarKeep page confirms the board is up and")
+        print("serving requests correctly.")
 
     banner("DIAGNOSTIC SUMMARY")
     for k, v in results.items():
@@ -2635,136 +2620,10 @@ def diagnostics(port, board_type=None, interactive=True):
         print(f"  {k:<15} {label}")
     all_relevant_passed = all(v for v in results.values() if v is not None)
     if all_relevant_passed:
-        print("\nCERTIFIED FOR FIELD DEPLOYMENT")
+        print("\n" + bold(green("CERTIFIED FOR FIELD DEPLOYMENT")))
     else:
-        print("\nNOT CERTIFIED — resolve failures above before deploying.")
-        # A meaningfully better-informed response than just repeating
-        # the failures above: if the node's own web server is confirmed
-        # live and answering correctly right now, visitors are
-        # unaffected by whatever else failed, even though this run
-        # isn't fully certified. serial_bridge and sd_card specifically
-        # matter for RECONFIGURING this board from THIS computer later
-        # -- a real, separate concern from whether it currently works
-        # for anyone walking up to it. Silently turning this into a
-        # blanket PASS would hide that distinction rather than explain
-        # it, which is its own kind of misleading in the opposite
-        # direction from the report this check exists to address.
-        if results.get("cam_online") is True:
-            print("\nNote: the CAM's own web server IS confirmed live and answering")
-            print("requests correctly right now (checked directly, not inferred) --")
-            print("visitors are unaffected by whatever failed above. What's actually")
-            print("unconfirmed is whether THIS COMPUTER can reconfigure this board")
-            print("over USB serial later, a separate concern from whether it works")
-            print("for anyone using it today.")
+        print("\n" + bold(yellow("NOT CERTIFIED")) + " — resolve failures above before deploying.")
     return results
-
-
-def _read_bridge_target_from_config():
-    """Reads target_host/target_port out of the firmware folder's own
-    config.py, so the bridge test checks what the node will ACTUALLY
-    try to reach rather than a value retyped at the prompt (which could
-    silently disagree with the deployed config -- exactly the kind of
-    drift that makes a green diagnostic meaningless).
-
-    Parsed textually, tracking the "Heltec Bridge" block specifically --
-    config.py has a second, disabled TCP Client block with an
-    identically-named target_host key, same reason _generate_config_py
-    is context-aware. Returns (host, port) or None."""
-    try:
-        resolved = _remembered_path("stump_app_dir") or STUMP_APP_DIR
-        cfg = Path(resolved) / "config.py"
-        if not cfg.is_file():
-            return None
-        host, bport, in_block = None, None, False
-        for line in cfg.read_text().splitlines():
-            if "Heltec Bridge" in line:
-                in_block = True
-            if in_block and '"target_host"' in line:
-                host = line.split(":", 1)[1].strip().strip(",").strip("'\"")
-            if in_block and '"target_port"' in line:
-                bport = int(line.split(":", 1)[1].strip().strip(",").strip("'\""))
-                break
-        if host and bport:
-            return host, bport
-    except Exception:
-        pass
-    return None
-
-
-def _retry_while_booting(fn, max_wait=65, interval=5, label=""):
-    """Calls fn() (a zero-arg callable returning a tuple whose first
-    element is a success bool) repeatedly until it succeeds or max_wait
-    seconds have passed, returning the last result either way.
-
-    Exists specifically for the two network-dependent diagnostic checks
-    (Heltec Bridge reachability, CAM web server reachability) -- both
-    depend on the CAM having finished its real boot sequence (WiFi
-    join, AP bring-up, HTTP server start), which a real report measured
-    at close to a full minute, not the few seconds mpremote's own
-    serial checks need. Running --diag immediately after a fresh flash
-    or a deliberate reboot, as the main flow already does right after
-    upload/config, was failing these two specific checks purely because
-    they ran before the board had gotten there yet -- a false failure
-    from the tool's own timing, not a real problem with the board.
-
-    max_wait=65 specifically to comfortably clear that measured ~60s
-    boot time with a small margin, not an arbitrary round number.
-    Retrying is harmless when the board is already fully up: the first
-    attempt just succeeds immediately and this returns without ever
-    sleeping, so this adds no meaningful delay to the common case where
-    --diag runs well after boot has already finished.
-    """
-    import time as _time
-    deadline = _time.time() + max_wait
-    attempt = 0
-    while True:
-        attempt += 1
-        result = fn()
-        if result[0]:
-            return result
-        if _time.time() >= deadline:
-            return result
-        remaining = int(deadline - _time.time())
-        print(f"  Not ready yet (attempt {attempt}) -- {label} can take close to a")
-        print(f"  minute after a fresh boot. Retrying for up to {remaining}s more...")
-        _time.sleep(interval)
-
-
-def _probe_bridge(host, port, timeout=5):
-    """Plain TCP connect to the Heltec's WiFi Remote port. Deliberately
-    does NOT send KISS frames or try to talk the protocol -- a bare
-    connect answers the question this test is actually for ("is the
-    radio reachable on the network at all"), and injecting bytes into a
-    live RNode's host connection could desync a session the node is
-    genuinely using. Returns (ok, detail).
-
-    Distinguishes a timeout from every other connection failure
-    explicitly, rather than returning whatever text the exception
-    happens to carry -- a timeout means nothing ever answered at all
-    (the OS had nowhere to even send the packet), which reads
-    completely differently from a refused connection (the subnet WAS
-    reachable, just nothing listening on that port). The caller uses
-    this distinction directly: a timeout to a 192.168.4.x address is
-    the signature of the PROBING COMPUTER not being on that network,
-    not of the bridge itself being down.
-    """
-    import socket as _socket
-    s = None
-    try:
-        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        s.connect((host, port))
-        return True, "connected"
-    except _socket.timeout:
-        return False, "timeout"
-    except OSError as e:
-        return False, str(e)
-    finally:
-        if s is not None:
-            try:
-                s.close()
-            except Exception:
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -2880,14 +2739,7 @@ def interactive_wizard():
                 addrs = get_stump_ip(port)
                 if addrs and (addrs.get("sta") or addrs.get("ap")):
                     print()
-                    if addrs.get("sta"):
-                        print(f"LAN IP (from '{profile['wifi_ssid']}'): {addrs['sta']}")
-                        print(f"  -- reachable from anyone else on that same network:")
-                        print(f"     http://{addrs['sta']}/billboard")
-                    if addrs.get("ap"):
-                        print(f"Local hotspot IP: {addrs['ap']}")
-                        print(f"  -- connect a phone to the node's own 'Stump' Wi-Fi network,")
-                        print(f"     then browse to: http://{addrs['ap']}/billboard")
+                    _print_discovered_addrs(addrs, wifi_ssid=profile["wifi_ssid"])
                     if not addrs.get("sta"):
                         print("\n(No LAN IP yet -- if this is right after flashing/config, power-cycle")
                         print(" the board so example_node.py actually runs through its real WiFi join.)")
@@ -2982,10 +2834,7 @@ def main():
         port = args[idx + 1]
         addrs = get_stump_ip(port)
         if addrs and (addrs.get("sta") or addrs.get("ap")):
-            if addrs.get("sta"):
-                print(f"LAN IP:  {addrs['sta']}  ->  http://{addrs['sta']}/billboard")
-            if addrs.get("ap"):
-                print(f"AP IP:   {addrs['ap']}  ->  http://{addrs['ap']}/billboard  (node's own 'Stump' hotspot)")
+            _print_discovered_addrs(addrs)
         else:
             print("Couldn't confirm either address. If the board was just flashed/configured,")
             print("power-cycle it first so example_node.py's real boot sequence (WiFi join,")
