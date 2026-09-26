@@ -1,6 +1,6 @@
 # Project Stump — Beta A (Release)
 
-![demo](demo.gif)
+
 
 An off-grid community node. A long-range encrypted mesh radio and a
 local high-bandwidth server, deliberately kept on separate hardware.
