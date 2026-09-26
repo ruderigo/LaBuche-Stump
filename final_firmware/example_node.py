@@ -33,6 +33,18 @@ except ImportError:
 # which no amount of reading the log afterwards can tell you.
 STUMP_VERSION = "Beta A"
 
+# Node-type beacon: a second destination on this node's own identity,
+# aspect "stump.node", so clients can tell a Stump from a person without
+# guessing from display names. The LXMF delivery announce is left exactly
+# as upstream LXMF defines it -- adding fields there would risk every
+# other client's parser (Sideband, MeshChat, the Android app). Announced
+# at boot and every STUMP_ANNOUNCE_INTERVAL seconds; path requests for it
+# are answered automatically, like any local destination.
+try:
+    from config import STUMP_ANNOUNCE_INTERVAL
+except ImportError:
+    STUMP_ANNOUNCE_INTERVAL = 1800
+
 import gc
 gc.collect()
 
@@ -195,6 +207,19 @@ def connect_wifi(ssid, password, timeout=15):
     return ip
 
 
+def make_stump_beacon(identity, lxmf_dest, node_name):
+    """The "stump.node" destination. Its announce data is a msgpack list:
+        ["stump", STUMP_VERSION, node_name, <16-byte LXMF delivery hash>]
+    Same identity as the LXMF destination, so a client can also match
+    the two announces by identity hash."""
+    from urns.destination import Destination
+    from urns import umsgpack
+    beacon = Destination(identity, Destination.IN, Destination.SINGLE, "stump", "node")
+    beacon.set_default_app_data(
+        umsgpack.packb(["stump", STUMP_VERSION, node_name, bytes(lxmf_dest.hash)]))
+    return beacon
+
+
 def setup_node(rns, node_name):
     """Stump's own node bring-up: the shared identity/router mechanics
     from node_common.py, plus Stump's specific inbound-message and
@@ -229,11 +254,19 @@ def setup_node(rns, node_name):
         # through its own send queue. The old blanket echo would fight
         # with that -- every mesh message would get both a room post and
         # a parroted copy of itself.
+        # Chat turned off in the provisioner (features.py) turns the mesh
+        # side of it off too: nothing is posted to rooms or answered.
         try:
-            import rrc_mesh
-            rrc_mesh.on_message(router, message)
-        except Exception as e:
-            print("[rrc_mesh] inbound failed:", e)
+            import features
+            chat_on = features.enabled("chat")
+        except ImportError:
+            chat_on = True
+        if chat_on:
+            try:
+                import rrc_mesh
+                rrc_mesh.on_message(router, message)
+            except Exception as e:
+                print("[rrc_mesh] inbound failed:", e)
         gc.collect()
 
     def on_announce(destination_hash, display_name):
@@ -397,6 +430,36 @@ def main():
                 print("Initial announce error:", e)
         gc.collect()
 
+    try:
+        beacon = make_stump_beacon(rns.identity, dest, NODE_NAME)
+        if DEBUG >= 1:
+            print("Stump beacon:", beacon.hexhash, "(stump.node)")
+    except Exception as e:
+        beacon = None
+        print("Stump beacon not created:", e)
+
+    async def beacon_loop():
+        # Announce signing freezes the event loop (see reannounce_loop
+        # below), so this runs on its own slow cycle, started 5 s after
+        # boot -- offset from the 2-minute LXMF announce so the two
+        # stalls never land on top of each other.
+        await asyncio.sleep(5)
+        while True:
+            try:
+                from urns.interfaces.wifi_serial import prime_all_bridges
+                prime_all_bridges()
+            except Exception:
+                pass
+            try:
+                beacon.announce()
+                if DEBUG >= 2:
+                    print("[Stump beacon announced]")
+            except Exception as e:
+                if DEBUG >= 2:
+                    print("Beacon announce error:", e)
+            gc.collect()
+            await asyncio.sleep(STUMP_ANNOUNCE_INTERVAL)
+
     async def reannounce_loop():
         while True:
             await asyncio.sleep(REANNOUNCE_INTERVAL)
@@ -436,6 +499,8 @@ def main():
     async def run_with_reannounce():
         asyncio.create_task(initial_announce())
         asyncio.create_task(reannounce_loop())
+        if beacon is not None:
+            asyncio.create_task(beacon_loop())
         asyncio.create_task(serial_input_loop(router))
         asyncio.create_task(barkeep.run_barkeep_server())
         # The DNS redirect is what actually makes the captive portal
@@ -453,8 +518,16 @@ def main():
             asyncio.create_task(captive_portal.run_dns_server(ap_ip))
         # Drains the bridge's outbound queue and pushes new room lines
         # to subscribed mesh peers.
-        import rrc_mesh
-        asyncio.create_task(rrc_mesh.poll_loop(router))
+        try:
+            import features
+            chat_on = features.enabled("chat")
+        except ImportError:
+            chat_on = True
+        if chat_on:
+            import rrc_mesh
+            asyncio.create_task(rrc_mesh.poll_loop(router))
+        elif DEBUG >= 1:
+            print("[features] chat is off: mesh chat bridge not started")
         await _original_run()
 
     try:

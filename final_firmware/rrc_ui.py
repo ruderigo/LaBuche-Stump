@@ -20,12 +20,14 @@
 
 import ujson as json
 import rrc
+import theme
+import features
 import i18n
 
 STYLE = """
 *{box-sizing:border-box;}
 body{
-  background:#1b1512; color:#ecdfc8; margin:0;
+  background:var(--bg); color:var(--text); margin:0;
   font-family:ui-monospace,'Cascadia Code','SF Mono','Courier New',monospace;
   font-size:14px; display:flex; flex-direction:column;
   /* 100vh is the WRONG height on mobile: it means the viewport with
@@ -39,13 +41,13 @@ body{
   height:100dvh;
 }
 header{
-  padding:8px 12px; border-bottom:1px solid #493c2e; background:#2a2119;
+  padding:8px 12px; border-bottom:1px solid var(--border); background:var(--panel);
   display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
 }
-header b{color:#d97a3a;}
-#topic{color:#9c8d76; font-size:12px; flex:1; min-width:0;
+header b{color:var(--ember);}
+#topic{color:var(--muted); font-size:12px; flex:1; min-width:0;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-#me{color:#f0a050;}
+#me{color:var(--ember-bright);}
 .me{white-space:nowrap;}
 /* Escape hatches. Touch-sized (44px min) because the kiosk is a
    wall-mounted panel operated with a finger, not a cursor. */
@@ -53,22 +55,22 @@ header b{color:#d97a3a;}
 .nav a{
   display:flex; flex-direction:column; align-items:center; justify-content:center;
   min-width:44px; min-height:44px; gap:2px; padding:4px 8px;
-  color:#d97a3a; text-decoration:none; border:1px solid #493c2e;
-  border-radius:6px; background:#231c16;
+  color:var(--ember); text-decoration:none; border:1px solid var(--border);
+  border-radius:6px; background:var(--panel-2);
 }
 .nav a:hover,.nav a:active,.nav a:focus{
-  color:#f0a050; border-color:#d97a3a; outline:none;
+  color:var(--ember-bright); border-color:var(--ember); outline:none;
 }
 .nav span{font-size:10px; letter-spacing:.02em;}
 main{flex:1; display:flex; min-height:0;}
 #rooms{
-  width:132px; border-right:1px solid #493c2e; background:#221b15;
+  width:132px; border-right:1px solid var(--border); background:var(--panel-2);
   overflow-y:auto; flex-shrink:0;
 }
-#rooms div{padding:7px 10px; cursor:pointer; border-bottom:1px solid #2f271e;
+#rooms div{padding:7px 10px; cursor:pointer; border-bottom:1px solid var(--line);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-#rooms div:hover{background:#2f271e;}
-#rooms div.active{background:#d97a3a; color:#1b1512; font-weight:bold;}
+#rooms div:hover{background:var(--line);}
+#rooms div.active{background:var(--ember); color:var(--bg); font-weight:bold;}
 /* DM section nests plain divs inside #rooms, so the base row styling
    above (#rooms div{...}) already applies -- descendant selectors
    match at any depth, not just direct children. Only the header label
@@ -79,23 +81,25 @@ main{flex:1; display:flex; min-height:0;}
 .dm-header{
   padding:10px 10px 4px !important; cursor:default !important;
   font-size:.72rem; text-transform:uppercase; letter-spacing:.06em;
-  color:#7d715f; border-bottom:none !important;
+  color:var(--dim); border-bottom:none !important;
 }
-#rooms div.dm-entry.unread{color:#f0a050; font-weight:bold;}
+#rooms div.dm-entry.unread{color:var(--ember-bright); font-weight:bold;}
+.tag{font-size:.72em; color:var(--muted); border:1px solid var(--border); border-radius:4px;
+  padding:0 4px; margin-left:6px; font-weight:normal; vertical-align:middle;}
 #log{flex:1; overflow-y:auto; padding:10px 12px; line-height:1.5;}
 #log p{margin:0 0 3px; overflow-wrap:break-word; word-break:break-word;}
-.nick{color:#d97a3a;}
-.self .nick{color:#f0a050;}
-.system{color:#7d715f; font-style:italic;}
-.action{color:#c8b48f; font-style:italic;}
-.local{color:#7d715f;}
+.nick{color:var(--ember);}
+.self .nick{color:var(--ember-bright);}
+.system{color:var(--dim); font-style:italic;}
+.action{color:var(--action); font-style:italic;}
+.local{color:var(--dim);}
 /* Private messages, visually distinct from room traffic so nobody
    mistakes one for something the whole room can see. */
-.dm{color:#c8a2c8;}
-.dm .nick{color:#d8b4d8;}
-.err{color:#e07a5a;}
+.dm{color:var(--dm);}
+.dm .nick{color:var(--dm-nick);}
+.err{color:var(--err);}
 footer{
-  border-top:1px solid #493c2e; background:#2a2119;
+  border-top:1px solid var(--border); background:var(--panel);
   display:flex; gap:8px;
   /* Pad past the home-indicator / gesture area on devices that report
      one, so the input isn't flush against a bar the user can't move. */
@@ -103,16 +107,16 @@ footer{
   padding-bottom:calc(8px + env(safe-area-inset-bottom, 0px));
 }
 #in{
-  flex:1; min-width:0; background:#1b1512; color:#ecdfc8;
-  border:1px solid #493c2e; border-radius:4px; padding:9px 10px;
+  flex:1; min-width:0; background:var(--bg); color:var(--text);
+  border:1px solid var(--border); border-radius:4px; padding:9px 10px;
   font-family:inherit; font-size:14px;
 }
-#in:focus{outline:2px solid #d97a3a; outline-offset:1px;}
+#in:focus{outline:2px solid var(--ember); outline-offset:1px;}
 button{
-  background:#d97a3a; color:#1b1512; border:none; border-radius:4px;
+  background:var(--ember); color:var(--bg); border:none; border-radius:4px;
   padding:9px 16px; font-family:inherit; font-weight:bold; cursor:pointer;
 }
-button:hover{background:#f0a050;}
+button:hover{background:var(--ember-bright);}
 @media (max-width:520px){
   #rooms{width:96px;}
   header{font-size:13px;}
@@ -131,17 +135,17 @@ button:hover{background:#f0a050;}
    stacks tightly. Padding is now symmetric top/bottom, not just top. */
 .langbar{
   display:flex; gap:6px; padding:8px 12px; margin:0;
-  background:#241d17; border-bottom:1px solid #493c2e;
+  background:var(--panel-2); border-bottom:1px solid var(--border);
 }
 .langbar a,.langbar span{
   min-width:36px; min-height:28px; display:flex; align-items:center;
   justify-content:center; padding:3px 9px; border-radius:6px;
   font-size:.72rem; font-weight:bold; text-decoration:none;
-  border:1px solid #493c2e;
+  border:1px solid var(--border);
 }
-.langbar a{color:#9c8d76;}
-.langbar a:hover,.langbar a:focus{color:#d97a3a; border-color:#d97a3a; outline:none;}
-.langbar span.lang-active{background:#d97a3a; color:#1b1512; border-color:#d97a3a;}
+.langbar a{color:var(--muted);}
+.langbar a:hover,.langbar a:focus{color:var(--ember); border-color:var(--ember); outline:none;}
+.langbar span.lang-active{background:var(--ember); color:var(--bg); border-color:var(--ember);}
 """
 
 SCRIPT = """
@@ -153,6 +157,17 @@ var log=document.getElementById('log');
 // counts, and remembering which thread is currently open all happen
 // here, not on the board.
 var dmThreads={}, dmUnread={}, viewingDM=null, lastIdBeforeDM=null;
+// Nicks the server knows are other Stump nodes (their stump.node beacons).
+var stumps={};
+function stumpTag(el, name){
+  // A separate element, never part of the name: the name is what
+  // /msg and openDM use, so it has to stay exactly the nick.
+  if(!stumps[name]) return;
+  var t=document.createElement('span');
+  t.className='tag';
+  t.textContent='stump';
+  el.appendChild(t);
+}
 var inp=document.getElementById('in');
 // The most recent user list from a poll, in each person's own
 // server-registered case. find_client_by_nick() on the server is
@@ -284,6 +299,7 @@ function renderUserList(users){
     var d=document.createElement('div');
     d.className='dm-entry'+(viewingDM===u?' active':'');
     d.textContent=u;
+    stumpTag(d, u);
     d.onclick=function(){ openDM(u); };
     sec.appendChild(d);
   });
@@ -310,6 +326,7 @@ function renderDMSidebar(){
     var d=document.createElement('div');
     d.className='dm-entry'+(viewingDM===s?' active':'')+(unread>0?' unread':'');
     d.textContent=s+(unread>0?' ('+unread+')':'');
+    stumpTag(d, s);
     d.onclick=function(){ openDM(s); };
     dmBox.appendChild(d);
   });
@@ -368,6 +385,7 @@ function poll(){
        else{ dmUnread[m.nick]=(dmUnread[m.nick]||0)+1; }
      });
      lastId=maxId;
+     if(d.stumps){ stumps={}; d.stumps.forEach(function(n){ stumps[n]=1; }); }
      if(d.rooms) setRooms(d.rooms, room, d.users); else renderDMSidebar();
      if(d.topic!==undefined) document.getElementById('topic').textContent=d.topic?('— '+d.topic):'';
      if(d.nick && d.nick!==nick){ nick=d.nick; document.getElementById('me').textContent=nick; }
@@ -577,19 +595,23 @@ def _nav_links(lang):
     once at import time -- converted to a function for the same reason
     barkeep.py's nav tiles were: labels now depend on who's asking, so
     this has to render fresh per request rather than once at boot."""
+    # Only features this node offers (features.py); home and tools always.
+    items = (
+        (None, "/", "Home", _NAV_HOME, "nav_home"),
+        ("billboard", "/billboard", "Billboard", _NAV_BOARD, "nav_board"),
+        ("files", "/files", "Files", _NAV_FILES, "nav_files"),
+        (None, "/tools", "Tools", _NAV_TOOLS, "nav_tools"),
+        ("about", "/about", "About", _NAV_ABOUT, "nav_about"),
+    )
     return (
         "<nav class='nav'>"
-        "<a href='/' title='Home' aria-label='Home'>" + _NAV_HOME +
-        "<span>" + i18n.t("nav_home", lang) + "</span></a>"
-        "<a href='/billboard' title='Billboard' aria-label='Billboard'>" + _NAV_BOARD +
-        "<span>" + i18n.t("nav_board", lang) + "</span></a>"
-        "<a href='/files' title='Files' aria-label='Files'>" + _NAV_FILES +
-        "<span>" + i18n.t("nav_files", lang) + "</span></a>"
-        "<a href='/tools' title='Tools' aria-label='Tools'>" + _NAV_TOOLS +
-        "<span>" + i18n.t("nav_tools", lang) + "</span></a>"
-        "<a href='/about' title='About' aria-label='About'>" + _NAV_ABOUT +
-        "<span>" + i18n.t("nav_about", lang) + "</span></a>"
-        "</nav>"
+        + "".join(
+            "<a href='" + href + "' title='" + title + "' aria-label='" + title + "'>" + icon
+            + "<span>" + i18n.t(key, lang) + "</span></a>"
+            for feat, href, title, icon, key in items
+            if feat is None or features.enabled(feat)
+        )
+        + "</nav>"
     )
 
 
@@ -626,9 +648,10 @@ def render_page(room, nick, lang=None):
               .replace("I18N_MESSAGE_SOMEONE", _js(i18n.t("rrc_message_someone", lang)))
               .replace("I18N_DIRECT_MESSAGES", _js(i18n.t("rrc_direct_messages", lang))))
     return (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<!DOCTYPE html>" + theme.html_open() + "<head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "<title>RRC — Stump</title><style>" + STYLE + "</style></head><body>"
+        "<title>RRC — Stump</title><style>" + theme.CSS + STYLE + "</style>"
+        "<script>" + theme.STARTUP_SCRIPT + "</script></head><body>"
         "<header><b>RRC</b><span id='topic'></span>"
         "<span class='me'>" + i18n.t("rrc_you_are", lang) + " <span id='me'>" + _esc(nick) + "</span></span>"
         + _nav_links(lang) + "</header>"

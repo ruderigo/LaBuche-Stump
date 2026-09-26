@@ -42,6 +42,12 @@ def help_(ctx):
 
 
 def list_(ctx):
+    try:
+        import features
+        if not features.enabled("files"):
+            return "file sharing isn't offered on this node."
+    except ImportError:
+        pass
     if not fserv.sd_ok:
         return "shelf's empty -- no card in the slot."
     names = fserv._list_files()

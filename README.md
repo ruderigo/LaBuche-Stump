@@ -1,8 +1,6 @@
 # Project Stump — Beta A (Release)
 
-<p align="center">
-  <img src="demo.gif" alt="Project Stump Demo" width="500">
-</p>
+![demo](demo.gif)
 
 An off-grid community node. A long-range encrypted mesh radio and a
 local high-bandwidth server, deliberately kept on separate hardware.
@@ -79,19 +77,41 @@ assuming you know what "turn on hybrid" does.
 python3 provisioner.py
 ```
 
-Handles both boards: flashing, upload, guided configuration, plugin
-setup, and diagnostics.
+The guided wizard: flashing, app upload, configuration, plugin setup
+and diagnostics, for all three roles — the CAM, the Heltec Bridge, and
+the standalone Heltec transport.
+
+Everywhere below, `PORT` means the board's USB serial port, not the
+word itself — find it with `--scan` (on a Mac it looks like
+`/dev/cu.usbmodem5C372383661`).
 
 ```bash
 python3 provisioner.py --check-tools      # verify esptool/mpremote/rnodeconf
-python3 provisioner.py --scan             # list connected boards
-python3 provisioner.py --upload-app PORT  # (re-)upload firmware only
+python3 provisioner.py --scan             # list connected boards and their ports
+python3 provisioner.py --upload-app PORT  # update the CAM's code only, no erase
 python3 provisioner.py --get-ip PORT      # query LAN + hotspot addresses
-python3 provisioner.py --diag PORT        # serial, SD, radio, bridge tests
+python3 provisioner.py --diag PORT        # serial, SD and radio checks
 python3 provisioner.py --wipe-sd PORT     # reformat a problem SD card
 ```
 
-The Heltec needs its WiFi mode set once (the wizard does this too):
+**Updating a CAM that's already deployed:** the wizard's "Flash
+firmware" step erases the whole chip, including the node's Reticulum
+identity — it comes back with a **new LXMF address**, and mesh clients
+(the Android app, Sideband) must pick it again from its next announce.
+To update without that, use `--upload-app`: it copies the new files
+only, keeping the identity, and the billboard and shared files on the
+SD card. It also copies the firmware folder's `config.py` onto the
+board, so check that file holds this node's settings first — or, after
+uploading, run the wizard, answer **no** to "Flash firmware" and
+**yes** to the config wizard.
+
+`--diag` automates the serial, SD card and radio checks. Network
+reachability is confirmed by hand at the end (it prints how): power-
+cycle the board, then open its LAN IP (from `--get-ip`) or
+`http://192.168.4.1/` on its own hotspot.
+
+The Heltec **Bridge** role needs its WiFi mode set once (the wizard
+does this too; the standalone transport role doesn't use WiFi):
 
 ```bash
 rnodeconf <port> --autoinstall
@@ -99,12 +119,14 @@ rnodeconf <port> -w STATION --ssid "..." --psk "..." \
           --ip 192.168.0.222 --nm 255.255.255.0
 ```
 
-Then join the node's WiFi. By default that's the literal network name
-`LaBuche-Stump.web.app` — a real, publicly hosted page explaining what
-the network is, so anyone can read it off their phone's WiFi list and
-look it up on their own data before ever joining. The Provisioner
-wizard also offers a custom name instead, with or without the AP's own
-IP appended (see [Configuration](#configuration)).
+Then join the node's WiFi and open **`http://192.168.4.1/`** (most
+phones also pop the page up on their own, as a captive portal). By
+default the network is named `LaBuche-Stump.web.app` — a real,
+publicly hosted page explaining what the network is, so anyone can
+read it off their phone's WiFi list and look it up on their own data
+before ever joining. The Provisioner wizard also offers a custom name
+instead, with or without the AP's own IP appended (see
+[Configuration](#configuration)).
 
 ---
 
@@ -239,6 +261,27 @@ own section below for why, and what replaced an earlier, retired approach.
 5. Start Reticulum + LXMF, register delivery identity
 6. Start the HTTP server (port 80) and captive-portal DNS (port 53)
 7. Start the mesh bridge; announce, then re-announce every `REANNOUNCE_INTERVAL`
+8. Announce the **`stump.node` beacon**: a second destination on the
+   node's own identity whose only job is to say "this is a Stump".
+   Announce data is msgpack `["stump", STUMP_VERSION, NODE_NAME,
+   <16-byte LXMF delivery hash>]`. The LXMF delivery announce stays
+   exactly as upstream LXMF defines it, so no other client's parser is
+   affected. Announced 5 s after boot and every
+   `STUMP_ANNOUNCE_INTERVAL` (default 1800 s) — on its own slow cycle,
+   offset from the LXMF re-announce, because signing an announce stalls
+   the event loop. Path requests for it are answered automatically, so
+   a client can also ask on demand. Verified by parsing a real beacon
+   announce with upstream Reticulum (`rns` 1.5.4): valid signature,
+   `stump.node` aspect, destination hash matching
+   `Destination.hash(identity, "stump", "node")`, and the embedded LXMF
+   hash matching the node's real delivery destination.
+   The node also listens for *other* Stumps' beacons, remembers their
+   LXMF addresses, and labels them: `GET /rrc/poll` returns a `stumps`
+   list of those nicks, and the web chat shows a small "stump" tag next
+   to them in "Message someone" and "Direct Messages" (the nick itself
+   is unchanged, so `/msg` works as usual). Order doesn't matter —
+   beacon before or after their LXMF announce — and the label follows a
+   `/nick` change; the node's own beacon is ignored.
 
 ### The single most important structural fact
 
@@ -643,24 +686,102 @@ suite alongside this fix to confirm that conclusion holds against the
 real code, not just the reasoning above — no changes needed, and none
 made.
 
-**Theme and logo.** The same login also unlocks four theme presets
-(Default/Amber, Phosphor, OLED, Paper — CSS custom properties switched
-via a `[data-theme]` attribute), a five-color custom palette
-(background, panel, text, accent, border), and an SVG logo the default
-stump-cross-section mark can be replaced with, hidden, or restored.
-One login, not a second password prompt, since both are "things only
-an admin should touch."
+**Then, on real hardware: ticking entry #2 deleted entry #1.** The two
+fixes above were verified on desktop MicroPython, which uses 64-bit
+floats. This board's ESP32 build uses 32-bit floats — about 7
+significant digits — and every prune rewrote each post's timestamp from
+its parsed float (`str(ts)`), not from the text on disk. Timestamps
+like `1789740233` came back out as `1.78974e+09`: identical for every
+post within a couple of minutes of each other, so every checkbox
+carried the same value and the first-match backstop deleted whichever
+post happened to be first in the file. Reproduced exactly by running
+the real `billboard.py` with device-accurate float behavior injected:
+three posts, tick #2, #1 disappears.
 
-**Worth being precise about, because it's easy to assume otherwise for
-a "branding" feature: all of this is `localStorage`, not server-side.**
-Setting a theme or uploading a logo through `/admin` changes what *that
-one browser* sees on its own next visit — not what every other visitor
-sees. There is currently no way to make a theme or logo choice apply
-site-wide to everyone; that would mean writing the choice to the SD
-card and having every page read it back, which this deliberately
-doesn't do. If site-wide branding for every visitor is actually the
-goal here rather than a per-admin preference, that's a different,
-larger feature than what's built.
+Fixed by separating identity from time entirely. A post's id is now
+the ts field *exactly as stored on disk*, carried through every
+rewrite verbatim and compared only as a string — never regenerated
+from a float again. New posts get ids of the form
+`1789740233.004821917` (whole seconds, then 9 random digits from the
+ESP32's hardware RNG): still parseable for the 72-hour TTL, but unique
+by the random part rather than by time, so same-second posts and
+off-grid boards whose clock restarts at every reboot can't collide
+either. Duplicate ids already on disk — which every board that ran the
+previous build now has — are repaired to unique ids on the first
+rewrite, i.e. the first admin page load. The earlier docstring claim
+that `str(float(x))` "round-trips exactly" was only ever true on
+desktop and has been corrected in the source.
+
+**Status: verified with device-accurate floats and on MicroPython** —
+ticking each of #1, #2 and #3 in turn deletes exactly that post, on a
+fresh board and on a file already holding the collapsed duplicates;
+five same-second posts get five distinct ids that stay stable across
+ten rewrites; and through the real `/admin` → `/admin/delete_post`
+HTTP route, 72-hour expiry, old-format stamping, and the 150-post
+ceiling all still behave as before.
+
+**Still unreliable after that — the clock, not the delete.** Tested
+this time on a real single-precision MicroPython build (the ESP32
+port's own `MICROPY_FLOAT_IMPL_FLOAT` setting), not an emulation: the
+delete itself removes exactly the ticked post. What made posts vanish
+unasked was expiry. The CAM sets its clock by NTP only when it joins
+the router at boot, and a failed sync is tolerated — the clock then
+counts from the epoch, so posts made that session get tiny timestamps.
+After the next boot *with* a sync, those posts looked decades old, and
+the next prune — every new post and every admin page load — silently
+removed all of them at once. Reproduced exactly: two posts made while
+the router was down disappeared the moment anyone posted after a
+normal reboot.
+
+Expiry now only trusts a correctly-set clock (compared against
+2025-01-01 via the device's own `mktime`, so it's right whichever epoch
+the firmware counts from). With no valid clock, nothing expires by
+time; the 150-post ceiling still applies. A post stamped while the
+clock was unset counts as posted *now* once the clock becomes valid —
+the same rule already used for pre-timestamp posts — and then expires
+72 hours later as usual. Also: the admin confirmation now names the
+posts it removed (*1 message(s) supprimé(s). « … »*), so a mismatch is
+visible immediately; and both admin delete forms set
+`autocomplete='off'`, since some browsers restore checkbox ticks *by
+position* on reload, which after a list shift lands them on different
+posts.
+
+**Status: on single- and double-precision MicroPython** — a whole
+session with no clock (nothing expires, delete exact); unsynced posts
+kept once the clock is set, still there at 71 hours, gone at 73;
+synced posts older than 72 hours still expire; synced posts survive a
+reboot where NTP fails; ids restamp once when the clock becomes valid,
+then stay stable; and the earlier title/body, delete-by-id, ceiling and
+HTTP suites all still pass.
+
+**Theme — site-wide, chosen at provisioning.** The node has one theme
+for every visitor, on every page including the chat: Amber (the
+original look), Phosphor, OLED or Paper. The technician picks it in
+the provisioner's config wizard, and it's stored as `THEME` in
+`config.py`; the server writes it into each page's
+`<html data-theme='…'>`, so it applies on first paint, with or without
+JavaScript. An unknown value falls back to Amber. All colours live in
+one shared module, `theme.py`, used by both `barkeep.py` and the chat
+page (`rrc_ui.py`). The chat page used to hard-code the amber palette
+in about 30 places, so it ignored themes entirely — including the
+per-browser choice below; it now takes every colour from the theme.
+The palettes were checked for WCAG contrast on every text/background
+pair the pages use; Paper's secondary text was darkened slightly
+(`#7a7264` → `#6b6355`, 4.25:1 → 5.3:1) to clear the 4.5:1 guideline
+for readable text.
+
+**Per-browser overrides and logo, behind `/admin`.** The same login
+unlocks a per-browser theme (*Site theme* to follow the node, or
+Amber / Phosphor / OLED / Paper), a five-colour custom palette
+(background, panel, text, accent, border — the in-between shades are
+derived from those five), and an SVG logo the default
+stump-cross-section mark can be replaced with, hidden, or restored.
+
+**These overrides are `localStorage`, not server-side.** They change
+what *that one browser* sees, not what anyone else sees; *Site theme*
+and *Reset palette* both return that browser to the node's theme. To
+change the theme for everyone, re-run the provisioner's config wizard.
+The logo is still per-browser only.
 
 An admin visiting `/admin` sees their own current custom colors and
 saved SVG pre-filled in the controls (read back from their own
@@ -777,6 +898,14 @@ actually hold it.
 there's room, doesn't over-evict), confirmed the three protected
 directories are completely untouched, and confirmed the correct `507`
 refusal when even a full eviction isn't enough.
+
+**Where uploading lives.** The upload panel is on the Files page,
+under the list it adds to (it used to sit on the home page); the Files
+tile's subtitle says so. It's only shown when an SD card is mounted,
+since without one `/upload` can only answer "no card". After a
+successful upload the list refreshes in place, so the new file appears
+while the confirmation (and any credit balance) stays on screen. The
+`/upload` endpoint itself is unchanged.
 
 **A real, reported bug: uploads that appeared to just silently not
 work.** Not a problem with the storage logic above — the actual file
@@ -935,6 +1064,48 @@ existed, but it only ever limited what the `/billboard` page displays
 — the underlying file kept every post ever made, unbounded, even
 though only the newest 50 were ever shown.
 
+**Titles and bodies.** A post is a required title (80 characters) and
+an optional body (600 characters, line breaks kept). The page lists
+titles only, newest first; a post with a body shows its title as a
+native `<details>`/`<summary>` toggle — tap to expand, tap again to
+collapse, no JavaScript involved, so it behaves the same on the kiosk,
+phones and screen readers. A post without a body is a plain row with
+nothing that looks tappable. The admin moderation list shows each
+title *with* its full body, since what a moderator needs to see is
+often in the body.
+
+On disk each post is still one line — `sig ⇥ id ⇥ title ⇥ body` — with
+the body's line breaks and backslashes escaped. Posts written before
+this have three fields and read back as title-only, so existing boards
+display exactly as before with no migration. `POST /post` takes
+`title=` and `body=`; the original single `entry=` field is still
+accepted as a title-only post, so existing clients keep working. A
+post with a body but no title takes the body's first line as its title.
+
+**Accented text was being garbled on the way in — fixed alongside.**
+Found while building this, and live before it: `_url_decode()` turned
+each `%XX` into its own character, but browsers send each UTF-8 *byte*
+that way (`é` arrives as `%C3%A9`), so "café" was stored as "cafÃ©".
+French being the default language, that hit ordinary billboard posts,
+and everything else decoded the same way: admin passwords, the
+file-delete checkboxes, download names. It now collects the bytes and
+decodes them as UTF-8 once. `_url_encode()` (which builds download
+links) changed in step to encode UTF-8 bytes too — it had been using
+`ord()`, which only happened to round-trip for characters below
+U+0100 and produced unreadable links beyond that.
+
+**Status: verified through real HTTP dispatch on MicroPython, and in a
+real DOM** — a post with an accented, apostrophe-containing, two-line
+body is stored intact and renders as a collapsed title that expands on
+tap and collapses again; legacy `entry=` posts and pre-existing
+one-line posts render as plain rows; an empty post is rejected; a
+`<script>` title and an `<img onerror>` body render as inert text; the
+French title placeholder (*titre de l'avis*) survives attribute
+escaping; the admin list shows full bodies and still deletes exactly
+the ticked post, including under the device's single-precision floats;
+72-hour expiry and the 150-post ceiling are unchanged; and a download
+link for `résumé été 🌲.txt` round-trips.
+
 Auto-purge isn't the only way a post disappears — see "The `/admin`
 page" above for manually removing something inappropriate without
 waiting on the 72-hour window below.
@@ -1077,6 +1248,93 @@ text unresolved only if no current match exists. Confirmed directly:
 typing a wrong-case name now resolves to the one real thread, and a
 reply from that person lands in the same thread rather than a new one.
 
+**DMs to mesh/LXMF peers only worked after they'd posted publicly.**
+Real, reported by the Android team, and confirmed from source rather
+than assumed. `/msg` resolves nicks against `rrc`'s own user table, but
+the only thing that ever registered a mesh peer there was the
+fall-through at the bottom of `rrc_mesh._handle()` — reached by a plain
+public message (or `/msg`, `/me`, `/topic`), never by `/help`, `/rooms`,
+`/names`, `/nick`, `/join` or `/part`, which `rrc_mesh` handles itself.
+A peer whose traffic so far was only commands existed on the mesh side
+but got "no one here called X" from `/msg`. Three related defects in
+the same path, all fixed together:
+
+- **Registration** now happens on *any* inbound LXMF message, and is
+  re-synced after every command — so a mesh `/nick` or `/join` is
+  reflected in `/msg` and `/names` immediately (previously `/msg` to a
+  mesh peer's new nick failed the same way, and `/names` kept listing
+  them in the room they'd left).
+- **Quiet rooms**: `_flush_to_peer()` returned early whenever the peer's
+  room had no new messages, *before* checking for DMs — so a DM to a
+  mesh peer in a silent room sat undelivered until someone happened to
+  speak in that room. A second, independent route to exactly the
+  reported symptom. DMs are now checked regardless of room traffic.
+- **Presence**: a LoRa client can't poll the way a browser does, so
+  `rrc` dropped mesh peers from `/msg` after `USER_TIMEOUT` (300s) of
+  silence, while `rrc_mesh` only expired them lazily, when some *other*
+  mesh message happened to arrive — meanwhile still pushing room
+  traffic to them over the radio. Both now run on one clock in
+  `poll_loop()`: a mesh peer is present, `/msg`-able, and receiving room
+  traffic for exactly `MESH_PEER_TIMEOUT` seconds after their last
+  transmission (new optional `config.py` setting, default 300 —
+  unchanged). Raising it keeps peers reachable longer at the cost of
+  LoRa airtime spent on peers who may have left.
+
+Also fixed on the way: DMs shared the room's delivery marker, which
+`/join` resets to replay room context — so every room change
+re-delivered every DM still in the peer's 72-hour inbox. DMs now have
+their own marker.
+
+**Status: reproduced against the shipped code, then re-run against the
+fix** — `/msg` after a command-only first contact, after `/nick`, in a
+quiet room, 250s into silence, and past the timeout (pruned on
+schedule, departure announced); a DM delivered exactly once across a
+`/join`; plus a regression pass on ordinary mesh chat (room messages
+still forwarded, own lines not echoed back, mesh→web DMs unaffected).
+Every case failed on the shipped code and passes on the fix. The web
+client's own DM path (`rrc.py`) was not changed.
+
+**Announce-only mesh peers are reachable by DM.** Someone heard only
+by their LXMF announce — who has never messaged this node — can now be
+sent a DM from the web chat; they appear in its "Message someone" list
+under their announced display name. They receive **DMs only**: room
+traffic over LoRa still starts only when they message this node,
+which is what keeps a Stump from pushing chat at every Reticulum app
+in range. The first DM they get from this node carries a one-line hint
+on how to reply (`/msg NICK your text`). They're kept in their own
+registry in `rrc`, not the room roster, so they never show in `/names`,
+never count toward room occupancy, and can't push web users out of the
+40-user ceiling; capped at 20.
+
+The router is handed every announce on the mesh — nodes, propagation
+servers, other apps — so only LXMF delivery destinations (people)
+count: the announce's name hash, the 10 bytes after its 64-byte public
+key, must match this node's own `lxmf.delivery` destination's. Own
+announces are ignored. Each announce refreshes their reachability for
+`MESH_ANNOUNCE_TIMEOUT` seconds (new optional `config.py` setting,
+default 3600) — set it comfortably longer than your clients' announce
+interval.
+
+Moving between the two states never duplicates or loses a DM: a peer
+who messages keeps the exact nick people were DMing, and DM delivery
+continues from the same point; a peer who goes quiet past
+`MESH_PEER_TIMEOUT` but keeps announcing drops back to DM-only, again
+without re-sends. Also fixed on the way: a mesh peer who "left the
+mesh" stayed in `/names` for up to five more minutes; they're now
+removed from the room roster when they leave.
+
+**Status: on single-precision MicroPython, with the device's plugin
+stack, real `urns` Transport registration and device-accurate announce
+packets** — a person's announce makes them reachable; node and own
+announces don't; the web user's DM reaches them over LoRa once, with
+the hint once, and no room traffic; their reply reaches the web user;
+becoming a full peer re-sends nothing and starts room traffic; going
+quiet while announcing returns them to DM-only with no duplicates;
+silence past the announce window makes them unreachable; a name
+colliding with a web user gets a distinct nick; the 20-peer cap holds;
+the room roster is untouched; `/rrc/poll` lists them from any room.
+The earlier mesh-DM suites still pass.
+
 ---
 
 ## Internationalization
@@ -1180,6 +1438,9 @@ BOT_NAME  = "BarKeep"
 MESH_GREETING = ""                  # sent once per mesh peer, blank = off
 
 REANNOUNCE_INTERVAL = 120           # seconds between this node's own mesh announces
+STUMP_ANNOUNCE_INTERVAL = 1800      # seconds between stump.node beacon announces (see Architecture)
+THEME = "amber"                     # site theme: amber, phosphor, oled or paper (set by the provisioner)
+FEATURES = ["chat", "billboard", "files", "about"]   # features offered (set by the provisioner)
 ANNOUNCE_RATE_MAX = 6               # max rebroadcasts/source/window when relaying for others
 ANNOUNCE_RATE_WINDOW = 60
 
@@ -1212,6 +1473,28 @@ And the bridge target:
 ```
 
 ---
+
+### Features offered
+
+The provisioner's config wizard asks which visitor features the node
+offers — chat, billboard, file sharing, about — and stores the answer
+as `FEATURES` in `config.py` (all four when absent). A feature that's
+off is removed, not just unlinked: no home tile, no link in any page's
+nav (the chat page's icon bar included), no section in `/admin`, and
+every one of its addresses answers `404` with "not offered on this
+node". Turning **chat** off also turns off chat over the mesh: inbound
+LXMF messages aren't posted to rooms, and the loop that pushes room
+traffic and handles DM reachability isn't started (the `stump.node`
+beacon still announces). Turning **files** off also makes fservbot's
+`!list`/`!files` say file sharing isn't offered. The home page,
+`/tools` and `/admin` always exist. Everything asks one module,
+`features.py`; `FEATURES` may be a list or a comma-separated string, an
+explicitly empty list means none (the wizard warns first), and a value
+with no recognisable names falls back to all four.
+
+The home page itself is now the logo, title, language switcher and a
+tile per enabled feature; the Concierge chat box that used to sit there
+is hidden feature HF-003.
 
 ## Conventions for contributors
 
@@ -1429,3 +1712,6 @@ what each decision would need, in `docs/HIDDEN_FEATURES.md`:
   itself is unrelated to the file-deletion feature documented above —
   that's a separate capability that shipped since this entry was
   written, and doesn't touch the awaiting-slot mechanism at all.
+- **`HF-003`** — the Concierge (BarKeep) chat box, moved off the home
+  page. Still works at `/concierge` (and `POST /chat`); nothing links
+  to it.

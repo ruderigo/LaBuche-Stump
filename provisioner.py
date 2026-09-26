@@ -200,15 +200,16 @@ DEFAULT_CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
 #   [print(f'    {str(f.relative_to(\"final_firmware\"))!r}: {hashlib.sha256(f.read_bytes()).hexdigest()[:16]!r},')
 #    for f in sorted(Path('final_firmware').rglob('*')) if f.is_file()]"
 EXPECTED_FILE_HASHES = {
-    "barkeep.py": "0b00081654e0b631",
-    "billboard.py": "a351fc95e0ffdf0c",
+    "barkeep.py": "e2e88df565f1e62c",
+    "billboard.py": "5691a6248c0fba4e",
     "boot_common.py": "d1f60dd4434752bf",
     "captive_portal.py": "8c2a0ee90cdc1e04",
     "config.py": "40524df2178b7afe",
-    "docs/CLIENT_QUICKSTART.md": "22f09055cb4c65f1",
+    "docs/CLIENT_QUICKSTART.md": "6d7cd7434ba8cc66",
     "docs/COMMANDS.md": "4735cd01e77cdbd0",
-    "docs/HIDDEN_FEATURES.md": "1a530af86fb36e05",
-    "example_node.py": "e9c4849ce755a3f2",
+    "docs/HIDDEN_FEATURES.md": "b9e0f96d83e25fa8",
+    "example_node.py": "e0e1162df21c3bff",
+    "features.py": "d9004bcd560f8799",
     "flasher_ui.py": "f0af338707d46d25",
     "fserv.py": "88a2722727eed728",
     "fservbot/README.md": "4ab77b9e51dd5edc",
@@ -216,8 +217,8 @@ EXPECTED_FILE_HASHES = {
     "fservbot/core.py": "18ed35f2e0710d37",
     "fservbot/install.py": "8d6f5e5870ce5437",
     "fservbot/plugin.json": "bc8aca2fefb8b9e7",
-    "fservbot/templates.py": "120b25ba5d326958",
-    "i18n.py": "4e8a737716401af6",
+    "fservbot/templates.py": "bfac06fa94d01f62",
+    "i18n.py": "97a6085299a21546",
     "lib/bz2_fast_xtensawin.mpy": "ac55d9eda2126432",
     "lib/ed25519_fast_xtensawin.mpy": "96e74dac45f91687",
     "lib/ed25519_iram.mpy": "96e74dac45f91687",
@@ -226,14 +227,15 @@ EXPECTED_FILE_HASHES = {
     "node_common.py": "e1e748a3283da2f4",
     "peripherals/__init__.py": "d2bdac4de6de79de",
     "peripherals/adc_reader.py": "50a393bfa61641d4",
-    "rrc.py": "afff9f4da003f317",
-    "rrc_mesh.py": "f981f4669737a96e",
-    "rrc_ui.py": "0438e18394467c08",
+    "rrc.py": "f8ac3759f80929a4",
+    "rrc_mesh.py": "2d2725fc99ecfb48",
+    "rrc_ui.py": "1892571687e59726",
     "stumpid/README.md": "da60b797b09855c3",
     "stumpid/__init__.py": "83462abf471caca1",
     "stumpid/core.py": "d7f755af8f6b5494",
     "stumpid/install.py": "7b218d5825cf1ecc",
     "stumpid/plugin.json": "049f73bbf3ccfd03",
+    "theme.py": "4a21ea855a1fa92d",
     "tools_payload/flasher/catalog.json": "8dc38061d6bf49a3",
     "tools_payload/flasher/esptool-bundle.js": "ef7d5a237d3f273e",
     "tools_payload/flasher/esptool-js-LICENSE.txt": "1c25f29242785d63",
@@ -1962,10 +1964,10 @@ def config_wizard(board_type):
             profile["heltec_port"] = 7633
 
         # ---- Local greeter name ----
-        print("\nThe greeter on the node's own web pages has a name. This is")
-        print("cosmetic and separate from the node name above, which is what")
-        print("mesh peers see.")
-        profile["bot_name"] = ask("  Greeter's name", "BarKeep")
+        print("\nThe node's bot has a name: it's who answers '!' commands in the")
+        print("chat (and the Concierge, a hidden page at /concierge). Cosmetic,")
+        print("and separate from the node name above, which is what mesh peers see.")
+        profile["bot_name"] = ask("  Bot's name", "BarKeep")
 
         # ---- What the Wi-Fi list will actually show ----
         preview, clipped = preview_ssid(profile["node_name"])
@@ -2039,6 +2041,46 @@ def config_wizard(board_type):
                     except ValueError:
                         print(f"    '{raw}' isn't a whole number -- try again.")
             profile["credit_weights"] = weights
+
+        # ---- Features ----
+        # Which visitor features this node offers. One that's off is gone:
+        # no tile, no link, and its addresses answer "not offered here".
+        # Turning chat off also turns off chat over the mesh.
+        print("\nWhich features should this node offer? (A feature that's off is")
+        print("removed entirely: no tile, no link, its pages answer 'not offered'.)")
+        picked = []
+        for key, label in (
+            ("chat", "Chat -- rooms and DMs, on WiFi and over the mesh"),
+            ("billboard", "Billboard -- the bulletin board"),
+            ("files", "File sharing -- upload and download"),
+            ("about", "About page -- where this came from, how to connect"),
+        ):
+            if ask_yes_no("  Offer " + label + "?", True):
+                picked.append(key)
+        if not picked:
+            print("  With nothing enabled, visitors see only the logo and title.")
+            if not ask_yes_no("  Keep it that way?", False):
+                picked = ["chat", "billboard", "files", "about"]
+                print("  OK -- all four features enabled.")
+        profile["features"] = picked
+
+        # ---- Look ----
+        # Site-wide: every page and the chat use it, for every visitor.
+        # A browser can still pick its own from /admin; that only
+        # changes that one browser.
+        print("\nPick the node's look. It applies to every page and the chat, for")
+        print("everyone. (Anyone with the admin password can still switch their")
+        print("own browser from /admin -- that changes nothing for other visitors.)")
+        look = ask_choice(
+            "Theme:",
+            [
+                "Amber -- warm dark, the original look",
+                "Phosphor -- green terminal on near-black",
+                "OLED -- true black with blue accents",
+                "Paper -- light, for bright daylight",
+            ],
+        )
+        profile["theme"] = look.split(" ", 1)[0].lower()
 
     CONFIG_OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = CONFIG_OUT_DIR / f"{node_name.replace(' ', '_')}.json"
@@ -2160,6 +2202,8 @@ def push_config_to_board(port, board_type, profile):
             plugin_config=profile.get("plugin_config"),
             ssid_include_ip=profile.get("ssid_include_ip"),
             ssid_name=profile.get("ssid_name", _UNSET),
+            theme=profile.get("theme"),
+            features=profile.get("features"),
         )
     except Exception as e:
         print(f"FAILED to generate config.py: {e}")
@@ -2181,7 +2225,7 @@ def push_config_to_board(port, board_type, profile):
 def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, heltec_host, heltec_port,
                          credits_enabled=None, credit_weights=None, bot_name=None,
                          mesh_greeting=None, plugin_config=None, ssid_include_ip=None,
-                         ssid_name=_UNSET):
+                         ssid_name=_UNSET, theme=None, features=None):
     """
     Substitutes WIFI_SSID/WIFI_PASS/NODE_NAME and the Heltec Bridge
     interface's target_host/target_port into the existing config.py
@@ -2201,6 +2245,8 @@ def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, helt
     saw_greeting = False
     saw_ssid_ip = False
     saw_ssid_name = False
+    saw_theme = False
+    saw_features = False
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("WIFI_SSID"):
@@ -2231,6 +2277,14 @@ def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, helt
         if stripped.startswith("MESH_GREETING =") and mesh_greeting is not None:
             out.append("MESH_GREETING = %r\n" % mesh_greeting)
             saw_greeting = True
+            continue
+        if features is not None and stripped.split("=", 1)[0].strip() == "FEATURES":
+            out.append("FEATURES = %r\n" % list(features))
+            saw_features = True
+            continue
+        if theme is not None and stripped.split("=", 1)[0].strip() == "THEME":
+            out.append("THEME = %r\n" % theme)
+            saw_theme = True
             continue
         if stripped.startswith("CREDITS_ENABLED") and credits_enabled is not None:
             out.append("CREDITS_ENABLED = %r\n" % bool(credits_enabled))
@@ -2297,6 +2351,12 @@ def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, helt
     if ssid_name is not _UNSET and not saw_ssid_name:
         out.append("\n# ---- Walk-up AP hotspot name (added by the Provisioner) ----\n")
         out.append("SSID_NAME = %r\n" % ssid_name)
+    if features is not None and not saw_features:
+        out.append("\n# ---- Features offered: any of chat, billboard, files, about (added by the Provisioner) ----\n")
+        out.append("FEATURES = %r\n" % list(features))
+    if theme is not None and not saw_theme:
+        out.append("\n# ---- Site theme: amber, phosphor, oled or paper (added by the Provisioner) ----\n")
+        out.append("THEME = %r\n" % theme)
 
     return "".join(out)
 

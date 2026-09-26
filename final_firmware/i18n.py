@@ -160,9 +160,9 @@ STRINGS = {
         "es": "avisos y mensajes",
     },
     "tile_files_sub": {
-        "fr": "prends quelque chose",
-        "en": "take something home",
-        "es": "llévate algo",
+        "fr": "prends ou partage quelque chose",
+        "en": "take something, leave something",
+        "es": "llévate o comparte algo",
     },
     "tile_about_sub": {
         "fr": "d'où ça vient, comment se connecter",
@@ -488,6 +488,11 @@ STRINGS = {
         "es": "Código de espera (opcional)",
     },
     "home_sending": {"fr": "Envoi…", "en": "Sending...", "es": "Enviando…"},
+    "feature_off": {
+        "fr": "Cette fonction n'est pas offerte sur ce nœud.",
+        "en": "This feature isn't offered on this node.",
+        "es": "Esta función no está disponible en este nodo.",
+    },
     "home_upload_error": {
         "fr": "échec de l'envoi — problème de connexion. réessaie.",
         "en": "upload failed — connection problem. try again.",
@@ -506,6 +511,16 @@ STRINGS = {
         "es": "escribe un aviso…",
     },
     "billboard_post_button": {"fr": "Publier", "en": "Post", "es": "Publicar"},
+    "billboard_title_placeholder": {
+        "fr": "titre de l'avis",
+        "en": "notice title",
+        "es": "título del aviso",
+    },
+    "billboard_body_placeholder": {
+        "fr": "détails (facultatif)",
+        "en": "details (optional)",
+        "es": "detalles (opcional)",
+    },
 
     # ---- Files ----
     "files_tap_to_download": {
@@ -567,7 +582,8 @@ STRINGS = {
     },
 
     "admin_theme_header": {"fr": "Thème", "en": "Theme", "es": "Tema"},
-    "admin_theme_default": {"fr": "Défaut", "en": "Default", "es": "Predeterminado"},
+    "admin_theme_site": {"fr": "Thème du site", "en": "Site theme", "es": "Tema del sitio"},
+    "admin_theme_amber": {"fr": "Ambre", "en": "Amber", "es": "Ámbar"},
     "admin_theme_phosphor": {"fr": "Phosphore", "en": "Phosphor", "es": "Fósforo"},
     "admin_theme_oled": {"fr": "OLED", "en": "OLED", "es": "OLED"},
     "admin_theme_paper": {"fr": "Papier", "en": "Paper", "es": "Papel"},

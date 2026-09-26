@@ -19,6 +19,8 @@ import i18n
 import fserv
 import rrc
 import rrc_ui
+import theme
+import features
 import flasher_ui
 
 # Per-node greeter name. Falls back so this module still imports on its
@@ -38,32 +40,7 @@ BARKEEP_ART = (
     "  |  |  |  |\n"
 )
 
-STYLE = """
-:root{
-  --bg:#1b1512; --panel:#2a2119; --ember:#d97a3a; --ember-bright:#f0a050;
-  --text:#ecdfc8; --muted:#9c8d76; --border:#493c2e;
-}
-/* Theme presets -- [data-theme] on <html>, set by the startup script in
-   _page() from localStorage. Absent entirely (the default amber look
-   above, :root's own values) unless a visitor or the admin has chosen
-   something else. --muted isn't mentioned in the original spec's four
-   preset definitions, so each one below picks a --muted that actually
-   reads against its own --bg/--panel rather than leaving warm amber
-   tan sitting on, say, pure black -- the .sub class uses --muted for
-   secondary text on every page, so leaving it untouched would be a
-   visible, real inconsistency, not a harmless gap. */
-[data-theme='phosphor']{
-  --bg:#0d140e; --panel:#142217; --ember:#33ff66; --ember-bright:#5cff85;
-  --text:#d0f0d6; --muted:#5c8f68; --border:#1f3b25;
-}
-[data-theme='oled']{
-  --bg:#000000; --panel:#121212; --ember:#4da6ff; --ember-bright:#80bfff;
-  --text:#f0f0f0; --muted:#8a8a8a; --border:#2a2a2a;
-}
-[data-theme='paper']{
-  --bg:#f5f2eb; --panel:#e8e3d5; --ember:#a84814; --ember-bright:#c25b1f;
-  --text:#2c2825; --muted:#7a7264; --border:#d0c8b6;
-}
+STYLE = theme.CSS + """
 *{box-sizing:border-box;}
 body{
   background:var(--bg); color:var(--text);
@@ -100,8 +77,16 @@ input,button{
   font-family:inherit; font-size:1rem; padding:10px 12px;
   border-radius:6px; border:1px solid var(--border);
 }
-input{background:var(--panel); color:var(--text);}
-input:focus,button:focus{outline:2px solid var(--ember); outline-offset:1px;}
+input,textarea{background:var(--panel); color:var(--text);}
+textarea{font-family:inherit; font-size:1rem; padding:10px 12px;
+  border-radius:6px; border:1px solid var(--border); resize:vertical;}
+.post-form{display:flex; flex-direction:column; gap:8px; margin:10px 0;}
+.post-form button{align-self:flex-start;}
+details.post summary{cursor:pointer; padding:2px 0;}
+details.post[open] summary{color:var(--ember-bright);}
+.post-body{display:block; white-space:pre-wrap; color:var(--muted);
+  margin-top:6px; padding-left:14px;}
+input:focus,textarea:focus,button:focus,summary:focus{outline:2px solid var(--ember); outline-offset:1px;}
 button{
   background:var(--ember); color:var(--bg); font-weight:bold;
   border:none; cursor:pointer;
@@ -207,10 +192,10 @@ h2{
 }
 .link-tile{
   display:flex; flex-direction:column; text-decoration:none;
-  background:#221b15; border:1px solid var(--border); border-radius:6px;
+  background:var(--panel-2); border:1px solid var(--border); border-radius:6px;
   padding:12px 14px; transition:border-color .2s, background .2s;
 }
-.link-tile:hover{border-color:var(--ember); background:#271f18;}
+.link-tile:hover{border-color:var(--ember); background:var(--line);}
 .link-tile .title{
   font-family:ui-monospace,monospace; font-size:.9rem; font-weight:bold;
   color:var(--ember); margin-bottom:2px;
@@ -265,7 +250,7 @@ code.ip-tag{
   background:var(--panel); border:1px solid var(--border); border-radius:8px;
   overflow:hidden;
 }
-.gallery-card img{width:100%; height:auto; display:block; background:#161210;}
+.gallery-card img{width:100%; height:auto; display:block; background:var(--bg);}
 .gallery-card .caption{
   padding:8px 10px; display:flex; flex-direction:column; gap:2px;
 }
@@ -366,66 +351,28 @@ def _home_tiles(lang):
     just because the original English text happened to say it twice."""
     return (
         "<div class='tiles'>"
-        "<a class='tile' href='/rrc'>" + _ICON_CHAT +
-        "<span>" + i18n.t("nav_chat", lang) + "</span>"
-        "<small>" + i18n.t("tile_chat_sub", lang) + "</small></a>"
-        "<a class='tile' href='/billboard'>" + _ICON_BOARD +
-        "<span>" + i18n.t("nav_board", lang) + "</span>"
-        "<small>" + i18n.t("tile_board_sub", lang) + "</small></a>"
-        "<a class='tile' href='/files'>" + _ICON_FILES +
-        "<span>" + i18n.t("nav_files", lang) + "</span>"
-        "<small>" + i18n.t("tile_files_sub", lang) + "</small></a>"
-        "<a class='tile' href='/about'>" + _ICON_ABOUT +
-        "<span>" + i18n.t("nav_about", lang) + "</span>"
-        "<small>" + i18n.t("tile_about_sub", lang) + "</small></a>"
+        + "".join(
+            "<a class='tile' href='" + href + "'>" + icon +
+            "<span>" + i18n.t(label, lang) + "</span>"
+            "<small>" + i18n.t(sub, lang) + "</small></a>"
+            for feat, href, icon, label, sub in (
+                ("chat", "/rrc", _ICON_CHAT, "nav_chat", "tile_chat_sub"),
+                ("billboard", "/billboard", _ICON_BOARD, "nav_board", "tile_board_sub"),
+                ("files", "/files", _ICON_FILES, "nav_files", "tile_files_sub"),
+                ("about", "/about", _ICON_ABOUT, "nav_about", "tile_about_sub"),
+            )
+            if features.enabled(feat)
+        ) +
         "</div>"
     )
 
 
 def _page(body):
-    return ("<!DOCTYPE html><html><head><meta name='viewport' "
+    return ("<!DOCTYPE html>" + theme.html_open() + "<head><meta name='viewport' "
              "content='width=device-width, initial-scale=1'>"
              "<style>" + STYLE + "</style>"
-             "<script>" + _THEME_STARTUP_SCRIPT + "</script>"
+             "<script>" + theme.STARTUP_SCRIPT + "</script>"
              "</head><body>" + body + "</body></html>")
-
-
-# Runs before body content renders, so a returning visitor's chosen
-# theme/logo apply immediately rather than flashing default styling
-# first. Wrapped in try/catch per localStorage access -- private
-# browsing mode can make localStorage throw outright rather than just
-# return null on some browsers, and a malformed stump_custom_colors
-# value (hand-edited devtools, an old format from a future version)
-# would otherwise take the whole page down over a cosmetic preference.
-# Logo swapping/hiding waits for DOMContentLoaded since #site-logo
-# doesn't exist yet at this point in <head>; the theme variables don't
-# need that wait, since CSS custom properties apply to <html> whether
-# or not <body> has rendered.
-_THEME_STARTUP_SCRIPT = """
-(function(){
-  try {
-    var t = localStorage.getItem('stump_theme');
-    if (t === 'custom') {
-      var c = JSON.parse(localStorage.getItem('stump_custom_colors') || '{}');
-      for (var k in c) document.documentElement.style.setProperty(k, c[k]);
-    } else if (t) {
-      document.documentElement.setAttribute('data-theme', t);
-    }
-  } catch (e) {}
-  try {
-    var customSvg = localStorage.getItem('stump_custom_svg');
-    var hidden = localStorage.getItem('stump_logo_hidden') === '1';
-    if (customSvg || hidden) {
-      window.addEventListener('DOMContentLoaded', function(){
-        var el = document.getElementById('site-logo');
-        if (!el) return;
-        if (customSvg) el.innerHTML = customSvg;
-        if (hidden) el.style.display = 'none';
-      });
-    }
-  } catch (e) {}
-})();
-"""
 
 
 def _url_encode(s):
@@ -440,7 +387,13 @@ def _url_encode(s):
         if ch in safe:
             out += ch
         else:
-            out += "%%%02X" % ord(ch)
+            # Each UTF-8 byte, not ord(ch): _url_decode now decodes
+            # UTF-8 (as browsers send it), and the two must stay exact
+            # inverses or links to accented filenames break. ord() also
+            # produced "%2019" for characters past U+00FF, which no
+            # decoder reads back correctly.
+            for b in ch.encode("utf-8"):
+                out += "%%%02X" % b
     return out
 
 
@@ -547,32 +500,26 @@ def _process_command(text, identifier, lang):
 
 
 def _render_chat_page(lang):
-    # Escaped, not just embedded raw, even though today's three
-    # translations ("Toi"/"You"/"Tú") happen to contain nothing that
-    # would break the surrounding single-quoted JS string below --
-    # that's exactly the assumption that just failed for a different
-    # string in this same script block (see the real, confirmed bug
-    # this line sits next to), so this stays escaped on the same
-    # principle even though it isn't broken today.
-    you_label = billboard._esc(i18n.t("home_you_label", lang))
+    """The home page: logo, title, language switcher, and a tile for
+    each feature this node offers (see features.py). The Concierge chat
+    box that used to sit here is a hidden feature now -- HF-003,
+    _render_concierge_page() below."""
     return (
-        # Restored to the original ASCII art by request after real
-        # testing -- the concentric-ring SVG this held before read as
-        # a target/bullseye rather than the tree-stump cross-section it
-        # was meant to be, and the person who's actually looked at it
-        # in a browser wanted the original back. The #site-logo wrapper
-        # stays: an admin who DOES want a custom SVG can still set one
-        # from /admin, which replaces this element's content the exact
-        # same way regardless of what's inside it by default. No
-        # forced inline style here either -- the existing pre{} rule
-        # already colors and sizes this correctly (color:var(--ember),
-        # monospace, proper line-height); the SVG-specific fill/
-        # max-width/display rules that were here don't mean anything
-        # applied to text and would have squeezed the art oddly if
-        # they'd stuck around.
         "<div id='site-logo'><pre>" + BARKEEP_ART + "</pre></div>"
         "<h1>Stump</h1>"
-        + _lang_switcher(lang, "/") +
+        + _lang_switcher(lang, "/")
+        + _home_tiles(lang)
+    )
+
+
+def _render_concierge_page(lang):
+    """HF-003 -- the Concierge (BarKeep) chat box, unlinked. Moved off
+    the home page by request; still fully working at /concierge, talking
+    to the same POST /chat endpoint. See docs/HIDDEN_FEATURES.md."""
+    you_label = billboard._esc(i18n.t("home_you_label", lang))
+    return (
+        "<h1>" + _esc_name(BOT_NAME) + "</h1>"
+        + _lang_switcher(lang, "/concierge") +
         "<p class='sub'>" + i18n.t("barkeep_greeting", lang, bot_name=_esc_name(BOT_NAME)) + "</p>"
         "<div class='panel' id='log'>"
         "<p><b>" + _esc_name(BOT_NAME) + ":</b> " + i18n.t("barkeep_evening", lang) + "</p>"
@@ -581,53 +528,8 @@ def _render_chat_page(lang):
         "<input id='in' placeholder='" + i18n.t("home_say_something", lang) + "' autofocus>"
         "<button onclick='sendMsg()'>" + i18n.t("rrc_send", lang) + "</button>"
         "</div>"
-        + _home_tiles(lang) +
-        "<div class='panel'>"
-        "<p class='sub' style='margin-top:0;'>" + i18n.t("home_bring_something", lang) + "</p>"
-        "<input type='file' id='upfile'>"
-        "<div class='row'>"
-        "<input id='uphash' style='display:none' value=''>"
-        "<button id='upbtn' onclick='doUpload()'>" + i18n.t("home_upload_button", lang) + "</button>"
-        "</div>"
-        "<p id='upstatus'><small></small></p>"
-        "</div>"
-        # doUpload() below: three real, reported gaps fixed together --
-        # no .catch() on the fetch() chain meant any failure on the
-        # server's side of this request (the actual exception source is
-        # fixed in fserv.py/barkeep.py, but this is the client's own
-        # last line of defense against any OTHER cause too, network
-        # failure included) left the promise rejecting with nothing to
-        # handle it: the status line stuck on "Sending..." forever, no
-        # success shown and no error either, indistinguishable from the
-        # upload having silently failed even when the file itself made
-        # it onto the card intact. Disabling #upbtn for the duration
-        # also stops a second, overlapping upload from a repeated or
-        # impatient click, since nothing here queues or cancels one
-        # already in flight. Clearing the file input once a response
-        # actually arrives (success or a server-side error message,
-        # either counts) is itself a visible sign something happened,
-        # independent of whatever text the response carries.
+        + _nav(lang, "home") +
         "<script>"
-        "function doUpload(){"
-        "  var file=document.getElementById('upfile').files[0];"
-        "  if(!file){return;}"
-        "  var hash=document.getElementById('uphash').value;"
-        "  var status=document.getElementById('upstatus');"
-        "  var btn=document.getElementById('upbtn');"
-        "  btn.disabled=true;"
-        "  status.innerHTML='<small>" + billboard._esc(i18n.t("home_sending", lang)) + "</small>';"
-        "  fetch('/upload',{method:'POST',headers:{'X-Filename':file.name,'X-Hash':hash},body:file})"
-        "    .then(function(r){return r.text();})"
-        "    .then(function(t){"
-        "      status.innerHTML='<small>'+t+'</small>';"
-        "      document.getElementById('upfile').value='';"
-        "      btn.disabled=false;"
-        "    })"
-        "    .catch(function(){"
-        "      status.innerHTML='<small>" + billboard._esc(i18n.t("home_upload_error", lang)) + "</small>';"
-        "      btn.disabled=false;"
-        "    });"
-        "}"
         "function sendMsg(){"
         "  var input=document.getElementById('in');"
         "  var text=input.value;"
@@ -674,6 +576,10 @@ _DESTINATIONS = {
 }
 
 
+# Nav keys that belong to a switchable feature (see features.py).
+_NAV_FEATURE = {"chat": "chat", "board": "billboard", "files": "files", "about": "about"}
+
+
 def _nav(lang, *keys):
     """Builds a tile row in the requesting client's language. The grid
     is auto-fit, so whatever number of tiles a page asks for spreads
@@ -686,6 +592,9 @@ def _nav(lang, *keys):
     each page renderer instead."""
     out = ["<div class='tiles'>"]
     for k in keys:
+        feat = _NAV_FEATURE.get(k)
+        if feat is not None and not features.enabled(feat):
+            continue
         href, icon, label_key = _DESTINATIONS[k]
         out.append("<a class='tile' href='" + href + "'>" + icon +
                     "<span>" + i18n.t(label_key, lang) + "</span></a>")
@@ -774,18 +683,22 @@ def _render_admin_file_list_page(lang, names, pw):
             for n in names
         )
         file_section = (
-            "<form method='POST' action='/admin/delete'>"
+            "<form method='POST' action='/admin/delete' autocomplete='off'>"
             "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
             "<div class='panel'><ul class='files'>" + items + "</ul></div>"
             "<button type='submit'>" + i18n.t("admin_delete_selected", lang) + "</button>"
             "</form>"
         )
 
+    # Sections for features this node doesn't offer are left out (their
+    # delete routes answer 404 anyway); theme and logo settings always show.
+    files_part = ("<p class='sub'>" + i18n.t("admin_select_intro", lang) + "</p>" + file_section
+                  if features.enabled("files") else "")
+    board_part = _render_admin_billboard_section(lang, pw) if features.enabled("billboard") else ""
     return (
         "<h1>" + i18n.t("admin_header", lang) + "</h1>"
-        "<p class='sub'>" + i18n.t("admin_select_intro", lang) + "</p>"
-        + file_section
-        + _render_admin_billboard_section(lang, pw)
+        + files_part
+        + board_part
         + _render_admin_settings_section(lang)
     )
 
@@ -830,13 +743,17 @@ def _render_admin_billboard_section(lang, pw):
             "<p class='sub'>" + i18n.t("billboard_nothing_yet", lang) + "</p>"
         )
     items = "".join(
-        "<li><label><input type='checkbox' name='ts' value='" + billboard._esc(str(ts)) + "'> "
-        + billboard._esc(text) + " <small>&mdash; " + billboard._esc(sig) + "</small></label></li>"
-        for sig, text, ts in reversed(entries)
+        "<li><label><input type='checkbox' name='ts' value='" + billboard._esc(pid) + "'> "
+        + "<span>" + billboard._esc(title) + " <small>&mdash; " + billboard._esc(sig) + "</small>"
+        # Full body, not collapsed: a moderator needs to see exactly what
+        # they're about to remove, which is often in the body, not the title.
+        + ("<span class='post-body'>" + billboard._esc(body) + "</span>" if body else "")
+        + "</span></label></li>"
+        for sig, title, body, ts, pid in reversed(entries)
     )
     return (
         "<h2 class='sub'>" + i18n.t("admin_billboard_header", lang) + "</h2>"
-        "<form method='POST' action='/admin/delete_post'>"
+        "<form method='POST' action='/admin/delete_post' autocomplete='off'>"
         "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
         "<div class='panel'><ul class='files'>" + items + "</ul></div>"
         "<button type='submit'>" + i18n.t("admin_delete_selected", lang) + "</button>"
@@ -859,7 +776,9 @@ def _render_admin_settings_section(lang):
         "<h2 class='sub'>" + i18n.t("admin_theme_header", lang) + "</h2>"
         "<div class='panel'>"
         "<div class='row'>"
-        "<button type='button' onclick=\"stumpSetTheme('default')\">" + i18n.t("admin_theme_default", lang) + "</button>"
+        "<button type='button' onclick=\"stumpSetTheme('site')\">" + i18n.t("admin_theme_site", lang)
+        + " (" + i18n.t("admin_theme_" + theme.site_theme(), lang) + ")</button>"
+        "<button type='button' onclick=\"stumpSetTheme('amber')\">" + i18n.t("admin_theme_amber", lang) + "</button>"
         "<button type='button' onclick=\"stumpSetTheme('phosphor')\">" + i18n.t("admin_theme_phosphor", lang) + "</button>"
         "<button type='button' onclick=\"stumpSetTheme('oled')\">" + i18n.t("admin_theme_oled", lang) + "</button>"
         "<button type='button' onclick=\"stumpSetTheme('paper')\">" + i18n.t("admin_theme_paper", lang) + "</button>"
@@ -892,7 +811,7 @@ def _render_admin_settings_section(lang):
         "<script>" + _ADMIN_SETTINGS_SCRIPT.replace(
             "I18N_LOGO_RESET_NOTICE",
             json.dumps(i18n.t("admin_logo_reset_notice", lang)).replace("</", "<\\/")
-        ) + "</script>"
+        ).replace("STUMP_SITE_THEME", json.dumps(theme.site_theme())) + "</script>"
     )
 
 
@@ -916,9 +835,10 @@ function stumpSetTheme(t){
   try {
     localStorage.removeItem('stump_custom_colors');
     document.documentElement.removeAttribute('style');
-    if (t === 'default') {
+    if (t === 'site') {
+      // Follow the node's own theme again (set by the technician).
       localStorage.removeItem('stump_theme');
-      document.documentElement.removeAttribute('data-theme');
+      document.documentElement.setAttribute('data-theme', STUMP_SITE_THEME);
     } else {
       localStorage.setItem('stump_theme', t);
       document.documentElement.setAttribute('data-theme', t);
@@ -935,6 +855,22 @@ function stumpSaveCustomPalette(){
       '--ember': document.getElementById('stump-c-ember').value,
       '--border': document.getElementById('stump-c-border').value
     };
+    // The in-between shades (tiles, sidebars, dividers, secondary text)
+    // derived from the five picked colours, so a light custom palette
+    // doesn't keep the dark amber versions of them.
+    function mix(a, b){
+      var r = '#';
+      for (var i = 1; i < 7; i += 2) {
+        var v = Math.round((parseInt(a.substr(i, 2), 16) + parseInt(b.substr(i, 2), 16)) / 2);
+        r += ('0' + v.toString(16)).slice(-2);
+      }
+      return r;
+    }
+    colors['--panel-2'] = mix(colors['--bg'], colors['--panel']);
+    colors['--line'] = mix(colors['--panel'], colors['--border']);
+    colors['--muted'] = mix(colors['--text'], colors['--bg']);
+    colors['--dim'] = colors['--muted'];
+    colors['--ember-bright'] = colors['--ember'];
     localStorage.setItem('stump_custom_colors', JSON.stringify(colors));
     localStorage.setItem('stump_theme', 'custom');
     document.documentElement.removeAttribute('data-theme');
@@ -946,7 +882,7 @@ function stumpResetPalette(){
   try {
     localStorage.removeItem('stump_custom_colors');
     localStorage.removeItem('stump_theme');
-    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme', STUMP_SITE_THEME);
     document.documentElement.removeAttribute('style');
   } catch (e) {}
 }
@@ -1022,13 +958,76 @@ def _render_files_page(lang):
                 )
             rows = "<ul class='files'>" + "".join(items) + "</ul>"
 
+    # Upload lives here, next to the shelf it adds to (it used to sit on
+    # the home page). Shown only with a card mounted -- without one,
+    # /upload can only answer "no card", so offering it would be a trap.
+    upload = ""
+    if fserv.sd_ok:
+        upload = (
+            "<div class='panel'>"
+            "<p class='sub' style='margin-top:0;'>" + i18n.t("home_bring_something", lang) + "</p>"
+            "<input type='file' id='upfile'>"
+            "<div class='row'>"
+            "<input id='uphash' style='display:none' value=''>"
+            "<button id='upbtn' onclick='doUpload()'>" + i18n.t("home_upload_button", lang) + "</button>"
+            "</div>"
+            "<p id='upstatus'><small></small></p>"
+            "</div>"
+            + _UPLOAD_SCRIPT
+                .replace("I18N_SENDING", json.dumps(i18n.t("home_sending", lang)).replace("</", "<\\/"))
+                .replace("I18N_UPLOAD_ERROR", json.dumps(i18n.t("home_upload_error", lang)).replace("</", "<\\/"))
+        )
+
     return (
         "<h1>" + i18n.t("nav_files", lang) + "</h1>"
         + _lang_switcher(lang, "/files") +
         "<p class='sub'>" + i18n.t("files_tap_to_download", lang) + "</p>"
-        "<div class='panel'>" + rows + "</div>"
+        "<div class='panel' id='file-list'>" + rows + "</div>"
+        + upload
         + _nav(lang, "home", "chat", "board", "tools", "about")
     )
+
+
+# The upload button's script. Three real, reported gaps fixed earlier
+# stay fixed: a .catch() so a failed request shows an error instead of
+# "Sending..." forever; the button disabled while a request is in flight
+# (no overlapping uploads from impatient clicks); the file input cleared
+# once any response arrives. New with the move to /files: on success the
+# file list refreshes in place, so the new file appears while the
+# confirmation (and any credit balance) stays on screen. Translated text
+# goes in via json.dumps, never raw into a quoted JS string -- the
+# apostrophe in the French error message broke this whole script once.
+_UPLOAD_SCRIPT = """<script>
+function doUpload(){
+  var file=document.getElementById('upfile').files[0];
+  if(!file){return;}
+  var hash=document.getElementById('uphash').value;
+  var status=document.getElementById('upstatus');
+  var btn=document.getElementById('upbtn');
+  function say(t){ status.innerHTML='<small></small>'; status.firstChild.textContent=t; }
+  btn.disabled=true;
+  say(I18N_SENDING);
+  var ok=false;
+  fetch('/upload',{method:'POST',headers:{'X-Filename':file.name,'X-Hash':hash},body:file})
+    .then(function(r){ok=r.ok; return r.text();})
+    .then(function(t){
+      say(t);
+      document.getElementById('upfile').value='';
+      btn.disabled=false;
+      if(ok) refreshList();
+    })
+    .catch(function(){
+      say(I18N_UPLOAD_ERROR);
+      btn.disabled=false;
+    });
+}
+function refreshList(){
+  fetch('/files').then(function(r){return r.text();}).then(function(h){
+    var fresh=new DOMParser().parseFromString(h,'text/html').getElementById('file-list');
+    if(fresh) document.getElementById('file-list').innerHTML=fresh.innerHTML;
+  }).catch(function(){});
+}
+</script>"""
 
 
 def _render_tools_page(lang):
@@ -1453,6 +1452,18 @@ async def _handle(reader, writer):
         peer = writer.get_extra_info("peername")
         identifier = billboard._extract_ip(peer)
 
+        # A feature the technician turned off (features.py) is gone,
+        # not just unlinked: every one of its addresses answers 404.
+        if features.path_blocked(path):
+            await _send(writer, "404 Not Found",
+                        i18n.t("feature_off", i18n.get_lang(identifier)), "text/plain")
+            return
+
+        if method == "GET" and path.startswith("/concierge"):
+            # HF-003: the Concierge, unlinked (see docs/HIDDEN_FEATURES.md).
+            await _send(writer, "200 OK", _page(_render_concierge_page(i18n.get_lang(identifier))))
+            return
+
         if method == "POST" and path.startswith("/chat"):
             length = int(headers.get("content-length", "0"))
             body = await _read_small_body(reader, length)
@@ -1462,11 +1473,20 @@ async def _handle(reader, writer):
         elif method == "POST" and path.startswith("/post"):
             length = int(headers.get("content-length", "0"))
             body = await _read_small_body(reader, length)
-            entry = ""
+            # title= and body= from the current form. entry= is the
+            # original single-field form, still accepted as a title-only
+            # post so existing clients (the Android integration's tech
+            # sheet documents it) keep working unchanged.
+            title = ""
+            post_body = ""
             for kv in body.decode().split("&"):
-                if kv.startswith("entry="):
-                    entry = billboard._url_decode(kv[6:])
-            billboard._append_entry(entry, identifier)
+                if kv.startswith("title="):
+                    title = billboard._url_decode(kv[6:])
+                elif kv.startswith("body="):
+                    post_body = billboard._url_decode(kv[5:])
+                elif kv.startswith("entry=") and not title:
+                    title = billboard._url_decode(kv[6:])
+            billboard._append_entry(title, post_body, identifier)
             await writer.awrite("HTTP/1.1 303 See Other\r\nLocation: /billboard\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
 
         elif method == "GET" and path.startswith("/admin"):
@@ -1518,18 +1538,20 @@ async def _handle(reader, writer):
             if not _check_admin_pw(pw):
                 await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
             else:
-                deleted_count = 0
+                deleted_titles = []
                 for ts_str in timestamps:
-                    if ts_str and billboard.delete_entry(ts_str):
-                        deleted_count += 1
-                # Same reasoning as the file-delete route: re-render
-                # the updated admin page directly rather than redirect
-                # to the bare /admin login, so a successful delete is
-                # immediately visible instead of looking like nothing
-                # happened.
+                    removed = billboard.delete_entry(ts_str) if ts_str else False
+                    if removed:
+                        deleted_titles.append(removed if removed is not True else "?")
+                # Name exactly what was removed, not just how many -- so a
+                # moderator can see at a glance that it matches what they
+                # ticked.
                 lang = i18n.get_lang(identifier)
                 names = fserv._list_files() if fserv.sd_ok else []
-                notice = "<p class='sub'>" + i18n.t("admin_post_deleted_notice", lang, n=deleted_count) + "</p>"
+                notice = "<p class='sub'>" + i18n.t("admin_post_deleted_notice", lang, n=len(deleted_titles))
+                if deleted_titles:
+                    notice += " " + ", ".join("« " + billboard._esc(t) + " »" for t in deleted_titles)
+                notice += "</p>"
                 await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
 
         elif method == "POST" and path.startswith("/admin/delete"):
@@ -1615,7 +1637,14 @@ async def _handle(reader, writer):
                 # _prune_users call, and simpler than a second
                 # changed-since check for a list this short (MAX_USERS
                 # is 40).
-                "users": rrc.users_in_room(actual),
+                # People in this room, plus mesh peers reachable only by
+                # DM (heard by announce, never messaged) -- the web UI
+                # lists these under "Message someone". /names and room
+                # counts stay room-only.
+                "users": sorted(set(rrc.users_in_room(actual)) | set(rrc.reachable_nicks())),
+                # Which of those are other Stump nodes (from their
+                # stump.node beacons), so the UI can label them.
+                "stumps": rrc.stump_nicks(),
             }
             await _send(writer, "200 OK", json.dumps(payload), "application/json")
 

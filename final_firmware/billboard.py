@@ -21,7 +21,12 @@ import i18n
 
 SD_STORAGE_FILE = "/sd/billboard.txt"
 FLASH_STORAGE_FILE = "/billboard.txt"
-MAX_ENTRY_LEN = 200
+# Posts are a title (always shown) plus an optional body (shown when
+# the title is tapped). Both are bounded so the worst case fits the
+# server's 8 KB form-body limit even fully percent-encoded: 600 chars
+# of 3-byte UTF-8 is 5400 bytes as %XX, plus a 240-char title's 2160.
+MAX_TITLE_LEN = 80
+MAX_BODY_LEN = 600
 MAX_ENTRIES_SHOWN = 50
 
 # Same retention model as rrc.py's DMs, by explicit request: a real,
@@ -144,20 +149,58 @@ def _esc(s):
 
 
 def _url_decode(s):
+    """Decodes application/x-www-form-urlencoded text as UTF-8.
+
+    Browsers percent-encode each UTF-8 BYTE of a character -- "é" is
+    sent as %C3%A9. The previous version turned each %XX into its own
+    character, so "café" arrived as "cafÃ©". French is this node's
+    default language, so this garbled every accented billboard post,
+    and anything else decoded here (admin passwords, file-delete
+    checkboxes, download names). Collects the bytes first and decodes
+    them once. Falls back to one character per byte only if the input
+    isn't valid UTF-8 at all, so a malformed request can't raise.
+    """
     s = s.replace("+", " ")
-    out = ""
+    buf = bytearray()
     i = 0
-    while i < len(s):
-        if s[i] == "%" and i + 2 < len(s):
+    n = len(s)
+    while i < n:
+        if s[i] == "%" and i + 2 < n:
             try:
-                out += chr(int(s[i + 1:i + 3], 16))
+                buf.append(int(s[i + 1:i + 3], 16))
                 i += 3
                 continue
             except ValueError:
                 pass
-        out += s[i]
+        buf.extend(s[i].encode("utf-8"))
         i += 1
-    return out
+    try:
+        return bytes(buf).decode("utf-8")
+    except Exception:
+        return "".join(chr(b) for b in buf)
+
+
+def _escape_body(text):
+    """Bodies may span lines, but each post is one line on disk.
+    Backslash first, so an escaped newline can't be forged by typing
+    a literal backslash-n."""
+    return text.replace("\\", "\\\\").replace("\n", "\\n")
+
+
+def _unescape_body(text):
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\" and i + 1 < n:
+            nxt = text[i + 1]
+            out.append("\n" if nxt == "n" else nxt)
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def _signature(identifier):
@@ -173,7 +216,24 @@ def _signature(identifier):
 
 
 def _read_entries():
-    """Returns a list of (signature, text, timestamp) tuples.
+    """Returns a list of (signature, title, body, timestamp, post_id)
+    tuples.
+
+    Current line format: "sig\\tid\\ttitle\\tbody" (body escaped by
+    _escape_body). Posts written before titles existed have three
+    fields; their whole text becomes the title and the body is empty,
+    so they keep displaying exactly as they did.
+
+    post_id is the ts field EXACTLY as written on disk -- a string, and
+    the only thing that identifies a post (checkbox values, deletion).
+    timestamp is that same string parsed to a float, used for the TTL
+    check ONLY. The two are deliberately separate: this board's
+    MicroPython build uses single-precision floats (~7 significant
+    digits), so a float parsed from "1789740233" and turned back into
+    text comes out as "1.78974e+09" -- the same string for every post
+    within about two minutes of each other. Using str(float) for
+    identity is what made a real, reported admin delete of entry #2
+    remove entry #1 instead.
 
     Three storage generations, all handled without dropping anything --
     matching this file's own established rule (see the older comment
@@ -195,11 +255,16 @@ def _read_entries():
                 line = line.rstrip("\n")
                 if not line.strip():
                     continue
-                parts = line.split("\t", 2)
-                if len(parts) == 3:
-                    sig, ts_str, text = parts
+                parts = line.split("\t", 3)
+                raw = None
+                body = ""
+                if len(parts) >= 3:
+                    sig, ts_str, text = parts[0], parts[1], parts[2]
+                    if len(parts) == 4:
+                        body = _unescape_body(parts[3])
                     try:
                         ts = float(ts_str)
+                        raw = ts_str
                     except ValueError:
                         ts = None
                 elif len(parts) == 2:
@@ -208,10 +273,53 @@ def _read_entries():
                 else:
                     sig, text = "?", line
                     ts = None
-                out.append((sig, text, ts))
+                out.append((sig, text, body, ts, raw))
             return out
     except OSError:
         return []
+
+
+def _rand9():
+    """9 random decimal digits. os.urandom is hardware RNG on the ESP32;
+    the fallbacks only matter off-device (tests, desktop Python)."""
+    try:
+        n = int.from_bytes(os.urandom(4), "big")
+    except Exception:
+        try:
+            import random
+            n = random.getrandbits(30)
+        except Exception:
+            n = int(time.time() * 1000)
+    return n % 1000000000
+
+
+def _new_post_id(seconds, taken):
+    """A post id: whole seconds, then 9 random digits after a dot --
+    e.g. "1789740233.004821917". Still parses as a number (so the TTL
+    check keeps working, to within float precision, which is plenty
+    for a 72-hour window), but its identity is the STRING, which no
+    float round-trip ever touches again. The random part is what makes
+    it unique rather than time: two posts in the same second, or an
+    off-grid board whose clock restarts from zero on every reboot,
+    would otherwise collide."""
+    while True:
+        pid = "%d.%09d" % (int(seconds), _rand9())
+        if pid not in taken:
+            taken.add(pid)
+            return pid
+
+
+def _clock_floor():
+    """The earliest reading a correctly-set clock can give: 2025-01-01,
+    computed with the device's own mktime so it's right whichever epoch
+    the firmware counts from. None if mktime isn't available, in which
+    case the clock is trusted as before."""
+    for t in ((2025, 1, 1, 0, 0, 0, 0, 0), (2025, 1, 1, 0, 0, 0, 0, 0, 0)):
+        try:
+            return time.mktime(t)
+        except Exception:
+            pass
+    return None
 
 
 def _prune_and_write(new_entry=None):
@@ -227,7 +335,7 @@ def _prune_and_write(new_entry=None):
     again -- that content gets a fresh 72-hour window from here,
     not deleted outright and not kept forever either.
 
-    new_entry, if given, is a (sig, text, ts) tuple appended AFTER
+    new_entry, if given, is a (sig, title, body) tuple appended AFTER
     time-based pruning but BEFORE the MAX_ENTRIES_STORED ceiling is
     applied -- doing the ceiling check inclusive of the entry about to
     be written, in the same pass, rather than pruning first and
@@ -248,31 +356,52 @@ def _prune_and_write(new_entry=None):
     """
     entries = _read_entries()
     now = time.time()
+    floor = _clock_floor()
+    clock_ok = floor is None or now >= floor
     kept = []
-    stamped = 0
-    for sig, text, ts in entries:
-        if ts is None:
-            # A tiny, strictly increasing offset per entry stamped in
-            # THIS call -- confirmed directly as a real, reported bug
-            # without it: several untimestamped entries (an old board's
-            # posts, never pruned before this feature existed) all
-            # landed on the exact same `now` value, since it's computed
-            # once per call and was being reused verbatim for every one
-            # of them. delete_entry() identifies a post by its
-            # timestamp alone, so two posts sharing one meant deleting
-            # "the one at that timestamp" deleted both -- selecting one
-            # checkbox deleted every post that collided onto that same
-            # stamp. A microsecond-scale offset keeps each one unique
-            # while staying "now" for everything that reads it: the
-            # 72-hour TTL check two lines down, and display order.
-            effective_ts = now + stamped * 0.000001
-            stamped += 1
+    taken = set()
+    for sig, text, body, ts, pid in entries:
+        # Expiry only trusts timestamps from a clock that was actually
+        # set. The CAM's clock is set by NTP when it joins the router
+        # at boot, and a failed sync is tolerated -- the clock then
+        # counts from the epoch, so posts that session get tiny
+        # timestamps. After the next boot WITH a sync, those posts
+        # looked decades old and every prune (each new post, each
+        # admin page load) silently removed all of them at once -- a
+        # real, reported "delete doesn't remove what I selected".
+        trusted = ts is not None and (floor is None or ts >= floor)
+        if clock_ok:
+            if not trusted:
+                # Stamped before the clock was ever right (or never
+                # stamped): its age is unknowable, so it counts as
+                # posted now -- the same rule as pre-timestamp posts --
+                # and gets a fresh id stamped with the real time.
+                effective_ts = now
+                pid = None
+            else:
+                effective_ts = ts
+            if now - effective_ts > BILLBOARD_TTL_SECONDS:
+                continue
         else:
-            effective_ts = ts
-        if now - effective_ts <= BILLBOARD_TTL_SECONDS:
-            kept.append((sig, text, effective_ts))
+            # No valid clock this boot: ages can't be measured at all,
+            # so nothing expires by time (the ceiling below still holds).
+            effective_ts = ts if ts is not None else now
+        # Each post's on-disk id is carried through VERBATIM -- never
+        # regenerated from the parsed float. The previous version
+        # wrote str(ts) back here, which on this board's single-
+        # precision floats collapsed every recent post to the same
+        # "1.78974e+09" on every single rewrite (every new post, every
+        # admin page load). A post with no id yet (older storage
+        # formats) gets one; so does a DUPLICATE id, which is exactly
+        # what boards already running the previous version have on
+        # disk right now -- this repairs them on the first rewrite.
+        if pid is None or pid in taken:
+            pid = _new_post_id(effective_ts, taken)
+        else:
+            taken.add(pid)
+        kept.append((sig, text, body, pid))
     if new_entry is not None:
-        kept.append(new_entry)
+        kept.append((new_entry[0], new_entry[1], new_entry[2], _new_post_id(now, taken)))
     # Safety-valve ceiling only, applied after time-based pruning above
     # -- oldest-first, matching MAX_DMS_PER_USER's own eviction order
     # and its own reasoning for why this is secondary, not primary.
@@ -283,8 +412,8 @@ def _prune_and_write(new_entry=None):
     tmp = target + ".tmp"
     try:
         with open(tmp, "w") as f:
-            for sig, text, ts in kept:
-                f.write(sig + "\t" + str(ts) + "\t" + text + "\n")
+            for sig, text, body, pid in kept:
+                f.write(sig + "\t" + pid + "\t" + text + "\t" + _escape_body(body) + "\n")
         os.rename(tmp, target)
     except OSError:
         # Best-effort: a full card or similar mid-rewrite failure
@@ -296,22 +425,36 @@ def _prune_and_write(new_entry=None):
             pass
 
 
-def _append_entry(text, identifier="unknown"):
-    text = text[:MAX_ENTRY_LEN].replace("\n", " ").replace("\r", "")
-    if not text.strip():
+def _clean_title(text):
+    return " ".join(text.replace("\t", " ").replace("\r", " ").replace("\n", " ").split())
+
+
+def _append_entry(title, body="", identifier="unknown"):
+    """Adds a post. A title is required; the body is optional.
+
+    A post with a body but no title (a client that only filled one
+    field) takes the body's first line as its title rather than being
+    rejected. Tabs become spaces everywhere, since tab is the field
+    separator on disk; the body keeps its line breaks."""
+    body = body.replace("\r", "").replace("\t", " ").strip()[:MAX_BODY_LEN]
+    title = _clean_title(title)[:MAX_TITLE_LEN]
+    if not title and body:
+        title = _clean_title(body.split("\n", 1)[0])[:MAX_TITLE_LEN]
+    if not title:
         return False
-    new_entry = (_signature(identifier), text, time.time())
-    _prune_and_write(new_entry)
+    _prune_and_write((_signature(identifier), title, body))
     return True
 
 
 def delete_entry(ts_str):
-    """Removes one post, identified by the exact timestamp string
-    _read_entries's own float(ts_str) was parsed from -- confirmed
-    directly that str(float(x)) round-trips exactly for real
-    timestamps on this MicroPython build, so comparing as strings
-    here (never re-parsing to float and comparing floats) sidesteps
-    any float-formatting mismatch risk entirely.
+    """Removes one post, identified by its post id -- the ts field
+    exactly as stored on disk, compared as a string, never parsed.
+
+    An earlier version of this docstring claimed str(float(x))
+    round-trips exactly for real timestamps. That was only ever
+    tested on desktop MicroPython, which uses double precision; this
+    board's ESP32 build uses SINGLE precision, where it does not --
+    see _read_entries() for the real, reported bug that caused.
 
     Only ever removes the FIRST matching line, never every line that
     matches -- this used to remove all of them, which is a real,
@@ -356,7 +499,7 @@ def delete_entry(ts_str):
             continue
         parts = stripped.split("\t", 2)
         if not found and len(parts) == 3 and parts[1] == ts_str:
-            found = True
+            found = parts[2].split("\t", 1)[0] or True
             continue
         kept.append(stripped)
 
@@ -375,7 +518,21 @@ def delete_entry(ts_str):
         except OSError:
             pass
         return False
-    return True
+    # The removed post's title (truthy), so the caller can say exactly
+    # what was deleted instead of just how many.
+    return found
+
+
+def _post_item(sig, title, body):
+    """One billboard row. With a body, the title is a native
+    <details>/<summary> toggle -- tap to expand, no JavaScript, works
+    on the kiosk and with screen readers. Without one, a plain row:
+    nothing to expand, so nothing that looks tappable."""
+    head = _esc(title) + " <small>&mdash; " + _esc(sig) + "</small>"
+    if not body:
+        return "<li>" + head + "</li>"
+    return ("<li><details class='post'><summary>" + head + "</summary>"
+            "<div class='post-body'>" + _esc(body) + "</div></details></li>")
 
 
 def _render_page(lang=None):
@@ -384,16 +541,20 @@ def _render_page(lang=None):
     entries = _read_entries()[-MAX_ENTRIES_SHOWN:]
     entries.reverse()  # newest first
     items = "".join(
-        "<li>" + _esc(text) + " <small>&mdash; " + sig + "</small></li>"
-        for sig, text, ts in entries
+        _post_item(sig, title, body) for sig, title, body, ts, pid in entries
     ) or ("<li>" + i18n.t("billboard_nothing_yet", lang) + "</li>")
+    # Every translated string that lands inside a quoted attribute goes
+    # through _esc -- an apostrophe in a translation would otherwise end
+    # the attribute early, the same bug class this project has hit twice.
     return (
         "<h1>" + i18n.t("billboard_title", lang) + "</h1>"
         + i18n.switcher_html(lang, "/billboard") +
         "<p class='sub'>" + i18n.t("billboard_intro", lang) + "</p>"
-        "<form method='POST' action='/post' class='row'>"
-        "<input name='entry' maxlength='" + str(MAX_ENTRY_LEN) + "' placeholder='" +
-        i18n.t("billboard_post_placeholder", lang) + "'>"
+        "<form method='POST' action='/post' class='post-form'>"
+        "<input name='title' required maxlength='" + str(MAX_TITLE_LEN) + "' placeholder='"
+        + _esc(i18n.t("billboard_title_placeholder", lang)) + "'>"
+        "<textarea name='body' rows='3' maxlength='" + str(MAX_BODY_LEN) + "' placeholder='"
+        + _esc(i18n.t("billboard_body_placeholder", lang)) + "'></textarea>"
         "<button type='submit'>" + i18n.t("billboard_post_button", lang) + "</button>"
         "</form>"
         "<div class='panel'>"

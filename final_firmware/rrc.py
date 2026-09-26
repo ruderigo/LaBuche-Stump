@@ -77,6 +77,51 @@ MAX_DMS_PER_USER = 60
 # client_id -> {"nick", "room", "last_seen"}
 _users = {}
 
+# Mesh peers heard only by their LXMF announce: reachable by /msg, but
+# not in any room -- so never in /names, room counts, or the MAX_USERS
+# ceiling (a busy mesh must not crowd real web users out). client_id ->
+# {"nick": str}. Maintained entirely by rrc_mesh, which decides who is
+# reachable and for how long; this module only resolves nicks against it.
+_reachable = {}
+
+
+def set_reachable(client_id, nick):
+    _reachable[client_id] = {"nick": nick}
+
+
+def drop_reachable(client_id):
+    _reachable.pop(client_id, None)
+
+
+def reachable_nicks():
+    return sorted(r["nick"] for r in _reachable.values())
+
+
+# Client ids (LXMF delivery hashes, hex) known to be other Stump nodes,
+# from their "stump.node" beacons. Resolved to nicks only when asked,
+# so it doesn't matter whether the beacon or the LXMF announce arrived
+# first, or whether they've changed nick since. Bounded: a type flag
+# is tiny, but nothing here grows without limit.
+_stumps = set()
+MAX_STUMPS = 64
+
+
+def mark_stump(client_id):
+    if client_id in _stumps:
+        return
+    if len(_stumps) >= MAX_STUMPS:
+        _stumps.pop()
+    _stumps.add(client_id)
+
+
+def stump_nicks():
+    out = []
+    for cid in _stumps:
+        u = _users.get(cid) or _reachable.get(cid)
+        if u is not None:
+            out.append(u["nick"])
+    return sorted(out)
+
 
 # ---------------------------------------------------------------------
 # Naming
@@ -177,6 +222,13 @@ def touch_user(client_id, nick=None, room=None):
     return u
 
 
+def drop_user(client_id):
+    """Removes a client from the room roster immediately. Used by
+    rrc_mesh when a mesh peer leaves, so /names stops listing someone
+    the room was just told had left."""
+    _users.pop(client_id, None)
+
+
 def get_user(client_id):
     return _users.get(client_id) or touch_user(client_id)
 
@@ -186,9 +238,10 @@ def nick_taken(nick, by_client):
     insensitive, because 'Bob' and 'bob' reading as different people in
     a chat window is a genuine source of confusion."""
     low = nick.lower()
-    for cid, u in _users.items():
-        if cid != by_client and u["nick"].lower() == low:
-            return True
+    for table in (_users, _reachable):
+        for cid, u in table.items():
+            if cid != by_client and u["nick"].lower() == low:
+                return True
     return False
 
 
@@ -279,9 +332,10 @@ def find_client_by_nick(nick):
     because 'Bob' and 'bob' being different people is the kind of
     confusion that loses a private message to the wrong person."""
     low = (nick or "").lower()
-    for cid, u in _users.items():
-        if u["nick"].lower() == low:
-            return cid
+    for table in (_users, _reachable):
+        for cid, u in table.items():
+            if u["nick"].lower() == low:
+                return cid
     return None
 
 
@@ -330,7 +384,7 @@ def send_dm(from_nick, to_nick, body):
     cid = find_client_by_nick(to_nick)
     if cid is None:
         return False, "no one here called '%s' -- /names shows who is" % to_nick
-    user = _users.get(cid)
+    user = _users.get(cid) or _reachable.get(cid)
     now = time.time()
     _prune_dms(cid, now)
     msg = {"id": _next_id[0], "ts": now, "nick": from_nick,
@@ -368,6 +422,8 @@ def reset():
     _topics[DEFAULT_ROOM] = "General. Be decent."
     _topics[MESH_ROOM] = "Mesh/LoRa traffic lands here by default."
     _users.clear()
+    _reachable.clear()
+    _stumps.clear()
     _dms.clear()
     _next_id[0] = 1
 
