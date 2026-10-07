@@ -138,7 +138,8 @@ def _dispatch(client_id, room, text):
     # someone who types /help actually discovers the thing is here.
     if stripped.startswith("/") and stripped[1:].split(" ", 1)[0].lower() == "help":
         try:
-            return list(replies) + [core.help_line()], new_room
+            import i18n
+            return list(replies) + [core.help_line(i18n.get_lang(client_id))], new_room
         except Exception:
             return replies, new_room
 

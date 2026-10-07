@@ -67,6 +67,12 @@ FW_DIR = SD_MOUNT + "/fw"
 # actually uploaded, and it should never be credit-charged or listed
 # on the community Files page.
 ABOUT_DIR = SD_MOUNT + "/about"
+# Home-page branding, dropped on the card by whoever keeps the node:
+# home.html (or home.<lang>.html), its images, and home.json for where it
+# goes. See barkeep._render_chat_page and docs/HOME_BRANDING.md.
+HOME_DIR = SD_MOUNT + "/home"
+HOME_MAX_BYTES = 32768
+HOME_PLACES = ("top", "bottom", "left", "right")
 LEDGER_FILE = SD_MOUNT + "/fserv_ledger.json"
 AWAITING_FILE = SD_MOUNT + "/fserv_awaiting.json"
 
@@ -114,7 +120,7 @@ def mount_sd():
         # guessed here, and plain pin numbers, not Pin() objects.
         sd = SDCard(slot=1, width=1, sck=39, cmd=38, data=(40,))
         os.mount(sd, SD_MOUNT)
-        for d in (SHARED_DIR, TOOLS_DIR, FW_DIR, ABOUT_DIR):
+        for d in (SHARED_DIR, TOOLS_DIR, FW_DIR, ABOUT_DIR, HOME_DIR):
             try:
                 os.mkdir(d)
             except OSError:
@@ -328,6 +334,175 @@ def list_tools():
         return sorted(os.listdir(TOOLS_DIR))
     except OSError:
         return []
+
+
+# The FireFly apps a node can hand out, found in TOOLS_DIR by name so a
+# newer file dropped on the card replaces the old one on the page -- no
+# firmware change. Big files (the Android APK is ~50 MB) go on the card
+# with a card reader: over USB they'd take hours.
+APPS = (
+    ("android", "FireFly-Android-", ".apk"),
+    ("rk3326", "FireFly-RK3326-", ".zip"),
+)
+
+
+def _version_key(v):
+    out = []
+    for part in v.split("."):
+        out.append(int(part) if part.isdigit() else -1)
+    return out
+
+
+def find_apps():
+    """{"android": {"file", "version", "size"}, "rk3326": {...}} for the
+    apps present -- the highest version of each, compared as numbers
+    (0.2.11 beats 0.2.9)."""
+    found = {}
+    for name in list_tools():
+        for key, prefix, suffix in APPS:
+            if name.startswith(prefix) and name.endswith(suffix):
+                version = name[len(prefix):-len(suffix)]
+                if not version:
+                    continue
+                best = found.get(key)
+                if best is None or _version_key(version) > _version_key(best["version"]):
+                    try:
+                        size = os.stat(TOOLS_DIR + "/" + name)[6]
+                    except OSError:
+                        continue
+                    found[key] = {"file": name, "version": version, "size": size}
+    return found
+
+
+def is_app_file(name):
+    return any(name.startswith(p) and name.endswith(s) for _, p, s in APPS)
+
+
+def _home_html_files():
+    try:
+        return sorted(n for n in os.listdir(HOME_DIR) if n.lower().endswith((".html", ".htm")))
+    except OSError:
+        return None
+
+
+def home_branding(lang):
+    """What the home page should show from the card's home/ folder: a dict
+    {"name", "kind", "html", "place", "height"} or None.
+
+    Which file: home.<lang>.html, else home.html, else -- when the folder
+    holds exactly one .html file -- that one, whatever it's called (a
+    file dropped in under its own name used to be silently ignored).
+
+    kind "fragment": a piece of HTML, inserted into the page (up to
+    HOME_MAX_BYTES). kind "page": a complete document (<!DOCTYPE> or
+    <html>) -- shown in a frame instead, because its own styles and
+    scripts would otherwise take over the whole Stump page (a full-screen
+    canvas page sets overflow:hidden and display:flex on body, for one).
+
+    home.json: {"place": "top"|"bottom"|"left"|"right", "height": px},
+    height being the frame's, for a page (default 280)."""
+    if not sd_ok:
+        return None
+    files = _home_html_files()
+    if not files:
+        return None
+    lower = {n.lower(): n for n in files}
+    name = lower.get("home." + lang + ".html") or lower.get("home.html")
+    if name is None:
+        if len(files) != 1:
+            return None
+        name = files[0]
+    path = HOME_DIR + "/" + name
+    try:
+        size = os.stat(path)[6]
+        with open(path, "rb") as f:
+            head = f.read(512)
+    except OSError as e:
+        print("[home] can't read %s: %s" % (name, e))
+        return None
+    probe = head.lower()
+    kind = "page" if (b"<!doctype" in probe or b"<html" in probe) else "fragment"
+    html = None
+    if kind == "fragment":
+        if size > HOME_MAX_BYTES:
+            print("[home] %s is %d bytes, over %d: ignored" % (name, size, HOME_MAX_BYTES))
+            return None
+        try:
+            with open(path, "rb") as f:
+                html = f.read().decode("utf-8")
+        except (OSError, UnicodeError) as e:
+            print("[home] can't read %s: %s" % (name, e))
+            return None
+    cfg = home_config()
+    if cfg["hidden"]:
+        return None
+    return {"name": name, "kind": kind, "html": html, "place": cfg["place"], "height": cfg["height"]}
+
+
+def home_config():
+    """home.json, checked: {"place", "height", "hidden"} with defaults
+    (top, 280, False) for anything missing, unknown or broken."""
+    cfg = {"place": "top", "height": 280, "hidden": False}
+    try:
+        import ujson as json
+        with open(HOME_DIR + "/home.json") as f:
+            raw = json.load(f)
+        if raw.get("place") in HOME_PLACES:
+            cfg["place"] = raw["place"]
+        h = raw.get("height")
+        if isinstance(h, int) and 80 <= h <= 1200:
+            cfg["height"] = h
+        cfg["hidden"] = raw.get("hidden") is True
+    except (OSError, ValueError, AttributeError):
+        pass
+    return cfg
+
+
+def save_home_config(place, height, hidden):
+    """Writes home.json from /admin. Returns None, or a reason it couldn't."""
+    if not sd_ok:
+        return "no SD card"
+    if place not in HOME_PLACES or not (80 <= height <= 1200):
+        return "invalid values"
+    try:
+        os.mkdir(HOME_DIR)
+    except OSError:
+        pass
+    try:
+        import ujson as json
+        with open(HOME_DIR + "/home.json", "w") as f:
+            json.dump({"place": place, "height": height, "hidden": bool(hidden)}, f)
+    except OSError as e:
+        return str(e)
+    return None
+
+
+def home_status(lang):
+    """For /admin: what the node sees in home/, in plain words."""
+    if not sd_ok:
+        return "no SD card"
+    files = _home_html_files()
+    if files is None:
+        return "no home folder on the SD card"
+    b = home_branding(lang)
+    if b is None and home_config()["hidden"] and files:
+        return "hidden from the home page (turned off in /admin) -- the Stump logo shows"
+    if b is not None:
+        how = "a full page, in a %d px frame" % b["height"] if b["kind"] == "page" else "a section"
+        return "home/%s: %s, placed %s" % (b["name"], how, b["place"])
+    if not files:
+        return "home/ has no .html file"
+    big = [n for n in files if n.lower().startswith("home") and _size(HOME_DIR + "/" + n) > HOME_MAX_BYTES]
+    if big:
+        return "home/%s is over %d KB: ignored (a piece of HTML must stay under that)" % (big[0], HOME_MAX_BYTES // 1024)
+    return "home/ has several .html files (%s): name the one to use home.html" % ", ".join(files)
+
+
+def _size(path):
+    try:
+        return os.stat(path)[6]
+    except OSError:
+        return 0
 
 
 def _list_files():

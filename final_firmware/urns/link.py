@@ -81,8 +81,8 @@ class Link:
     # and proof airtime. 1 hop -> 55s, 2 hops -> 75s, 3 hops -> 95s.
     ESTABLISHMENT_BASE    = 35  # seconds
     ESTABLISHMENT_PER_HOP = 20  # seconds per hop
-    CREATION_COOLDOWN   = 5     # min seconds between link creations (allow retries over multi-hop)
-    _last_creation      = 0
+    CREATION_COOLDOWN   = 5     # window (s) for the link-creation budget below
+    _recent_creations   = []    # creation times within the current window
 
     def __init__(self, destination, packet):
         from .identity import Identity
@@ -163,13 +163,21 @@ class Link:
                 self.status = Link.CLOSED
                 return
 
+        # A budget of link setups per window, not one: with a single global
+        # slot, a second phone contacting an LXMF propagation node seconds
+        # after the first was refused outright (reproduced against upstream
+        # LXMF 1.2: its sync failed as PR_LINK_FAILED). The budget still
+        # keeps expensive crypto from starving the loop -- generous only
+        # where the board has native Ed25519/X25519, where setup is cheap.
         now = time.time()
-        if now - Link._last_creation < Link.CREATION_COOLDOWN:
-            log("Link request rate limited (" + str(int(Link.CREATION_COOLDOWN - (now - Link._last_creation))) + "s remaining)", LOG_DEBUG)
+        recent = [t for t in Link._recent_creations if now - t < Link.CREATION_COOLDOWN]
+        if len(recent) >= Link._creation_budget():
+            log("Link request rate limited (" + str(int(Link.CREATION_COOLDOWN - (now - recent[0]))) + "s remaining)", LOG_DEBUG)
+            Link._recent_creations = recent
             self.status = Link.CLOSED
             return
-
-        Link._last_creation = now
+        recent.append(now)
+        Link._recent_creations = recent
 
         # Generate ephemeral X25519 keypair for ECDH
         import gc; gc.collect()
@@ -234,6 +242,16 @@ class Link:
         # Clean up (no longer needed after proof)
         del self._ephemeral_pub_bytes, self._signalling_bytes
         gc.collect()
+
+    @staticmethod
+    def _creation_budget():
+        """Link setups allowed per CREATION_COOLDOWN window: 4 with native
+        crypto (fast), 2 without (each setup can block for seconds)."""
+        try:
+            from .crypto import ed25519
+            return 4 if ed25519.have_native() else 2
+        except Exception:
+            return 2
 
     def receive(self, packet):
         """Handle incoming data packet on this link."""
@@ -450,7 +468,12 @@ class Link:
                 data=req_data,
                 request_id=request_id,
                 link_id=self.link_id,
-                remote_identity=None,
+                # The identity the remote side proved with LINKIDENTIFY, if
+                # any (reference RNS passes link.get_remote_identity()). It
+                # was always None here, so a handler could never tell who
+                # was asking -- an LXMF propagation node's /get can't
+                # answer anyone without it.
+                remote_identity=self.remote_identity,
                 requested_at=requested_at,
             )
         except Exception as e:

@@ -23,6 +23,8 @@ except ImportError:
 # checked before /admin/delete, which is a prefix of it.
 _ROUTES = (
     ("/admin/delete_post", "billboard"),
+    ("/billboard.json", "billboard"),
+    ("/files.json", "files"),
     ("/admin/delete", "files"),
     ("/rrc", "chat"),
     ("/billboard", "billboard"),

@@ -409,8 +409,23 @@ def main():
     rns.config = CONFIG
 
     dest, router = setup_node(rns, NODE_NAME)
+    # Reported in /rrc/poll as "node", so a client can tell the Wi-Fi
+    # session and the LXMF address are the same node.
+    try:
+        import rrc
+        rrc.NODE = {"name": NODE_NAME, "lxmf": dest.hexhash}
+    except Exception:
+        pass
     gc.collect()
 
+    # Radio settings saved from /admin override config.py's bridge entry,
+    # written in before the interfaces exist so the Heltec's very first
+    # connection already gets them (see radio.py).
+    try:
+        import radio
+        radio.overlay(rns.config)
+    except Exception as e:
+        print("[radio] saved settings not applied:", e)
     rns.setup_interfaces()
     gc.collect()
 
@@ -437,6 +452,30 @@ def main():
     except Exception as e:
         beacon = None
         print("Stump beacon not created:", e)
+
+    # LXMF propagation node (store-and-forward), when switched on in the
+    # provisioner or /admin (see propagation.py).
+    pn_on = False
+    try:
+        import propagation
+        propagation.attach(router, NODE_NAME)
+        if propagation.configured_on():
+            pn_on = propagation.enable()
+    except Exception as e:
+        print("[pn] not started:", e)
+
+    async def pn_announce_loop():
+        # Its own slow cycle, offset from the LXMF announce and the Stump
+        # beacon so the signing stalls never coincide.
+        await asyncio.sleep(10)
+        while True:
+            try:
+                if propagation._enabled:
+                    propagation.announce()
+            except Exception as e:
+                print("[pn] announce error:", e)
+            gc.collect()
+            await asyncio.sleep(STUMP_ANNOUNCE_INTERVAL)
 
     async def beacon_loop():
         # Announce signing freezes the event loop (see reannounce_loop
@@ -501,6 +540,14 @@ def main():
         asyncio.create_task(reannounce_loop())
         if beacon is not None:
             asyncio.create_task(beacon_loop())
+        try:
+            import propagation
+            # Always started: /admin can switch the node on at runtime, and
+            # both idle cheaply while it's off or has nothing to check.
+            asyncio.create_task(propagation.checker_loop())
+            asyncio.create_task(pn_announce_loop())
+        except Exception as e:
+            print("[pn] tasks not started:", e)
         asyncio.create_task(serial_input_loop(router))
         asyncio.create_task(barkeep.run_barkeep_server())
         # The DNS redirect is what actually makes the captive portal

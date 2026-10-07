@@ -1,8 +1,6 @@
 # Project Stump — Beta A (Release)
 
-<p align="center">
-  <img src="demo.gif" alt="demo" width="200" />
-</p>
+![demo](demo.gif)
 
 An off-grid community node. A long-range encrypted mesh radio and a
 local high-bandwidth server, deliberately kept on separate hardware.
@@ -208,10 +206,10 @@ current setting. If a mesh peer isn't verified and the landing room is
 tiered `minted` or `hybrid`, they're redirected to `#main` instead, with
 a system message explaining why. See [Access control](#access-control).
 
-**Images on the About page's hardware gallery are broken.**
-They're served from `/sd/about/`, not baked into the firmware — a
-technician has to copy the actual photos there. See `/about/img` in
-[HTTP API](#http-api).
+**The FireFly Android APK has to go on the SD card with a card reader.**
+At ~50 MB it would take about 14 hours over USB, so the provisioner
+refuses it and says where it goes (`tools/` on the card). Until it's
+there, the About page's Android card says "Not on this Stump yet".
 
 ---
 
@@ -403,30 +401,14 @@ on a newly-provisioned relay in the field.
 
 ## HTTP API
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/` | BarKeep console (also the captive-portal landing page) |
-| POST | `/chat` | Send a BarKeep command; body is raw text |
-| GET | `/billboard` | Bulletin board page |
-| POST | `/post` | Add a notice; body `entry=<urlencoded>` |
-| GET | `/rrc` | RRC chat client |
-| GET | `/rrc/poll?room=&since=` | New room messages, private messages, and who's currently in the room (JSON) |
-| POST | `/rrc/send` | Send a chat line or `/command`; body is raw text |
-| POST | `/upload` | Upload a file; `X-Filename` header, raw body. `507` if the card is over its capacity ceiling even after evicting the oldest shared files (see "File storage" below) |
-| GET | `/download?f=` | Download a file (streamed, with real filename) |
-| GET | `/files` | Browsable file listing (no admin UI on this page — see "Access control" #4) |
-| GET | `/admin` | Password-only login; no link anywhere points here on purpose |
-| POST | `/admin` | Validates the password, shows a checkbox file list on success |
-| POST | `/admin/delete` | Batch-deletes checked files after re-validating the password for real |
-| GET | `/about` | About page — what Stump/Fireflies are, how to connect, hardware gallery |
-| GET | `/about/img?f=` | Serves a gallery image from `/sd/about/`, inline (no download prompt) |
-| GET | `/tools` | Technician tools page — downloads only, no CLI instructions shown here (see below) |
-| GET | `/tool?f=` | Download a tool file |
-| GET | `/flash` | Browser-based board flasher (WebSerial) — still live, no longer linked from `/tools` |
-| GET | `/fw?f=` | Firmware image / catalog for the flasher |
-| GET | `/lang?set=&next=` | Sets the requesting visitor's language, redirects back |
+The full route table — every address the node answers, what it takes and
+returns — is **Part 5 of `docs/COMMANDS.md`**, kept in one place and
+checked against the code (the table that used to sit here had drifted:
+it still called `/` the BarKeep console and missed every route added
+since). For client builders, `docs/CLIENT_QUICKSTART.md` covers the same
+routes from the app side.
 
-Any unmatched path returns the BarKeep page with `200` — captive-portal
+Any unmatched path returns the home page with `200` — captive-portal
 detection depends on probe requests getting a real HTTP response.
 
 ### What ends up in `/sd/tools/`, and why
@@ -474,6 +456,14 @@ instead of carrying a USB stick:
   `LICENSE` pushed alongside it provides that; see the warning in
   `tools_payload/images/README.txt` for what staging a real binary
   there would actually require.
+- **The FireFly apps** (`tools_payload/apps/`) — found on the card by
+  name (`FireFly-Android-<version>.apk`, `FireFly-RK3326-<version>.zip`)
+  and offered on the About page and `/tools`. The handheld package goes
+  over USB; anything over 1 MB — the ~50 MB Android APK — is left for a
+  card reader, and the provisioner says where it goes.
+- **A `home` folder next to `provisioner.py`**, if there is one, goes to
+  `home/` on the card (not `tools/`): the node's own home page branding,
+  see `docs/HOME_BRANDING.md`. Same 1 MB rule.
 
 All of it downloads from `/tools` via `/tool?f=`, streamed in 16KB
 chunks like every other file transfer in this project — confirmed
@@ -755,6 +745,42 @@ synced posts older than 72 hours still expire; synced posts survive a
 reboot where NTP fails; ids restamp once when the clock becomes valid,
 then stay stable; and the earlier title/body, delete-by-id, ceiling and
 HTTP suites all still pass.
+
+**Radio settings for the Heltec Bridge, behind `/admin`.** The CAM
+configures the Heltec's radio itself every time it connects —
+frequency, bandwidth, TX power, spreading factor, coding rate (see
+`_init_radio()` in `urns/interfaces/wifi_serial.py`). Those values
+used to come only from config.py's bridge entry, which set none of
+them, so the driver's built-in defaults always won — **7 dBm** among
+them — and an `rnodeconf` change on the Heltec was simply overwritten
+at its next reconnect. (The provisioner's Bridge-role TX power question
+didn't help: its answer goes into the Heltec's own profile, not the
+CAM's config.)
+
+The same `/admin` login now shows a **Radio (Heltec Bridge)** section
+with the bridge's current values, pre-filled. *Apply* re-checks the
+password, validates every field (TX power 0–22 dBm, frequency
+150–960 MHz, the ten LoRa bandwidths, SF 5–12, CR 4/5–4/8 — anything
+else is refused and nothing changes), saves them to `/radio.json` on
+internal flash (so they work without an SD card and survive reboots),
+and sends them to the Heltec at once if it's connected — or says
+they'll go at its next connection if it isn't. At boot the saved values
+are written into the bridge's config *before* it first connects, so the
+Heltec never briefly gets config.py's values. Frequency is typed in MHz
+and parsed as text to exact hertz, never through a float — on this
+board's single-precision floats `915.1` would otherwise become
+915,099,976 Hz. All in `radio.py`; the section warns that frequency,
+bandwidth, SF and CR must match every node on the mesh, while TX power
+can differ.
+
+**Status: tested end to end on single-precision MicroPython** against a
+fake Heltec on TCP that logs every command it receives: the bridge
+connects with 7 dBm; *Apply* with 17 reaches it live; a reconnect keeps
+17; a reboot's first connection already sends 17; a bad value sends
+nothing; a wrong password gets `403`; with the Heltec unreachable the
+value is saved and held for its next connection. (Doing this surfaced
+that the older MicroPython 1.22 Unix build used earlier for tests lacks
+`socket.sendall`; the ESP32 port and current MicroPython have it.)
 
 **Theme — site-wide, chosen at provisioning.** The node has one theme
 for every visitor, on every page including the chat: Amber (the
@@ -1296,6 +1322,490 @@ still forwarded, own lines not echoed back, mesh→web DMs unaffected).
 Every case failed on the shipped code and passes on the fix. The web
 client's own DM path (`rrc.py`) was not changed.
 
+**A DM received while in another room was duplicated.** Real,
+reported and reproduced: a DM arrives while you're in `#lxmf`, you
+switch to `#main`, open the DM — it's there twice, and the unread count
+had doubled too. Switching rooms resets the client's `lastId` to 0 to
+load the new room's history; DMs share the same id sequence, so the
+server (correctly) sent every DM again, and the client added each one
+to its thread a second time. The client now remembers which DM ids it
+has already placed and skips repeats, which also covers the other path
+that lowers `lastId` (returning to a room from a DM view). Verified in a
+real DOM against the server's own `since` semantics: the exact repro
+now shows the DM once; bouncing between rooms repeatedly, a genuinely
+new DM arriving afterwards, replying from the thread, and returning to
+the room all behave correctly.
+
+**Room activity and DMs are written in symbols, not sentences.** A
+notice like "X a rejoint" used to be stored once, as finished text in
+the language of whoever triggered it, so every reader saw that one
+language — and the mesh bridge's notices were always English. They're
+now symbols every reader understands, built by one set of helpers in
+`rrc.py` (`ev_join`, `ev_leave`, `ev_rename`, `ev_topic`, `dm_line`,
+`no_such`, `moved`, `names_line`, `rooms_line`) that the web
+chat and the mesh bridge both use, so the two can't drift apart:
+
+| Line | Meaning |
+|---|---|
+| `✓ rod` · `✗ rod` | joined · left (a mesh user going quiet too) |
+| `✎ rod → bob` · `✎ #main text` | renamed · topic changed |
+| `[DM] <bob>: text` | a DM, always naming who wrote it |
+| `→ #main` | you're now in #main |
+| `⊖ ghost` | no one here by that name |
+| `#main: a, b` · `#main ·3 text` | `/names` · `/rooms` |
+
+`~` in front of a name marks a mesh user (`✓ ~rod`); nicks can't contain
+it, and `/msg ~rod` still reaches rod. Moving rooms shows `✗ rod` in the
+room left and `✓ rod` in the room joined, with nothing after the name.
+DMs are `[DM] <author>: text` everywhere — the web thread used to draw
+both sides as `→ <author>`, arrows pointing the same way whichever way
+the message went; now every line simply names who wrote it, so a thread
+reads as a conversation. Over LXMF that replaces `[private] <nick>
+text`, and notices arrive as bare symbol lines (they had a `* `
+prefix).
+
+Still sentences, and translated: `/help` (ending with a key to the
+symbols), and the rarer replies to one person — messaging yourself, a
+malformed command, a taken nick, a room you can't enter, the hint
+before the first DM to an announce-only peer. Web users get their own
+language; mesh users the node's default, French — no language setting
+over LXMF, since what they see constantly needs none. The mesh
+bridge's own replies (`/join`, `/nick`, `/part`, `/help`, `/clear`),
+previously English, now use the same translations as the web chat. The
+two built-in rooms' default topics follow each reader's language until
+someone sets a real topic. The file bot's `!` replies, posted to the
+room for everyone, use the node's default language; the translations
+live in `fservbot/templates.py` with the rest of its voice, so an
+operator still rewrites it by editing one file. Its `/fs…`
+configuration commands, operator-only, stay English. The web chat adds
+a spoken label in the reader's language to every symbol line, for
+tooltips and screen readers. Nine translation strings made obsolete by
+this were removed.
+
+**Every DM sent over LXMF is echoed back to the sender — deliberately.**
+A mesh client sending `/msg <nick> <text>` gets an LXMF reply that is
+its own DM line, `[DM] <its nick>: text` — the same in every language.
+It's kept on purpose: the LXMF delivery proof only says the node
+received the message, while the echo says it found a recipient by that
+name (failure comes back as `⊖ <name>`, or a sentence for the rarer
+cases). Because it names the author, a client tells it from an
+incoming DM by comparing the author with its own nick; it no longer
+names the recipient. The web chat relies on the same confirmation: your
+message appears in a thread only once your own `[DM]` line comes back,
+so a DM to someone who has left shows `⊖` instead of looking sent —
+previously, a reply typed in a thread ignored the server's answer
+entirely. Since the confirmation no longer carries the recipient's
+exact capitalisation, the web chat merges a thread started as `/msg BOB`
+into Bob's own name as soon as Bob replies, so one conversation stays
+one thread. Parsing patterns are in the Client Quickstart.
+
+Cost: every LXMF message across the radio is two transmissions (the
+message and its delivery proof), so the echo doubles a DM's airtime —
+about 0.9 s → 1.8 s for a 29-character DM at SF8/125 kHz/CR 4/5
+(measured packet sizes: 227 bytes per message, 83 per proof; 198 bytes
+of a message are fixed overhead, so a shorter echo text barely helps).
+That's ~3% → ~6% of the channel at 2 DMs a minute, ~15% → ~30% at 10.
+
+**The technician-tools step of an upload, made visible.** After the app
+is installed, `--upload-app` (and full provisioning) copies the tools
+for the node's `/tools` page to its SD card: `provisioner.py`,
+`README.md`, the firmware bundle, the browser flasher — about 1.1 MB.
+Copies to the SD card run at roughly 1 KB/s over USB, so the first time
+this takes up to ~20 minutes, and it used to do it in silence apart from
+one line about the bundle: it looked hung. Now it states the total and
+the time up front; prints every file with its size, then `ok` with how
+long it took, `unchanged, skipped`, or the reason it failed; skips any
+file already on the card byte for byte (SHA-256 computed on the board),
+so a re-run is quick and a half-copied file is redone; scales each time
+limit with the file's size; treats Ctrl+C as "stop here, the app is
+installed" instead of a traceback; and `--skip-tools` leaves it out.
+The bundle copied to the node no longer carries `third_party/` (the
+3 MB of Codec 2 sources tripled it to 1.6 MB); it stays in the project
+download.
+
+**HTTPS on the Stump's own Wi-Fi.** Browsers only open the microphone
+on secure pages, so live voice recording needs HTTPS. With a real
+certificate for a name you own (e.g. `stump.labuche.org`, from Let's
+Encrypt — **step-by-step with Firebase Hosting in
+`docs/HTTPS_SETUP.md`**), installed with
+`provisioner.py --install-cert PORT fullchain.pem privkey.pem`, the node
+also serves HTTPS on 443 (`stump_tls.py`; certificate in `/tls/` on
+internal flash). The captive DNS already answers every name with the
+node's address, so on its Wi-Fi that name reaches the node with a
+normal padlock, offline too. There is **no server-side redirect**: a
+page opened over plain HTTP on the Stump's Wi-Fi is a tiny page that
+asks the browser to fetch `https://<name>/tls-ok` and moves to HTTPS
+only if that works — so the *phone* checks the certificate against its
+own clock, and with an expired certificate, a wrong phone clock or no
+answer in 3 s the visitor just stays on HTTP, with no warning page. (A
+first version redirected from the server, which would have sent everyone
+into a warning once a certificate lapsed; an outside review caught it.)
+That also leaves captive-portal detection exactly as before. Background
+requests (polls, uploads, audio, downloads) are never touched; visitors
+on the router's LAN never try (there the name resolves to the internet).
+The guide recommends an ordinary TLD (`.org`, `.net`, `.com`): `.app` and
+`.dev` are HSTS-preloaded, so a lapsed certificate there would be an
+unbypassable error for anyone typing the name. `/admin` shows HTTPS status, the expiry
+date, and the days left (bold under 21) when the node's clock is set. With no certificate, or a MicroPython that
+can't serve TLS, nothing changes. `--install-cert` checks the key
+matches, the expiry, that the chain includes the intermediate, and the
+key type, before copying anything. `tls_probe.py` checks a board's TLS
+support and handshake time. The module is `stump_tls`, not `tls`:
+recent MicroPython has a built-in `tls` that would shadow it.
+
+*Status:* the real web server under MicroPython served HTTPS that a
+client verified like a browser (test CA, hostname `stump.labuche.app`,
+ECDHE-ECDSA-AES256-GCM); a plain-HTTP page on the Stump's Wi-Fi got the
+upgrade page (no redirect), `plain=1` the normal page, `/tls-ok` answered
+over HTTPS, polls and LAN visitors untouched; a wrong hostname refused.
+The upgrade page in a browser engine: valid certificate → HTTPS; failed
+fetch → stays on HTTP; no answer → HTTP after 3 s; a late answer can't
+cause a second jump. `--install-cert` checks tested
+on valid, mismatched, expired, near-expiry, intermediate-less, RSA and
+wildcard certificates. Not yet measured: handshake time and memory on
+the ESP32 itself, which matter more than usual because the Stump closes
+each connection after one request — on HTTPS, every chat poll (every
+2 s, per visitor) is a fresh handshake. `tls_probe.py` and the burst and
+parallel tests in `HTTPS_SETUP.md` step 0 measure exactly that.
+
+**Next field test:** `docs/FIELD_TEST.md` is the checklist for this
+build — what's new, in the order to check it on site, with the questions
+only real hardware can answer marked, and what to send back.
+
+**Home branding is set from `/admin`.** The Home page section panel shows
+what the node sees in `home/` and sets where the section goes — above
+the buttons, under them, beside them on the left or right — the frame's
+height (80–1200 px, for a complete page), and whether to show it at all
+(unticked brings back the Stump logo, files kept). It saves
+`home/home.json` (`fserv.save_home_config()`, now with `"hidden"`), so
+the panel and the file always agree; `POST /admin/home` re-checks the
+password and refuses unknown placements and out-of-range heights,
+changing nothing. *Status:* with the hearth file — every placement and
+height saved and followed by the home page, the panel reflecting each;
+hide and show; wrong password (403); bad values refused; no SD card
+(status only, no form); and in a browser engine, the form sends exactly
+what the route expects (no `show` field when unticked).
+
+**Home branding: any single file, complete pages framed, a status line.**
+A field report: a complete page dropped in `home/` under its own name
+(`the_hearth_kinetic_ascii.html`, a canvas animation) wasn't picked up —
+only `home.html` was looked for, silently. Now `fserv.home_branding()`
+also takes the only `.html` file in the folder, whatever its name (with
+several and no `home.html` it won't guess). A **complete page**
+(`<!DOCTYPE>`/`<html>`) is shown in a sandboxed `<iframe>` rather than
+inserted: inline, its `body` styles (`overflow:hidden`, `display:flex`,
+`margin:0` on everything) would have taken over the whole Stump page.
+The frame's height comes from `home.json` (`"height"`, 80–1200 px,
+default 280); `sandbox="allow-scripts"` lets it animate but gives it an
+origin of its own, so its scripts can't read the node's pages as the
+visitor. `.html`/`.htm` now have a type (`text/html`) — without one the
+frame would have downloaded the file. `/admin` gains **Home page
+section**: the file in use and how it's shown, or why none is
+(`fserv.home_status()`). *Status:* the user's own file — framed at the
+top, served intact as a page, named in `/admin`; frame height; the
+several-files case; a fragment still inline; the earlier placement
+suite unchanged. The canvas itself wasn't run (no real browser here):
+that's a field-test item.
+
+**Branding can bring its own styles and fonts.** The node now serves
+`text/css`, `font/woff2`, `font/woff`, `font/ttf`, `font/otf`,
+`image/x-icon` and `image/avif` (node-wide, so the Files page benefits
+too): a browser refuses a stylesheet sent as generic data, which made a
+`style.css` in `home/` useless. `docs/HOME_BRANDING.md` now covers
+images, styles, fonts and scripts — including that a home-page script
+acts as the visitor on that node, and Python only via an in-browser
+runtime like Brython stored on the card.
+
+**The home page can carry its own branding.** Whoever keeps a node can
+drop a `home` folder on its SD card (next to `tools`) with `home.html` —
+an HTML fragment, up to 32 KB — and its images, and that section
+replaces the Stump logo and title (`fserv.home_branding()`,
+`barkeep._render_chat_page()`). `home.<lang>.html` wins for that
+language; `home.json` (`{"place": "top"|"bottom"|"left"|"right"}`) puts
+it above, below, or beside the cards — side by side from 760 px wide,
+the page widened for it, stacking on phones (left above, right below).
+Files are served from `/home-file?f=`, behind the same name guard as
+`/tool`. A missing or broken `home.json` means top; a file over 32 KB is
+ignored and the default page shows; no folder, no change. The
+provisioner copies a `home` folder next to it to the card with the
+tools. Guide: `docs/HOME_BRANDING.md`. *Status:* every placement, the
+per-language file, missing/unknown/broken `home.json`, the size cap, the
+file route and a `../` attempt, through the real request handler.
+
+**Navigation rows are icon-only.** The Files page's row has five
+destinations (home, chat, billboard, tools, about); with a word under
+each, the grid's 92 px minimum fit only three on a phone and the tools
+tile dropped to a second line. Navigation rows (`_nav()`, class
+`tiles nav`) now show the icon alone, with the translated name kept as
+a tooltip and for screen readers (`title`, `aria-label`), at a 48 px
+minimum: five fit in 280 px, inside even a 320 px phone's 284 px of
+content width. The phone rule that stacked tiles in one column skips
+navigation rows. The home page's cards keep their words and subtitles.
+Every page's row is now one rule, `NAV_ORDER` minus the page itself —
+chat, billboard, files, tools, about, home — so each shows the other
+five in the same order (home, the billboard, tools and about had each
+been missing one); the home page gained a Tools card, and the chat
+page's bar follows the same order, icons only. Switched-off features
+drop out everywhere.
+The home page's cards are a vertical list, one per row (`tiles home`):
+icon on the left, the name and subtitle beside it — five cards in a grid
+were too compact.
+
+**The About and Tools pages now mirror the public site.** The About
+page follows labuche-stump.web.app as it is now: three views — Project
+(v1), How to Connect, Apps & Handhelds — with the site's current copy in
+all three languages, its five link tiles (LaBuche-Stump, FireFly-Android,
+FireFly_RK3326, LinkedIn, email), and its device cards for the two
+FireFly apps. The hardware photo gallery the site dropped is gone too,
+along with its `/about/img` route. Where the node can do better than the
+site, it does: the connect steps name the network it **actually**
+broadcasts (read live, so a technician's custom name shows) and its live
+address; and since there's no internet on its own Wi-Fi, each app card
+offers a **download from this node** — version and size shown, plus how
+to install — with GitHub kept as the second, online-only link. `/tools`
+lists the apps first, then the technician's files. APKs are served as
+`application/vnd.android.package-archive`, so a phone offers to install.
+
+*The apps are found on the SD card by name* (`fserv.find_apps()`), in
+the card's `tools` folder: `FireFly-Android-<version>.apk` and
+`FireFly-RK3326-<version>.zip`. The highest version wins (compared as
+numbers: 0.2.11 beats 0.2.9), so a newer file dropped on the card
+updates the page with no firmware change; a missing app says "Not on this
+Stump yet". The handheld package (95 KB) ships in
+`tools_payload/apps/` and the provisioner's tools step copies it. **The
+Android APK does not travel over USB**: FireFly 0.2.11's debug APK is
+49.7 MB — about 14 hours at the ~1 KB/s the SD card takes over USB — so
+the tools step refuses anything over 1 MB and says to copy it with a
+card reader (seconds). To install it: rename `app-debug.apk` to
+`FireFly-Android-0.2.11.apk` and copy it into `tools/` at the top of the
+node's SD card. (A release build for arm64 only would be far smaller,
+and its release signature avoids the uninstall a debug-signed install
+forces later.) Installing the handheld package still needs internet on
+the handheld — FireFly's `install.sh` uses `apt-get` — and the page says
+so.
+
+*Status:* through the real request handler with no apps, Android only,
+and both apps plus an older Android: the right downloads and "not here
+yet" messages, 0.2.11 chosen over 0.2.9, apps kept out of the technician
+list, the five tiles, the live network name and address, the site's
+French and Spanish labels, and the 49.7 MB APK streamed whole with
+Android's type; tab switching tested in a browser engine. The tools step
+copies the handheld zip and sends the APK to the card reader, and the
+firmware bundle carries no app files.
+
+**Voice notes in Opus as well as Codec 2 (FireFly 0.2.10).** FireFly
+now sends Opus by default on every link, Stump voice DMs included, so
+the node relays both: `FIELD_AUDIO` = `[16, Ogg Opus file]` or
+`[3–9, Codec 2 frames]`, byte for byte unchanged. Lengths come from the
+bytes in whole milliseconds as FireFly's spec defines them — Opus from
+the Ogg pages, `(last granule − pre-skip) / 48` (`rrc.opus_ms()`, which
+also validates `OpusHead`: 1–2 channels, mapping family 0) — with
+integer half-up labels, and limits of 600–15,000 ms (Codec 2) and
+600–15,100 ms (Opus). `/rrc/voice` takes up to 16 KB (a 15 s Opus note
+at 8 kbit/s is ~13.4–14.2 KB; every other small body stays at 8 KB); the
+poll's `voice` object gains an exact `ms`; voice held in RAM is capped
+at ~2 MB overall. The web chat now **sends Opus** with FireFly's
+settings (16 kHz mono, 8 kbit/s constrained VBR, 60 ms frames, VOIP,
+complexity 10) and plays both: libopus 1.5.2 compiled to WebAssembly
+(`web/opus.wasm`, 333 KB, BSD-style licence — `third_party/opus/` holds
+the licence, the wrapper and a build script that reproduces it byte for
+byte) with an Ogg writer/reader in `web/opus.js`; recordings are
+resampled to 16 kHz with a 7.2 kHz low-pass. The codec files are now
+streamed in 16 KB chunks (reading `opus.wasm` whole needed one 333 KB
+allocation — a MemoryError in testing). Two related fixes: the
+propagation node advertised 15 KB per message but answered syncs with
+at most 14,000 bytes, so a message between ~14 and 15 KB — a 15 s Opus
+note — was stored but never collectable (replies now hold ~16 KB, and
+uploads over the advertised limit are refused); and chat that reaches
+the node through its own propagation node more than 30 minutes late is
+not acted on — the sender is told instead.
+
+*Status:* both FireFly Opus vectors (`kristoff_opus.ogg`,
+`kristoff_opus_8k.ogg`) give 5,000 ms on the node and in the browser,
+and decode in the browser to exactly 240,000 samples at 48 kHz (60 dB
+SNR against the reference `opusdec`); `kristoff_3200` and
+`kristoff_1200` reproduce byte for byte. Our encoder's files pass
+`opusinfo` with no warnings and match FireFly's structure (pre-skip
+312, 960/840/240 ms pages, ~7.3 kbit/s). Every row of FireFly's
+"Seconds" table matches; Opus at exactly 15,100 ms is accepted, 15,101
+refused; five kinds of malformed Opus are refused. Against upstream
+LXMF 1.2.0: FireFly's Opus vector reached the web user byte for byte
+over an LXMF link, a 15 s Opus note (14,219 B) went the other way
+intact with a valid signature, and the same note left at the
+propagation node was collected intact. The web chat in a browser
+engine sends a real Ogg Opus file and plays Opus, Codec 2 and an
+unknown mode correctly.
+
+**Voice notes (Codec 2), on Wi-Fi and over the mesh.** A voice note is
+a DM with audio: `/msg <nick>` plus the note, delivered like any DM and
+shown as `[DM] <author>: ♪ 5.0 s`. It follows FireFly's voice-note spec
+(LXMF `FIELD_AUDIO` = `[mode, raw Codec 2 frames]`, default
+`AM_CODEC2_1200`), so notes travel between the web chat, FireFly and
+Sideband unchanged:
+
+- **Web chat:** a ♪ button in DM threads records; ▶ plays. The browser
+  does the codec work — Codec 2 1.2.0 compiled to WebAssembly
+  (`web/codec2.wasm`, 210 KB, served from the board with
+  `web/codec2.js`, loaded only on first use). Recordings are decoded,
+  brought to 8 kHz through a windowed-sinc low-pass at 3.6 kHz (aliasing
+  measured >80 dB down), DC-filtered, levelled to ~70 % peak with at
+  most 4× gain, capped at 15 s, refused under 0.6 s, then encoded at
+  1200 and posted as raw frames to `POST /rrc/voice?to=&mode=`. Playback
+  fetches `GET /rrc/voice?id=` (the recipient's own notes only).
+- **Two ways to record, one pipeline.** On a secure (HTTPS) page — a
+  node with a certificate, see `docs/HTTPS_SETUP.md` — ♪ records the
+  microphone live (`getUserMedia` + `MediaRecorder`) and ■ sends. On plain
+  HTTP, or if the visitor refuses microphone access, ♪ uses **HTML Media
+  Capture** (`<input type="file" accept="audio/*" capture>`): the device's
+  own recorder makes the recording and hands back a file — no HTTPS
+  needed. On iPhone, Safari may offer a file picker instead of a
+  recorder; worth testing on real devices. Either way the recording is
+  decoded, converted and encoded to Codec 2 in the browser and sent to
+  `/rrc/voice` as a DM — deliberately *not* through the file-sharing
+  `/upload`: a raw phone recording would land on the shared shelf, is far
+  too big for LoRa, and isn't something FireFly can play. While a note is
+  being processed and sent, ♪ shows ⋯ and ignores further taps; a
+  recording the browser can't decode gets its own message rather than
+  "connection problem" (older iPhones without `File.arrayBuffer()` are
+  read through `FileReader`).
+- **Mesh:** an LXMF message carrying `FIELD_AUDIO` and the text
+  `/msg <nick>` (FireFly's shape) becomes a voice DM; a note to a mesh
+  user goes as its own LXMF message with the field and
+  `[DM] <sender>: ♪ 5.0 s` as text. Audio with no `/msg` gets a hint.
+  At SF8/125 kHz a 5 s note is a few seconds of airtime over a link.
+- **Limits:** modes 3–9 (700C … 3200; Opus and the removed 450 modes are
+  refused), 0.6–15 s, one note per 5 s and 30 an hour per sender
+  (`⧗ — …` otherwise — the rate token FireFly's memo asked for), 10 voice
+  notes held per inbox. Same access rule as `/msg`, and covered by the
+  chat feature switch.
+
+*Licence.* Codec 2 is LGPL-2.1. `third_party/codec2/` holds exactly the
+sources `codec2.wasm` is built from (unmodified 1.2.0, plus generated
+codebooks), the licence, the wrapper and `build_codec2_wasm.sh`, which
+rebuilds the shipped module byte for byte. It stays in the project and
+is never copied to the board.
+
+**Status:** the WebAssembly encoder reproduces FireFly's test vector
+(`kristoff_1200`, SHA-256 `7ba18f75…`) byte for byte, and decodes it to
+exactly 40,000 samples (within one LSB of native Codec 2). Against
+upstream LXMF 1.2.0: a 5 s note from an upstream client reached the web
+user with identical bytes over an LXMF link, and the web user's reply
+arrived upstream with identical `FIELD_AUDIO` and a valid signature.
+Server side on single-precision MicroPython: every reply, the rate
+limit, the 10-note cap, mesh both ways, HTTP upload/download/poll, the
+access gate and the feature switch. Web page in a browser engine with
+the real codec: the file fallback, the live mic on a secure page, send,
+playback, a rate-limited send, and an unplayable format.
+
+**LXMF propagation node (store-and-forward).** Switched on in the
+provisioner or `/admin` (needs the SD card), the node announces itself
+as an LXMF 1.2 propagation node (`lxmf.propagation`, on its own
+identity) and holds messages for people who are offline: a phone
+(FireFly, Sideband) that picks LaBuche as its propagation node uploads
+messages for absent recipients, and the recipient collects them with a
+sync. The node can't read them — they're encrypted for the recipient.
+All in `propagation.py`, matching upstream LXMF 1.2.0 field for field
+(announce data, uploads as packets or resources, the two-step `/get`
+sync, error codes).
+
+*The one deliberate difference.* Every stored message carries a
+proof-of-work stamp the node must check: a 256 KB work block built in
+1,000 rounds, then one hash. Measured on the CAM with `stamp_bench.py`
+(same work block as upstream, byte for byte): **~30 s per message**.
+Upstream checks before confirming receipt; here that would freeze the
+web pages, chat and Heltec bridge for half a minute per upload, and a
+phone would give up waiting and resend. So receipt is confirmed at
+once, the upload is parked in `/sd/lxmf_pn/pending`, and a background
+task checks stamps two rounds (~60 ms) at a time. A message is stored
+and offered to its recipient only once its stamp checks out; a bad one
+is dropped (the sender isn't told). Capacity is roughly 30+ messages an
+hour; collecting stored messages costs nothing extra.
+
+Limits: 15 KB per transfer (the stack's 16 KB cap), a `/get` reply of at
+most ~14 KB (a phone syncs again for the rest), 100 messages per
+recipient, 50 MB in total, 30-day expiry (clock-aware, like the
+billboard), 50 uploads waiting for checks. Peering with other
+propagation nodes is Phase B: until then `/offer` answers
+`ERROR_NO_ACCESS`, which makes an upstream `lxmd` that tries to
+auto-peer back off cleanly.
+
+`/admin` shows the switch, status (held, being checked, accepted,
+refused, handed over) and two single-phone test tools: a **test
+mailbox** — an address that's never online, whose messages `/admin`
+displays — and **leave a message for an LXMF address**, which stores a
+message from the node for that phone to collect with a sync. Messages
+left that way are made on the node, so they carry no stamp (generating
+one would take this board hours); Phase B won't forward them to peers.
+
+Two fixes in `urns` came with it. Request handlers always received
+`remote_identity=None`, even after the client identified itself, so no
+phone could have synced. And link setup was limited to one per 5 s
+globally, so a second phone arriving right after the first was refused
+(reproduced: upstream's sync failed as `PR_LINK_FAILED`); it's now a
+budget of 4 per window with native crypto, 2 without.
+
+**Status: tested against upstream RNS 1.5.5 + LXMF 1.2.0** (FireFly's
+versions), with the Stump's real stack on single-precision MicroPython
+connected over TCP: upstream validates the announce; phone A's upload
+is confirmed, stamp-checked and stored; offline phone B syncs and
+receives it, and the node deletes it once B has it; "leave a message"
+reaches B from the node; the test mailbox shows what's sent to it; a
+forged stamp is rejected and not stored; `/get` without identifying
+gets `0xf0`; `/offer` gets `0xf1`. `/admin` tested through real HTTP
+(switch, saved setting, status, mailbox, bad and unknown addresses,
+wrong password); the provisioner question and config writer tested; and
+the node boots with it on, creating its store on the card.
+
+**Room tiers weren't enforced over the mesh — fixed.** The web's
+`/join` goes through stumpid's `can_join_room()`; the mesh bridge
+answers `/join` itself, and also has a `#room text` shortcut that posts
+into any existing room without moving — neither checked tiers. A mesh
+user could join, or post into, a `minted` or `hybrid` room with no
+`/auth` and no invite. Found while answering the FireFly memo. Both
+paths now apply the same check (`_tier_refusal()` in `rrc_mesh.py`),
+**fail-closed**: if stumpid is active but the check errors, the move is
+refused. Only the initial landing room had been checked before.
+
+**From the FireFly memo (requests 1–4, and JSON endpoints).**
+- A mesh user the node lands in a room — first message, first message
+  after going quiet past `MESH_PEER_TIMEOUT`, or redirected by a tiered
+  `#lxmf` — is sent `→ #room` before anything else.
+- Replies clients act on start with a stable token, the same in every
+  language, then ` — ` and the sentence: `= #room` already there,
+  `? /cmd` no such command, `⊘ #room <tier>` refused by tier. Built by
+  `rrc.tok_already/tok_unknown/tok_refused`, used by the web chat, the
+  mesh bridge and stumpid alike; the web chat labels them like the
+  other symbols. (The memo also asked for a "rate limited" token; the
+  node has no rate limiting yet, so there's nothing to attach it to.)
+- `/rrc/poll` includes `"node": {"name", "lxmf"}`, set at startup from
+  the node's LXMF destination, so a client on both Wi-Fi and LoRa can
+  tell it's one node.
+- Every pushed room batch over LXMF carries its room as the LXMF
+  message **title** (`#lxmf`); DM-only batches carry none. The send
+  queue takes an optional title, sent by one helper (`_send_item()`).
+  A title packed by `urns` was decoded with upstream LXMF 1.2 to
+  confirm compatibility.
+- `GET /billboard.json` and `GET /files.json` return the board and the
+  shelf as data; both are covered by the feature switches (`404` when
+  their feature is off — added to `features.py` explicitly, since its
+  address matching wouldn't otherwise cover `.json`).
+
+**Status: on single-precision MicroPython with the device's plugins** —
+every token on web and mesh; `→ #lxmf` on first contact and after
+re-landing; mesh `/join` into a minted room and the `#vip` shortcut both
+refused with nothing posted, while the shortcut into an open room still
+works; room batches titled, DM-only batches untitled; `node` in the
+poll; both JSON endpoints, and `404` with their feature off. The
+earlier reachability, labelling, DM and web-chat suites still pass
+(two test fakes updated to the real `send_message(…, title=…)`
+signature).
+
+**Room tiers over the mesh.** The web `/rooms` shows `[minted]` /
+`[hybrid]` after a gated room (stumpid annotates it), but the mesh
+bridge answers `/rooms` itself and never went through stumpid, so a
+mesh user never saw any tier. It now adds the same labels, only while
+stumpid is active. Tested on both sides.
+
 **Announce-only mesh peers are reachable by DM.** Someone heard only
 by their LXMF announce — who has never messaged this node — can now be
 sent a DM from the web chat; they appear in its "Message someone" list
@@ -1363,18 +1873,16 @@ integration.
 
 ## The About page
 
-`/about` — three views in one page (About / How to Connect / Hardware
-Gallery), switched client-side since they're facets of one page, not
-separate destinations. Content is the PR/marketing team's own copy,
-ported not rewritten, with corrected instructions matching this
-build's actual default SSID and the AP's real address rather than a
-placeholder.
-
-The hardware gallery's two photos are **not** part of the firmware
-upload — they live on the SD card at `/sd/about/`, copied there
-separately (e.g. via `mpremote fs cp`). A missing photo renders as a
-broken image, the same as any web page missing an asset; nothing
-crashes.
+`/about` mirrors the public site (labuche-stump.web.app): three views in
+one page — Project (v1) / How to Connect / Apps & Handhelds — switched
+client-side since they're facets of one page, not separate
+destinations. The copy is the site's own, in all three languages, with
+two things only the node can do better: the connect steps name the
+network it actually broadcasts and its live address, and the apps view
+offers each FireFly as a download from the node's SD card (with GitHub
+as the online-only second link). The hardware gallery the site dropped
+is gone here too. Details under "The About and Tools pages now mirror
+the public site", below.
 
 ---
 
@@ -1443,6 +1951,8 @@ REANNOUNCE_INTERVAL = 120           # seconds between this node's own mesh annou
 STUMP_ANNOUNCE_INTERVAL = 1800      # seconds between stump.node beacon announces (see Architecture)
 THEME = "amber"                     # site theme: amber, phosphor, oled or paper (set by the provisioner)
 FEATURES = ["chat", "billboard", "files", "about"]   # features offered (set by the provisioner)
+PROPAGATION_NODE = False            # LXMF propagation node: store-and-forward (provisioner / /admin)
+PROPAGATION_STAMP_COST = 16         # stamp cost the node asks of uploads (upstream default; accepts 3 below)
 ANNOUNCE_RATE_MAX = 6               # max rebroadcasts/source/window when relaying for others
 ANNOUNCE_RATE_WINDOW = 60
 
@@ -1584,7 +2094,7 @@ JavaScript against a mocked DOM, not just reading it.
 
 **Needs hardware.** Reticulum/LXMF in live operation with a real mesh
 peer exercising the landing-room redirect; real SD card mounting for
-the About page's gallery; which crypto backend (`iram`/`xip`/pure
+the home page's branding and the app downloads; which crypto backend (`iram`/`xip`/pure
 Python) a given deployed board actually loads.
 
 **Known limits.**
@@ -1602,13 +2112,18 @@ Python) a given deployed board actually loads.
   your deployed Heltec Bridge units were actually provisioned with via
   `rnodeconf` — an operational fact invisible from source. See its own
   section above.
-- Typing `/msg <nick> <text>` directly (not clicking a name first) is
-  echoed into a thread optimistically, before the server's own reply
-  confirms delivery — the client can't check the target nick exists in
-  advance. If it doesn't, the server's real "no one here called that"
-  reply still shows, alongside a thread that was opened for a message
-  that was never actually delivered. Clicking a name from the "Message
-  someone" list first doesn't have this gap at all.
+- **An LXMF sender's address is not proof of identity on this node.**
+  `urns` checks the Ed25519 signature on an incoming LXMF message only
+  when the board has native Ed25519 (`LXMRouter.verify_signatures =
+  ed25519.have_native()`); without it the check is skipped, on the
+  stated grounds that the encryption layer already authenticates the
+  message — which it doesn't, since anyone can encrypt a message *to*
+  this node. Messages whose signature wasn't checked, or whose sender's
+  identity isn't known yet, are delivered all the same. So nothing
+  links a mesh sender's LXMF address to a verified identity
+  automatically; `stumpid`'s `/auth` challenge is the proof, over LXMF
+  as on the web. Found while answering the Android team; the
+  `urns` behaviour itself is unchanged.
 - `--diag` used to include a Heltec Bridge reachability check and a
   CAM web server reachability check as automated steps — both removed
   on request after they kept producing new false-failure modes despite

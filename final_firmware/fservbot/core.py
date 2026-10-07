@@ -229,8 +229,15 @@ def _ctx():
     """Everything a template is allowed to know. Passed in rather than
     imported by templates.py so the template pack stays a file of plain
     text functions that can be rewritten without touching this engine."""
+    try:
+        import i18n
+        lang = i18n.DEFAULT_LANG
+    except ImportError:
+        lang = "en"
+    # lang: the bot's replies are posted into the room for everyone, so
+    # they use the node's default language rather than any one reader's.
     return {"bot_name": BOT_NAME, "prefix": prefix(),
-            "triggers": active_triggers()}
+            "triggers": active_triggers(), "lang": lang}
 
 
 def maybe_respond(room, nick, text):
@@ -281,11 +288,19 @@ def maybe_broadcast(room):
         return None
 
 
-def help_line():
+_HELP_LINE = {
+    "fr": "le bot de fichiers  (/fshelp pour le configurer)",
+    "en": "the fserv bot  (/fshelp to configure it)",
+    "es": "el bot de archivos  (/fshelp para configurarlo)",
+}
+
+
+def help_line(lang=None):
     """One line appended to rrc's own /help output, so the bot is
-    discoverable without editing rrc.py."""
+    discoverable without editing rrc.py. /help is a reply to one person,
+    so this follows their language."""
     p = prefix()
-    return "%sfserv %shelp     the fserv bot  (%sfshelp to configure it)" % (p, p, "/")
+    return "%sfserv %shelp     %s" % (p, p, _HELP_LINE.get(lang, _HELP_LINE["en"]))
 
 
 # ---------------------------------------------------------------------

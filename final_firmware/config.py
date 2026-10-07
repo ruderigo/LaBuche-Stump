@@ -6,9 +6,9 @@
 from lora_boards import LORA_BOARDS
 
 # ---- Node settings ----
-WIFI_SSID = "Bob's Glitch"
-WIFI_PASS = 'SalutComment'
-NODE_NAME = 'LaBuche'
+WIFI_SSID = 'YOUR_WIFI_NAME'
+WIFI_PASS = 'YOUR_WIFI_PASSWORD'
+NODE_NAME = 'Labuche'
 
 # The walk-up hotspot's own name -- separate from NODE_NAME (the mesh
 # identity's display name) on purpose; these are different concerns.
@@ -50,7 +50,7 @@ BOT_NAME = 'Concierge'
 # with a paragraph and do it again for the next three words. A greeting
 # on first contact says who this node is and what it offers; after that
 # the conversation is the point.
-MESH_GREETING = 'Bonjour Hi! I am Concierge, a bot, taking care of The Stump. https://LaBuche-Stump.web.app'
+MESH_GREETING = 'Bonjour Hi! I am Concierge, a bot maintaining this Stump. Type !help for more. Tire toi une buche! https://LaBuche-Stump.web.app'
 MESH_GREETING_MAX = 200
 
 # How often this node announces its LXMF identity to the mesh, in
@@ -157,12 +157,15 @@ CREDITS_ENABLED = False
 CREDIT_WEIGHTS = {'video': 3, 'music': 2, 'document': 1, 'other': 1}
 
 # ---- Plugin settings (added by the Provisioner) ----
-AUTH_ADMIN_PASSWORD = 'TeK'
+AUTH_ADMIN_PASSWORD = 'CHANGE_ME'
 AUTH_MODE = 'open'
-FSERVBOT_OP_PASSWORD = 'TeK_Knoh'
+FSERVBOT_OP_PASSWORD = 'CHANGE_ME'
+
+# ---- LXMF propagation node: store-and-forward (added by the Provisioner) ----
+PROPAGATION_NODE = True
 
 # ---- Features offered: any of chat, billboard, files, about (added by the Provisioner) ----
-FEATURES = ['chat', 'billboard', 'files']
+FEATURES = ['chat', 'billboard', 'files', 'about']
 
 # ---- Site theme: amber, phosphor, oled or paper (added by the Provisioner) ----
-THEME = 'paper'
+THEME = 'amber'

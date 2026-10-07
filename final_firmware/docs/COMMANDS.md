@@ -5,7 +5,7 @@ directly from the running code — not paraphrased. Where a reply is
 shown, that is what the field will actually see, verified against the
 source on the date this document was written.
 
-**Source and released builds**: https://github.com/ruderigo/SandBox_Stump
+**Source and released builds**: https://github.com/ruderigo/LaBuche-Stump
 
 **Structure**: identity and access control first, since that's what
 needs the most thorough testing right now — the rest of the chat
@@ -199,17 +199,23 @@ is the one behavior most worth confirming directly: create a `minted`
 room while the node is in global `open` mode, and confirm an unverified
 user still can't get in.
 
-**Rejection replies** (from an unverified user attempting `/join`):
+**Rejection replies** (from an unverified user attempting `/join`, on
+the web or over the mesh — mesh `/join` and the `#room text` shortcut
+are gated exactly like the web's `/join`). Each starts with the
+`⊘ #room <tier>` token, then the sentence:
 
 | Tier | Reply |
 |---|---|
-| `minted` | `that room requires a verified identity -- send /auth first` |
-| `hybrid` | `that room is invite-only for unverified visitors -- ask someone already inside to /invite you` |
+| `minted` | `⊘ #vip minted — that room requires a verified identity -- send /auth first` |
+| `hybrid` | `⊘ #lounge hybrid — that room is invite-only for unverified visitors -- ask someone already inside to /invite you` |
 
-`/rooms` shows the tier of every non-open room in brackets:
+`/rooms` shows the tier of every non-open room in brackets — on the web
+and, since this was added, over LXMF too (the mesh bridge answers
+`/rooms` itself and used to show no tiers at all). Each line is
+`#room ·<how many> <topic>`:
 ```
-#main  (3 here)  -- General. Be decent.
-#lounge  (2 here)  [hybrid]
+#main ·3  General. Be decent.
+#lounge ·2  [hybrid]
 ```
 
 **Test matrix:**
@@ -300,23 +306,34 @@ immediately, not just on their next reconnect.
 ## Part 2 — General chat commands (`rrc.py`)
 
 Command *words* stay in English as a fixed vocabulary regardless of the
-sender's language — only the description text and system messages
-translate. All of these are subject to the global `AUTH_MODE` gate
-described in Part 1.
+sender's language. Room activity and DMs are **symbols**, the same for
+everyone — `✓ rod` joined, `✗ rod` left, `✎ rod → bob` renamed,
+`✎ #main text` topic, `[DM] <author>: text`, `→ #main` you moved,
+`⊖ name` no one by that name, `~` before a mesh user's name (full table
+in `CLIENT_QUICKSTART.md`). Replies a client acts on start with a token, then ` — ` and the
+sentence: `= #room` already there, `? /cmd` no such command,
+`⊘ #room <tier>` refused by the room's tier. Tiers now apply over the
+mesh too — the bridge's own `/join` and its `#room text` shortcut are
+checked exactly like the web's `/join`. The remaining sentence replies — `/help`,
+errors, the tier rejections above — follow the sender's language on the
+web; **over LXMF they arrive in the node's default language, French**,
+since a mesh client has no language setting. The reply texts in this
+document are the English versions. All of these are subject to the
+global `AUTH_MODE` gate described in Part 1.
 
 | Command | Effect |
 |---|---|
 | `/nick <name>` | Change your display name |
 | `/join <room>` | Join or create a room |
-| `/part` | Leave, back to `#main` |
+| `/part` | Leave: back to `#main` on the web; over the mesh, back to the room you landed in |
 | `/rooms` | List all rooms, with tier annotations |
 | `/names` | Who's in the current room |
 | `/topic` | Show the current room's topic (a *read*) |
 | `/topic <text>` | Set the room's topic (a *write*) |
-| `/msg <who> <text>` | Private message — never posted to a room, never forwarded to the mesh |
+| `/msg <who> <text>` | Private message — never posted to a room. Reaches web users on their next poll and mesh users over LoRa (including mesh users who have only announced). The sender gets `[DM] <own nick>: text` back as confirmation, or `⊖ <name>` |
 | `/me <action>` | Third-person action |
 | `/clear` | Clear your own local view (client-side only) |
-| `/help` | This list, translated |
+| `/help` | This list, translated, ending with a key to the symbols |
 
 An unrecognized command replies: `unknown command: /<cmd>  (try /help)`
 
@@ -328,7 +345,10 @@ An unrecognized command replies: `unknown command: /<cmd>  (try /help)`
 in `rrc.py` exactly like `#main`, not created by any command, not
 dependent on `stumpid` being installed or active at all.
 
-**A mesh/LoRa peer's first message lands them in `#lxmf` by default.**
+**A mesh/LoRa peer's first message lands them in `#lxmf` by default,**
+and the node tells them so: its first reply is `→ #lxmf` (or `→ #main`
+when redirected, below). The same happens after they go quiet past
+`MESH_PEER_TIMEOUT` and write again.
 A web visitor can `/join lxmf` and `/join main` freely, with zero setup
 and zero auth friction under global `open` mode — this is core
 chat-bridge behavior, not an identity-plugin feature. Auth is layered
@@ -342,17 +362,21 @@ same way a rejected web visitor's message is.
 
 **Test matrix:**
 - [ ] Fresh, unconfigured node: `/rooms` shows both `#main` and `#lxmf`, with zero admin action taken
-- [ ] A mesh peer's first message lands them in `#lxmf`
+- [ ] A mesh peer's first message lands them in `#lxmf`, and the first thing they receive is `→ #lxmf`
 - [ ] A web user joins `#lxmf` and posts; the message survives and is visible via `/rooms`/polling
-- [ ] `/admin <pw> room lxmf minted`, then a new (unverified) mesh peer arrives → redirected to `#main`, with a visible system message explaining why
+- [ ] `/admin <pw> room lxmf minted`, then a new (unverified) mesh peer arrives → redirected to `#main`, receives `→ #main`, and a system message explains why
+- [ ] An unverified mesh peer sends `/join vip` (a `minted` room) → `⊘ #vip minted — …`, stays put
+- [ ] The same peer sends `#vip hello` → refused the same way, nothing posted in `#vip`
 - [ ] Re-tier `#lxmf` back to `open` → the *next* new mesh peer lands in `#lxmf` again (existing peers already placed aren't moved)
 
 ---
 
 ## Part 4 — BarKeep console (`/chat` — separate from RRC)
 
-The single-box command console on the home page. Command words stay
-fixed; only descriptions translate.
+The single-box command console. No longer on the home page: it's
+hidden feature HF-003, still working at `/concierge` (and `POST /chat`)
+for anyone who types the address — see `HIDDEN_FEATURES.md`. Command
+words stay fixed; only descriptions translate.
 
 | Input | Effect |
 |---|---|
@@ -372,28 +396,54 @@ outside the RRC/stumpid gating system.
 
 ## Part 5 — HTTP API
 
+A feature the technician turned off (chat, billboard, files, about)
+answers `404` with a "not offered" message on all of its addresses.
+
+With a certificate installed (`HTTPS_SETUP.md`), everything below is
+also served over HTTPS on port 443 under the node's name. A page opened
+over plain HTTP on the node's own Wi-Fi moves there only if the browser
+accepts the certificate (it fetches `/tls-ok` first).
+
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/` | BarKeep console |
+| GET | `/` | Home page: a tile per enabled feature |
+| GET | `/concierge` | BarKeep console — hidden feature HF-003, not linked anywhere |
 | POST | `/chat` | BarKeep command, raw text body |
 | GET | `/rrc` | RRC chat client |
-| GET | `/rrc/poll?room=&since=` | New messages, DMs, and who's in the room, JSON |
+| GET | `/rrc/poll?room=&since=` | JSON: new messages, DMs, `users`, `stumps`, and `node` (name + LXMF address) |
 | POST | `/rrc/send` | RRC chat line or `/command`, raw text body |
-| GET | `/billboard` | Bulletin board |
-| POST | `/post` | New notice, `entry=<urlencoded>` |
-| GET | `/files` | File listing (no admin UI here — see `/admin`) |
+| POST | `/rrc/voice?to=&mode=` | Voice note DM: an Ogg Opus file (mode 16) or Codec 2 frames (3–9) as the body, up to 16 KB; replies like `/msg` |
+| GET | `/rrc/voice?id=` | A voice note in your own inbox, byte for byte (`audio/ogg` for Opus) |
+| GET | `/codec2.wasm` | Codec 2 1.2.0 for the browser (LGPL-2.1) |
+| GET | `/codec2.js` | Its JavaScript glue |
+| GET | `/opus.wasm` | libopus 1.5.2 for the browser (BSD-style licence) |
+| GET | `/opus.js` | Its JavaScript glue: Ogg Opus writer and reader |
+| GET | `/billboard` | Bulletin board page |
+| GET | `/billboard.json` | Bulletin board as JSON: `{"posts": [{"id","title","body","sig"}]}` |
+| POST | `/post` | New notice: `title=` (required), `body=` (optional); legacy `entry=` = title only |
+| GET | `/files` | File listing and upload panel (upload shown only with an SD card) |
+| GET | `/files.json` | Shelf as JSON: `{"sd","credits","files": [{"name","size","class","cost"}]}` |
 | POST | `/upload` | `X-Filename` header, raw body; `507` if the card is over capacity even after evicting the oldest shared files |
-| GET | `/download?f=` | Streamed file download |
+| GET | `/download?f=` | Streamed file download (name percent-encoded as UTF-8) |
 | GET | `/admin` | Password-only login; no link anywhere points here |
-| POST | `/admin` | Validates the password, shows a checkbox file list on success |
-| POST | `/admin/delete` | Batch-deletes checked files, re-validates the password for real |
+| POST | `/admin` | Validates the password; shows files, billboard moderation, radio, propagation node, and theme settings |
+| POST | `/admin/delete` | Batch-deletes checked files, re-validates the password |
+| POST | `/admin/delete_post` | Deletes checked billboard posts, re-validates the password |
+| POST | `/admin/radio` | Heltec Bridge radio settings (TX power, frequency, bandwidth, SF, CR); saved, and sent to the Heltec at once if connected |
+| POST | `/admin/home` | Home page section: `place` (top/bottom/left/right), `height` (80–1200), `show=1` to show it; saves `home/home.json` |
+| POST | `/admin/propagation` | Propagation node: `action=on`/`off`, or `action=leave` with `to=` and `text=` to leave a message for an LXMF address |
 | GET | `/about` | About page |
-| GET | `/about/img?f=` | Gallery image, served inline |
 | GET | `/tools` | Technician tools — CLI provisioning steps |
 | GET | `/tool?f=` | Download a tool file |
-| GET | `/flash` | Browser-based flasher — still live, not linked from `/tools` anymore |
+| GET | `/home-file?f=` | A file from the card's `home/` folder, for the home page's own section (see `HOME_BRANDING.md`) |
+| GET | `/flash` | Browser-based flasher — hidden feature HF-001, not linked from `/tools` |
 | GET | `/fw?f=` | Firmware image / catalog for the flasher |
 | GET | `/lang?set=&next=` | Set language, redirect back |
+| GET | `/tls-ok` | Answers `ok`: what a plain-HTTP page fetches over HTTPS to check the browser accepts the certificate (see `HTTPS_SETUP.md`) |
+
+The propagation node itself (offline LXMF messages) has no HTTP or chat
+commands of its own: phones talk to it over LXMF, as to any upstream
+propagation node — see `CLIENT_QUICKSTART.md`.
 
 ---
 
