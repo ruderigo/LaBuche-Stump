@@ -61,7 +61,6 @@ header b{color:var(--ember);}
 .nav a:hover,.nav a:active,.nav a:focus{
   color:var(--ember-bright); border-color:var(--ember); outline:none;
 }
-.nav span{font-size:10px; letter-spacing:.02em;}
 main{flex:1; display:flex; min-height:0;}
 #rooms{
   width:132px; border-right:1px solid var(--border); background:var(--panel-2);
@@ -112,6 +111,8 @@ footer{
   font-family:inherit; font-size:14px;
 }
 #in:focus{outline:2px solid var(--ember); outline-offset:1px;}
+#voice.rec{background:var(--err); color:var(--bg);}
+button.play{font-size:.85em; padding:0 8px; margin-left:4px; cursor:pointer;}
 button{
   background:var(--ember); color:var(--bg); border:none; border-radius:4px;
   padding:9px 16px; font-family:inherit; font-weight:bold; cursor:pointer;
@@ -159,6 +160,23 @@ var log=document.getElementById('log');
 var dmThreads={}, dmUnread={}, viewingDM=null, lastIdBeforeDM=null;
 // Nicks the server knows are other Stump nodes (their stump.node beacons).
 var stumps={};
+// Ids of DMs already placed in a thread (see the poll handler).
+var dmSeen={};
+// A thread you started by typing a name ("/msg BOB") is keyed as typed;
+// the server matches names case-insensitively, so the reply comes from
+// "Bob". When it does, fold the typed-case thread into the sender's
+// exact name, so one conversation stays one thread.
+function adoptThread(exact){
+  var low=exact.toLowerCase();
+  for(var k in dmThreads){
+    if(k!==exact && k.toLowerCase()===low){
+      dmThreads[exact]=(dmThreads[exact]||[]).concat(dmThreads[k]);
+      delete dmThreads[k];
+      if(dmUnread[k]){ dmUnread[exact]=(dmUnread[exact]||0)+dmUnread[k]; delete dmUnread[k]; }
+      if(viewingDM===k) viewingDM=exact;
+    }
+  }
+}
 function stumpTag(el, name){
   // A separate element, never part of the name: the name is what
   // /msg and openDM use, so it has to stay exactly the nick.
@@ -196,21 +214,193 @@ function esc(s){
   });
 }
 
+// ---- Voice notes ----
+// Codec 2 1200 (LXMF mode 4), the same notes FireFly sends (its voice-note
+// spec). Two ways to record, one pipeline after that:
+//  - On a secure (HTTPS) page -- a node with a certificate, see
+//    docs/HTTPS_SETUP.md -- the microphone is recorded live (getUserMedia
+//    + MediaRecorder): tap ♪, tap ■ to send.
+//  - On plain HTTP, or if microphone access is refused: HTML Media
+//    Capture, <input type=file accept=audio/* capture>, which hands the
+//    job to the device's own recorder and gives back a file. On iPhone,
+//    Safari may offer a file picker instead of a recorder.
+// Either way the audio is decoded, brought to 8 kHz, levelled and encoded
+// here, then sent as raw Codec 2 frames to /rrc/voice: small enough for
+// LoRa, and playable by FireFly.
+// Notes are sent in Opus (LXMF mode 16, an Ogg Opus file), FireFly's
+// default; Codec 2 notes (modes 3-9) from others still play.
+var VOICE=I18N_VOICE, VOICE_MODE=16, VOICE_RATE=16000, VOICE_MAX_S=15, VOICE_MIN_S=0.6;
+var voiceCtx=null, voiceBusy=false, voiceRec=null, voiceChunks=[], voiceTimer=null;
+var vbtn=document.getElementById('voice'), vfile=document.getElementById('voicefile');
+function updateVoiceButton(){ vbtn.style.display = viewingDM ? '' : 'none'; }
+function liveMic(){
+  return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+}
+function voiceState(busy){
+  voiceBusy=busy; vbtn.disabled=busy; vbtn.textContent = busy ? '\u22ef' : '\u266a';
+}
+function readFile(f){
+  // File.arrayBuffer() is missing on older iPhones (Safari < 14).
+  if(f.arrayBuffer) return f.arrayBuffer();
+  return new Promise(function(res, rej){
+    var r=new FileReader(); r.onload=function(){ res(r.result); }; r.onerror=rej; r.readAsArrayBuffer(f);
+  });
+}
+function audioCtx(){
+  if(!voiceCtx){ var C=window.AudioContext||window.webkitAudioContext; voiceCtx=new C(); }
+  if(voiceCtx.state==='suspended') voiceCtx.resume();
+  return voiceCtx;
+}
+function decodeAny(buf){
+  // Callback form: older Safari has no promise-returning decodeAudioData.
+  var ctx=audioCtx();
+  return new Promise(function(res, rej){ ctx.decodeAudioData(buf, res, rej); });
+}
+// Any recording -> 8 kHz 16-bit mono, per FireFly's spec: windowed-sinc
+// low-pass at 3.6 kHz while resampling (no folding of >4 kHz sound into
+// the voice band), DC removed (~60 Hz high-pass), peak brought to ~70 %
+// with at most 4x gain, capped at 15 s. null if shorter than 0.6 s.
+function prepVoice(ab, rate){
+  rate = rate || VOICE_RATE;
+  var sr=ab.sampleRate, ch=ab.numberOfChannels, n=Math.min(ab.length, Math.floor(VOICE_MAX_S*sr));
+  var x=new Float32Array(n), c, i;
+  for(c=0;c<ch;c++){ var d=ab.getChannelData(c); for(i=0;i<n;i++) x[i]+=d[i]/ch; }
+  var ratio=sr/rate, outN=Math.floor(n/ratio);
+  if(outN < VOICE_MIN_S*rate) return null;
+  // Low-pass at 0.45 x the target rate: 3.6 kHz for 8 kHz (Codec 2), 7.2 kHz
+  // for 16 kHz (Opus) -- nothing above the new Nyquist folds back.
+  var fc=Math.min(0.45*rate, sr*0.45)/sr, H=Math.ceil(4/fc), y=new Float32Array(outN), k, j;
+  for(k=0;k<outN;k++){
+    var t=k*ratio, j0=Math.floor(t), acc=0;
+    for(j=j0-H+1;j<=j0+H;j++){
+      // Past either end, the edge sample is repeated rather than the tap
+      // dropped: dropped taps made the first and last samples ramp from
+      // half level, a step the DC filter and levelling then mistook for
+      // signal.
+      var xj=x[j<0?0:(j>=n?n-1:j)];
+      var u=t-j, v=u/H, w=0.42+0.5*Math.cos(Math.PI*v)+0.08*Math.cos(2*Math.PI*v);
+      var s=(u===0)?1:Math.sin(2*Math.PI*fc*u)/(2*Math.PI*fc*u);
+      acc+=xj*2*fc*s*w;
+    }
+    y[k]=acc;
+  }
+  // The high-pass starts from the first sample, not from zero: from zero,
+  // a DC offset arrives as a step, its transient became the "peak", and
+  // levelling then left the actual speech far too quiet.
+  var a=Math.exp(-2*Math.PI*60/rate), prevX=outN?y[0]:0, prevY=0, peak=0;
+  for(k=0;k<outN;k++){ var hp=a*(prevY+y[k]-prevX); prevX=y[k]; prevY=hp; y[k]=hp; peak=Math.max(peak, Math.abs(hp)); }
+  var gain=peak>0 ? Math.min(4, 0.7/peak) : 1, out=new Int16Array(outN);
+  for(k=0;k<outN;k++){ var z=Math.max(-1, Math.min(1, y[k]*gain)); out[k]=Math.round(z*32767); }
+  return out;
+}
+function sendVoiceFrom(buf){
+  var to=viewingDM;
+  if(!to) return;
+  voiceState(true);
+  var decoded=decodeAny(buf).then(null, function(){ throw 'unreadable'; });
+  Promise.all([decoded, Opus.load('/opus.wasm')]).then(function(r){
+    var pcm=prepVoice(r[0], VOICE_RATE);
+    if(!pcm){ line(esc(VOICE.length),'local'); voiceState(false); return; }
+    var bits=Opus.encode(pcm);
+    return fetch('/rrc/voice?to='+encodeURIComponent(to)+'&mode='+VOICE_MODE, {method:'POST', body:bits})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var mineTag='[DM] <'+nick+'>: ', ok=null;
+        (d.replies||[]).forEach(function(t){ if(ok===null && t.indexOf(mineTag)===0) ok=t; });
+        if(ok!==null){
+          var m={id:0, nick:nick, body:ok.slice(mineTag.length), kind:'dm', local:{mode:VOICE_MODE, bits:bits}};
+          var box=dmThreads[to]=dmThreads[to]||[]; box.push(m);
+          if(viewingDM===to) render(m);
+        } else {
+          (d.replies||[]).forEach(function(t){ labelled(line(esc(t),'local'), t.charAt(0)); });
+        }
+        voiceState(false);
+      });
+  }).catch(function(e){
+    // A recording the browser can't decode is not a connection problem.
+    line(esc(e==='unreadable' ? VOICE.unreadable : I18N_NOT_SENT),'err');
+    voiceState(false);
+  });
+}
+function voiceFailed(){ line(esc(VOICE.unreadable),'err'); voiceState(false); }
+vbtn.onclick=function(){
+  if(voiceRec){ voiceRec.stop(); return; }
+  if(voiceBusy) return;
+  if(!liveMic()){ vfile.click(); return; }
+  navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+    voiceChunks=[]; voiceRec=new MediaRecorder(stream);
+    voiceRec.ondataavailable=function(e){ if(e.data && e.data.size) voiceChunks.push(e.data); };
+    voiceRec.onstop=function(){
+      stream.getTracks().forEach(function(t){ t.stop(); });
+      clearTimeout(voiceTimer); voiceRec=null;
+      vbtn.className=''; vbtn.title=VOICE.record;
+      readFile(new Blob(voiceChunks)).then(sendVoiceFrom, voiceFailed);
+    };
+    voiceRec.start(); vbtn.textContent='\u25a0'; vbtn.className='rec'; vbtn.title=VOICE.recording;
+    voiceTimer=setTimeout(function(){ if(voiceRec) voiceRec.stop(); }, VOICE_MAX_S*1000);
+  }, function(){ vfile.click(); });   // permission refused or no microphone: the recorder app instead
+};
+vfile.onchange=function(){
+  var f=vfile.files[0]; vfile.value='';
+  if(f) readFile(f).then(sendVoiceFrom, voiceFailed);
+};
+function addPlay(p, m){
+  var mode=m.local ? m.local.mode : m.voice.mode;
+  if([3,4,5,6,7,8,9,16].indexOf(mode)<0){
+    var u=document.createElement('small'); u.textContent=' ('+VOICE.unplayable+')'; p.appendChild(u); return;
+  }
+  var b=document.createElement('button'); b.className='play'; b.textContent='\u25b6'; b.title=VOICE.record;
+  b.onclick=function(){
+    var ctx=audioCtx();   // created inside the tap, so playback is allowed
+    var bits=m.local ? Promise.resolve(m.local.bits)
+      : fetch('/rrc/voice?id='+m.id).then(function(r){ if(!r.ok) throw 0; return r.arrayBuffer(); })
+          .then(function(a){ return new Uint8Array(a); });
+    var opus=(mode===16), codec=opus ? Opus.load('/opus.wasm') : Codec2.load('/codec2.wasm');
+    Promise.all([codec, bits]).then(function(r){
+      // Opus decodes at 48 kHz (every browser takes that rate); Codec 2 at 8 kHz.
+      var pcm=opus ? Opus.decode(r[1]) : Codec2.decode(mode, r[1]), rate=opus ? 48000 : 8000, buf, f, i;
+      try { buf=ctx.createBuffer(1, pcm.length, rate); f=buf.getChannelData(0); for(i=0;i<pcm.length;i++) f[i]=pcm[i]/32768; }
+      catch(e){
+        // Browsers without 8 kHz buffers: upsample to the context's rate.
+        var R=ctx.sampleRate, n=Math.floor(pcm.length*R/rate);
+        buf=ctx.createBuffer(1, n, R); f=buf.getChannelData(0);
+        for(i=0;i<n;i++){ var t=i*rate/R, j=Math.floor(t), a=t-j; f[i]=((pcm[j]||0)*(1-a)+(pcm[j+1]||0)*a)/32768; }
+      }
+      var src=ctx.createBufferSource(); src.buffer=buf; src.connect(ctx.destination); src.start(0);
+    }).catch(function(){ line(esc(VOICE.unplayable),'err'); });
+  };
+  p.appendChild(document.createTextNode(' ')); p.appendChild(b);
+}
+
 function line(html, cls){
   var p=document.createElement('p');
   if(cls) p.className=cls;
   p.innerHTML=html;
   log.appendChild(p);
   log.scrollTop=log.scrollHeight;
+  return p;
+}
+// Room activity and DMs are symbols (rrc.ev_*), the same for every
+// reader. Each symbol line also gets a label in THIS reader's language,
+// for the tooltip and for screen readers, which would otherwise say
+// "check mark" or "circled minus".
+var SYMBOLS=I18N_SYMBOLS;
+function labelled(p, glyph){
+  var t=SYMBOLS[glyph];
+  if(t){ p.title=t; p.setAttribute('aria-label', t+': '+p.textContent.slice(glyph.length).trim()); }
+  return p;
 }
 
 function render(m){
   if(m.kind==='dm'){
-    var self=(m.nick===nick)?' self':'';
-    line('&#8594; <span class="nick">'+esc(m.nick)+'</span> '+esc(m.body),'dm'+self);
+    // "[DM] <author>: text", always naming who wrote it -- the thread
+    // reads as a conversation (rrc.dm_line builds the same line).
+    var mine=(m.nick===nick);
+    var p=labelled(line('[DM] <span class="nick">&lt;'+esc(m.nick)+'&gt;</span>: '+esc(m.body),'dm'+(mine?' self':'')), '[DM]');
+    if(m.voice||m.local) addPlay(p, m);
     return;
   }
-  if(m.kind==='system'){ line(esc(m.body),'system'); return; }
+  if(m.kind==='system'){ labelled(line(esc(m.body),'system'), m.body.charAt(0)); return; }
   if(m.kind==='action'){ line('* <span class="nick">'+esc(m.nick)+'</span> '+esc(m.body),'action'); return; }
   var self=(m.nick===nick)?' self':'';
   line('&lt;<span class="nick">'+esc(m.nick)+'</span>&gt; '+esc(m.body), 'msg'+self);
@@ -246,6 +436,7 @@ function setRooms(list, here, users){
     d.onclick=function(){
       var wasViewingDM=!!viewingDM;
       viewingDM=null;
+      updateVoiceButton();
       if(r===room){
         if(wasViewingDM){
           log.innerHTML='';
@@ -340,6 +531,7 @@ function openDM(sender){
   if(!viewingDM){ lastIdBeforeDM=lastId; }
   viewingDM=sender;
   dmUnread[sender]=0;
+  updateVoiceButton();
   log.innerHTML='';
   (dmThreads[sender]||[]).forEach(function(m){ render(m); });
   renderDMSidebar();
@@ -378,7 +570,15 @@ function poll(){
      });
      (d.dms||[]).forEach(function(m){
        if(m.id>maxId) maxId=m.id;
-       if(m.id<=lastId) return;
+       // DMs are remembered by id, not by lastId alone: switching rooms
+       // resets lastId to 0 to load the new room's history, and since
+       // DMs share the same id sequence, the server rightly sends every
+       // DM again -- each was being added to its thread (and counted as
+       // unread) a second time. Reported and reproduced: DM received in
+       // #lxmf, switch to #main, open the DM -> shown twice.
+       if(m.id<=lastId || dmSeen[m.id]) return;
+       dmSeen[m.id]=1;
+       adoptThread(m.nick);
        var box=dmThreads[m.nick]=dmThreads[m.nick]||[];
        box.push(m);
        if(viewingDM===m.nick){ render(m); }
@@ -434,66 +634,51 @@ function send(text){
   fetch('/rrc/send',{method:'POST',body:outgoing})
    .then(function(r){return r.json();})
    .then(function(d){
-     if(isDMReply){
-       // The server only ever delivers a DM to its RECIPIENT's inbox
-       // (rrc.py's _dms is keyed by recipient, never the sender) -- so
-       // without echoing it here directly, the sender would never see
-       // their own half of the conversation in the thread view at all,
-       // confirmed by reading send_dm()'s actual storage target.
-       var box=dmThreads[viewingDM]=dmThreads[viewingDM]||[];
-       var mine={id:0, nick:nick, body:text, kind:'dm'};
-       box.push(mine);
-       render(mine);
-     } else if(directMsgMatch){
-       var target=directMsgMatch[1], msgBody=directMsgMatch[2];
-       // Resolve the typed target against the current, known user list
-       // to the SAME case that person actually registered with --
-       // matching rrc.py's own find_client_by_nick, which is
-       // deliberately case-insensitive server-side. Without this,
-       // typing "/msg BOB hello" keys this client's own dmThreads
-       // "BOB", but Bob's own reply arrives with m.nick "Bob" (his
-       // real, registered case) and lands in a SEPARATE dmThreads
-       // entry -- one conversation split into two sidebar rows,
-       // confirmed directly as a real, reported duplicate-DM symptom.
-       // Falls back to the typed text unresolved if no current match
-       // exists (an unknown or since-departed nick) -- the server's
-       // own reply below still covers that case correctly either way.
-       for(var i=0;i<knownUsers.length;i++){
-         if(knownUsers[i].toLowerCase()===target.toLowerCase()){ target=knownUsers[i]; break; }
+     // A successful /msg is answered with your own DM line, "[DM] <you>:
+     // text", the same in every language (rrc.dm_line); anything else is
+     // a failure to show as is ("⊖ name", usage...). Before, the reply to a line typed in
+     // a thread was ignored outright, so a DM to someone who had left
+     // looked sent; and a /msg drew your copy AND printed the reply.
+     // The server only stores a DM for its RECIPIENT, so your own half
+     // of a thread is drawn here, on success.
+     var mineTag='[DM] <'+nick+'>: ';
+     var sent=(d.replies||[]).some(function(t){ return t.indexOf(mineTag)===0; });
+     if(isDMReply || directMsgMatch){
+       var target=isDMReply ? viewingDM : directMsgMatch[1];
+       var msgBody=isDMReply ? text : directMsgMatch[2].trim();
+       // The server matches the name case-insensitively; resolving it
+       // against the names this page knows keeps "/msg BOB" and Bob's
+       // replies in one thread.
+       if(!isDMReply){
+         for(var k=0;k<knownUsers.length;k++){
+           if(knownUsers[k].toLowerCase()===target.replace(/^~/,'').toLowerCase()){ target=knownUsers[k]; break; }
+         }
        }
-       // The same two checks rrc.py's own /msg handling makes BEFORE
-       // even attempting send_dm (messaging yourself, an empty body)
-       // -- checked here too so this doesn't echo into a thread for a
-       // message the server never actually queued. What this can't
-       // check client-side is whether the target nick exists at all;
-       // the server's own reply (rendered below regardless) covers
-       // that one remaining case, so a bad nick still shows the real
-       // "no one here called that" answer even though the optimistic
-       // echo above already rendered.
-       if(target.toLowerCase()!==nick.toLowerCase() && msgBody.trim()){
-         openDM(target);
+       if(sent){
+         if(!isDMReply) openDM(target);
          var box=dmThreads[target]=dmThreads[target]||[];
-         var mine={id:0, nick:nick, body:msgBody.trim(), kind:'dm'};
+         var mine={id:0, nick:nick, body:msgBody, kind:'dm'};
          box.push(mine);
          render(mine);
+       } else {
+         (d.replies||[]).forEach(function(t){
+           if(t==='__CLEAR__'){ log.innerHTML=''; return; }
+           labelled(line(esc(t),'local'), t.charAt(0));
+         });
        }
-       (d.replies||[]).forEach(function(t){
-         if(t==='__CLEAR__'){ log.innerHTML=''; return; }
-         line(esc(t),'local');
-       });
      } else {
        (d.replies||[]).forEach(function(t){
          if(t==='__CLEAR__'){ log.innerHTML=''; return; }
-         line(esc(t),'local');
+         labelled(line(esc(t),'local'), t.charAt(0));
        });
      }
      if(d.room && d.room!==room){
        room=d.room; lastId=0;
-       if(!viewingDM){ log.innerHTML=''; line('now in #'+room,'local'); }
+       if(!viewingDM){ log.innerHTML=''; labelled(line('\u2192 #'+esc(room),'local'), '\u2192'); }
      }
      poll();
    })
-   .catch(function(){ line('not sent — connection problem','err'); })
+   .catch(function(){ line(esc(I18N_NOT_SENT),'err'); })
    .then(function(){ setBusy(false); });
 }
 
@@ -528,6 +713,13 @@ schedulePoll();
 poll();
 inp.focus();
 """
+
+
+def _attr(text):
+    """Escapes text for a single-quoted HTML attribute (an apostrophe in
+    a French label would otherwise end the attribute early)."""
+    return (text.replace("&", "&amp;").replace("'", "&#39;")
+                .replace("<", "&lt;").replace(">", "&gt;"))
 
 
 def _js(value):
@@ -596,18 +788,22 @@ def _nav_links(lang):
     barkeep.py's nav tiles were: labels now depend on who's asking, so
     this has to render fresh per request rather than once at boot."""
     # Only features this node offers (features.py); home and tools always.
+    # The same order as every other page's row (barkeep.NAV_ORDER: chat,
+    # billboard, files, tools, about, home), minus chat itself.
     items = (
-        (None, "/", "Home", _NAV_HOME, "nav_home"),
         ("billboard", "/billboard", "Billboard", _NAV_BOARD, "nav_board"),
         ("files", "/files", "Files", _NAV_FILES, "nav_files"),
         (None, "/tools", "Tools", _NAV_TOOLS, "nav_tools"),
         ("about", "/about", "About", _NAV_ABOUT, "nav_about"),
+        (None, "/", "Home", _NAV_HOME, "nav_home"),
     )
     return (
         "<nav class='nav'>"
         + "".join(
-            "<a href='" + href + "' title='" + title + "' aria-label='" + title + "'>" + icon
-            + "<span>" + i18n.t(key, lang) + "</span></a>"
+            # Icons only, like every other navigation row; the name stays
+            # as a tooltip and for screen readers.
+            "<a href='" + href + "' title='" + _attr(i18n.t(key, lang)) + "' aria-label='" + _attr(i18n.t(key, lang)) + "'>" + icon
+            + "</a>"
             for feat, href, title, icon, key in items
             if feat is None or features.enabled(feat)
         )
@@ -646,7 +842,18 @@ def render_page(room, nick, lang=None):
               .replace("ROOM_INIT", _js(room))
               .replace("NICK_INIT", _js(nick))
               .replace("I18N_MESSAGE_SOMEONE", _js(i18n.t("rrc_message_someone", lang)))
-              .replace("I18N_DIRECT_MESSAGES", _js(i18n.t("rrc_direct_messages", lang))))
+              .replace("I18N_DIRECT_MESSAGES", _js(i18n.t("rrc_direct_messages", lang)))
+              .replace("I18N_NOT_SENT", _js(i18n.t("rrc_not_sent", lang)))
+              .replace("I18N_VOICE", _js({"record": i18n.t("voice_record", lang),
+                  "unreadable": i18n.t("voice_unreadable", lang), "recording": i18n.t("voice_recording", lang),
+                  "unplayable": i18n.t("voice_unplayable", lang), "length": i18n.t("voice_length", lang)}))
+              .replace("I18N_SYMBOLS", _js({
+                  "\u2713": i18n.t("sym_join", lang), "\u2717": i18n.t("sym_leave", lang),
+                  "\u270e": i18n.t("sym_change", lang), "\u2192": i18n.t("sym_to", lang),
+                  "\u2296": i18n.t("sym_unknown", lang), "[DM]": i18n.t("sym_dm", lang),
+                  "\u29d7": i18n.t("sym_rate", lang),
+                  "=": i18n.t("sym_already", lang), "?": i18n.t("sym_unknown_cmd", lang),
+                  "\u2298": i18n.t("sym_refused", lang)})))
     return (
         "<!DOCTYPE html>" + theme.html_open() + "<head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
@@ -662,7 +869,12 @@ def render_page(room, nick, lang=None):
         "autocomplete='off' autocapitalize='none' spellcheck='false' "
         "placeholder='" + i18n.t("rrc_input_placeholder", lang) + "'>"
         "<button id='go'>" + i18n.t("rrc_send", lang) + "</button>"
+        "<button id='voice' style='display:none' title='" + _attr(i18n.t("voice_record", lang))
+        + "' aria-label='" + _attr(i18n.t("voice_record", lang)) + "'>\u266a</button>"
+        "<input id='voicefile' type='file' accept='audio/*' capture hidden>"
         "</footer>"
+        "<script src='/codec2.js'></script>"
+        "<script src='/opus.js'></script>"
         "<script>" + script + "</script>"
         "</body></html>"
     )

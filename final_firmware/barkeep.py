@@ -21,6 +21,9 @@ import rrc
 import rrc_ui
 import theme
 import features
+import radio
+import propagation
+import stump_tls as tls  # not "tls": MicroPython has a built-in module by that name
 import flasher_ui
 
 # Per-node greeter name. Falls back so this module still imports on its
@@ -131,7 +134,30 @@ ul.files small{flex-shrink:0; padding-left:8px; text-align:right;}
 .tile:hover,.tile:focus{border-color:var(--ember); color:var(--ember-bright); outline:none;}
 .tile span{font-weight:bold; font-size:.95rem;}
 .tile small{color:var(--muted); text-align:center; line-height:1.25;}
-@media (max-width:380px){ .tiles{grid-template-columns:1fr;} }
+/* Home page branding from the card (home/home.html). */
+.home-brand{margin:0 0 18px;}
+.home-brand img, .home-brand video, .home-brand svg{max-width:100%; height:auto;}
+.home-frame{display:block; width:100%; border:0; background:transparent;}
+fieldset.opts{border:1px solid var(--border); border-radius:6px; padding:8px 12px; margin:0;
+  display:flex; flex-direction:column; gap:6px;}
+fieldset.opts legend{color:var(--muted); padding:0 4px;}
+label.opt{display:flex; align-items:center; gap:8px; cursor:pointer;}
+.home-layout.side .home-brand{margin:0;}
+@media (min-width:760px){
+  .home-layout.side{display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:start;}
+}
+@media (max-width:759px){ .home-layout.side > * + *{margin-top:18px;} }
+/* Home page: one card per row, the icon beside its name and subtitle. */
+.tiles.home{grid-template-columns:1fr;}
+.tiles.home .tile{flex-direction:row; align-items:center; justify-content:flex-start; gap:16px; padding:14px 18px;}
+.tiles.home .tile svg{flex-shrink:0;}
+.tiles.home .tile-text{display:flex; flex-direction:column; gap:2px;}
+.tiles.home .tile small{text-align:left;}
+/* Navigation rows: icons only, so every destination fits on one row,
+   even five on a narrow phone. */
+.tiles.nav{grid-template-columns:repeat(auto-fit, minmax(48px, 1fr));}
+.tiles.nav .tile{padding:12px 6px; justify-content:center;}
+@media (max-width:380px){ .tiles:not(.nav){grid-template-columns:1fr;} }
 
 /* Language switcher. Small and out of the way -- it's used once per
    visit, not something that should compete for attention with the
@@ -204,6 +230,27 @@ h2{
   font-size:.8rem; color:var(--muted); overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap;
 }
+.device-card{
+  background:var(--panel); border:1px solid var(--border); border-radius:8px;
+  padding:18px; margin-bottom:16px; display:flex; flex-direction:column; gap:12px;
+}
+.device-header{display:flex; align-items:center; gap:12px;}
+.device-icon{
+  width:28px; height:28px; min-width:28px; stroke:var(--ember); fill:none;
+  stroke-width:2; stroke-linecap:round; stroke-linejoin:round;
+}
+.device-title{font-family:ui-monospace,monospace; font-weight:bold; font-size:1.05rem; color:var(--ember-bright);}
+.device-desc{font-size:.95rem; color:var(--text); margin:0; line-height:1.5;}
+.device-note{font-size:.8rem; color:var(--muted); margin:0; line-height:1.4;}
+.device-btn{
+  align-self:flex-start; display:inline-flex; align-items:center; gap:8px;
+  background:var(--panel-2); border:1px solid var(--border); color:var(--ember);
+  text-decoration:none; font-family:ui-monospace,monospace; font-size:.85rem;
+  font-weight:bold; padding:6px 12px; border-radius:6px; transition:border-color .2s, background .2s;
+}
+.device-btn:hover{border-color:var(--ember); background:var(--line); color:var(--ember-bright);}
+.device-btn small{font-weight:normal; color:var(--muted);}
+.device-btn.secondary{font-weight:normal; color:var(--muted);}
 
 /* About page: view tabs (About / Connect / Hardware). A real UI
    interaction switched client-side on purpose -- these are three
@@ -242,20 +289,6 @@ code.ip-tag{
   border:1px solid var(--border); color:var(--ember-bright);
   padding:2px 8px; border-radius:4px; font-size:.9rem; display:inline-block;
 }
-
-/* Hardware pane: photo gallery. Two columns on anything wide enough
-   to show them side by side, one column on a narrow kiosk/phone. */
-.gallery-grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));}
-.gallery-card{
-  background:var(--panel); border:1px solid var(--border); border-radius:8px;
-  overflow:hidden;
-}
-.gallery-card img{width:100%; height:auto; display:block; background:var(--bg);}
-.gallery-card .caption{
-  padding:8px 10px; display:flex; flex-direction:column; gap:2px;
-}
-.gallery-card .caption span:first-child{font-weight:bold; font-size:.85rem; color:var(--ember);}
-.gallery-card .caption span:last-child{font-size:.75rem; color:var(--muted);}
 """
 
 
@@ -349,19 +382,22 @@ def _home_tiles(lang):
     English labels ("Billboard" here, "Board" elsewhere) that meant the
     same thing -- no reason to translate one concept two different ways
     just because the original English text happened to say it twice."""
+    # One card per row, icon on the left and the name and subtitle beside
+    # it: five cards squeezed into a grid were too compact to read.
     return (
-        "<div class='tiles'>"
+        "<div class='tiles home'>"
         + "".join(
             "<a class='tile' href='" + href + "'>" + icon +
-            "<span>" + i18n.t(label, lang) + "</span>"
-            "<small>" + i18n.t(sub, lang) + "</small></a>"
+            "<div class='tile-text'><span>" + i18n.t(label, lang) + "</span>"
+            "<small>" + i18n.t(sub, lang) + "</small></div></a>"
             for feat, href, icon, label, sub in (
                 ("chat", "/rrc", _ICON_CHAT, "nav_chat", "tile_chat_sub"),
                 ("billboard", "/billboard", _ICON_BOARD, "nav_board", "tile_board_sub"),
                 ("files", "/files", _ICON_FILES, "nav_files", "tile_files_sub"),
+                (None, "/tools", _ICON_TOOLS, "nav_tools", "tile_tools_sub"),
                 ("about", "/about", _ICON_ABOUT, "nav_about", "tile_about_sub"),
             )
-            if features.enabled(feat)
+            if feat is None or features.enabled(feat)
         ) +
         "</div>"
     )
@@ -504,12 +540,41 @@ def _render_chat_page(lang):
     each feature this node offers (see features.py). The Concierge chat
     box that used to sit here is a hidden feature now -- HF-003,
     _render_concierge_page() below."""
-    return (
-        "<div id='site-logo'><pre>" + BARKEEP_ART + "</pre></div>"
-        "<h1>Stump</h1>"
-        + _lang_switcher(lang, "/")
-        + _home_tiles(lang)
-    )
+    # Branding from the card (fserv.home_branding): replaces the logo and
+    # title, placed above, below, or beside the cards. The language
+    # switcher always stays first.
+    brand = fserv.home_branding(lang)
+    if brand is None:
+        return (
+            "<div id='site-logo'><pre>" + BARKEEP_ART + "</pre></div>"
+            "<h1>Stump</h1>"
+            + _lang_switcher(lang, "/")
+            + _home_tiles(lang)
+        )
+    place = brand["place"]
+    if brand["kind"] == "page":
+        # A complete page (its own <html>, styles, scripts) goes in a frame:
+        # inline, its body styles would take over the whole Stump page.
+        # Sandboxed: its scripts run, but in an origin of their own, so they
+        # can't read the node's pages as the visitor.
+        section = ("<section class='home-brand'><iframe class='home-frame' sandbox='allow-scripts' "
+                   "src='/home-file?f=" + _url_encode(brand["name"]) + "' title='" + _attr_esc(brand["name"]) + "' "
+                   "style='height:" + str(brand["height"]) + "px'></iframe></section>")
+    else:
+        section = "<section class='home-brand'>" + brand["html"] + "</section>"
+    tiles = _home_tiles(lang)
+    if place == "bottom":
+        body = tiles + section
+    elif place in ("left", "right"):
+        # Side by side where the screen allows (760 px and up), the page
+        # widened for it; on a phone they stack, "left" above the cards
+        # and "right" below -- the order they're written in.
+        body = ("<style>@media (min-width:760px){body{max-width:960px;}}</style>"
+                "<div class='home-layout side'>"
+                + (section + tiles if place == "left" else tiles + section) + "</div>")
+    else:
+        body = section + tiles
+    return _lang_switcher(lang, "/") + body
 
 
 def _render_concierge_page(lang):
@@ -576,8 +641,24 @@ _DESTINATIONS = {
 }
 
 
+# Every page's navigation row is this list minus the page itself -- one
+# rule, one order, so no page can drift (four of them had: home, the
+# billboard, tools and about were each missing a destination).
+NAV_ORDER = ("chat", "board", "files", "tools", "about", "home")
+
+
+def _nav_except(lang, current):
+    return _nav(lang, *[k for k in NAV_ORDER if k != current])
+
+
 # Nav keys that belong to a switchable feature (see features.py).
 _NAV_FEATURE = {"chat": "chat", "board": "billboard", "files": "files", "about": "about"}
+
+
+def _attr_esc(t):
+    """Text for a single-quoted HTML attribute."""
+    return (t.replace("&", "&amp;").replace("'", "&#39;").replace('"', "&quot;")
+             .replace("<", "&lt;").replace(">", "&gt;"))
 
 
 def _nav(lang, *keys):
@@ -590,14 +671,17 @@ def _nav(lang, *keys):
     hardcoded English labels -- that stopped being possible the moment
     labels depend on who's asking, so this is now called fresh inside
     each page renderer instead."""
-    out = ["<div class='tiles'>"]
+    # Icons only: with a word under each, five tiles didn't fit a phone's
+    # width and the last one dropped to a row of its own. The name stays
+    # as a tooltip and for screen readers (title, aria-label).
+    out = ["<div class='tiles nav'>"]
     for k in keys:
         feat = _NAV_FEATURE.get(k)
         if feat is not None and not features.enabled(feat):
             continue
         href, icon, label_key = _DESTINATIONS[k]
-        out.append("<a class='tile' href='" + href + "'>" + icon +
-                    "<span>" + i18n.t(label_key, lang) + "</span></a>")
+        name = _attr_esc(i18n.t(label_key, lang))
+        out.append("<a class='tile' href='" + href + "' title='" + name + "' aria-label='" + name + "'>" + icon + "</a>")
     out.append("</div>")
     return "".join(out)
 
@@ -699,7 +783,135 @@ def _render_admin_file_list_page(lang, names, pw):
         "<h1>" + i18n.t("admin_header", lang) + "</h1>"
         + files_part
         + board_part
+        + _render_admin_tls_line(lang)
+        + _render_admin_home_section(lang, pw)
+        + _render_admin_radio_section(lang, pw)
+        + _render_admin_pn_section(lang, pw)
         + _render_admin_settings_section(lang)
+    )
+
+
+def _render_admin_tls_line(lang):
+    """HTTPS status: on/off and why, and how long the certificate has
+    left -- every node falls back to plain HTTP the day it expires."""
+    import time
+    st = tls.status()
+    head = "<h2 class='sub'>HTTPS</h2>"
+    if not st["active"]:
+        return head + "<p class='sub'>" + i18n.t("admin_tls_off", lang, reason=billboard._esc(st["reason"])) + "</p>"
+    try:
+        import propagation
+        now = propagation.unix_now()
+    except Exception:
+        import time as _time
+        now = int(_time.time())
+    # The node's clock may be unset (off-grid, no NTP): then "days left"
+    # would be nonsense, so show the expiry date and skip the count.
+    clock_ok = now >= 1735689600
+    days = tls.days_left(now) if clock_ok else None
+    try:
+        import propagation as _pn
+        y, mo, d = time.gmtime(int(st["not_after"]) - _pn.EPOCH_OFFSET)[:3]
+        until = "%04d-%02d-%02d" % (y, mo, d)
+    except Exception:
+        until = "?"
+    line = i18n.t("admin_tls_on", lang, host=billboard._esc(st["host"] or "?"), until=until,
+                  days=days if days is not None else "?")
+    if days is not None and days < 21:
+        line = "<b>" + line + " — " + i18n.t("admin_tls_renew", lang) + "</b>"
+    return head + "<p class='sub'>" + line + "</p>"
+
+
+def _render_admin_home_section(lang, pw):
+    """The home page's own section (docs/HOME_BRANDING.md): what the node
+    sees in the card's home/ folder, and where to put it -- above, under,
+    or beside the buttons -- its frame height, and whether to show it.
+    Saved to home/home.json, so the panel and the file always agree."""
+    cfg = fserv.home_config()
+    out = ("<h2 class='sub'>" + i18n.t("admin_home_header", lang) + "</h2>"
+           "<p class='sub'>" + billboard._esc(fserv.home_status(lang)) + "</p>")
+    if not fserv.sd_ok:
+        return out
+    radios = "".join(
+        "<label class='opt'><input type='radio' name='place' value='" + v + "'"
+        + (" checked" if cfg["place"] == v else "") + "> " + i18n.t(k, lang) + "</label>"
+        for v, k in (("top", "admin_home_top"), ("bottom", "admin_home_bottom"),
+                     ("left", "admin_home_left"), ("right", "admin_home_right")))
+    return out + (
+        "<form method='POST' action='/admin/home' class='post-form' autocomplete='off'>"
+        "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+        "<fieldset class='opts'><legend>" + i18n.t("admin_home_place", lang) + "</legend>" + radios + "</fieldset>"
+        "<label>" + i18n.t("admin_home_height", lang) + "<br>"
+        "<input name='height' type='number' min='80' max='1200' value='" + str(cfg["height"]) + "'></label>"
+        "<small>" + i18n.t("admin_home_height_note", lang) + "</small>"
+        "<label class='opt'><input type='checkbox' name='show' value='1'" + ("" if cfg["hidden"] else " checked") + "> "
+        + i18n.t("admin_home_show", lang) + "</label>"
+        "<button type='submit'>" + i18n.t("admin_home_save", lang) + "</button></form>"
+    )
+
+
+def _render_admin_pn_section(lang, pw):
+    """LXMF propagation node (propagation.py): switch, status, and the two
+    single-phone test tools."""
+    st = propagation.status()
+    hid = "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+    head = ("<h2 class='sub'>" + i18n.t("admin_pn_header", lang) + "</h2>"
+            "<p class='sub'>" + i18n.t("admin_pn_intro", lang) + "</p>")
+    toggle = ("<form method='POST' action='/admin/propagation' autocomplete='off'>" + hid +
+              "<input type='hidden' name='action' value='" + ("off" if st["enabled"] else "on") + "'>"
+              "<button type='submit'>" + i18n.t("admin_pn_disable" if st["enabled"] else "admin_pn_enable", lang)
+              + "</button></form>")
+    if not st["enabled"]:
+        return head + "<p class='sub'>" + i18n.t("admin_pn_off_state", lang) + "</p>" + toggle
+    s = st["stats"]
+    body = ("<p class='sub'>" + i18n.t("admin_pn_on_state", lang) + " <code>" + (st["address"] or "") + "</code><br>"
+            + i18n.t("admin_pn_counts", lang, stored=st["stored"], checking=st["checking"],
+                     valid=s["valid"], invalid=s["invalid"], served=s["served"]) + "</p>")
+    inbox = propagation.mailbox_inbox()
+    mailbox = ("<p class='sub'>" + i18n.t("admin_pn_mailbox", lang) + " <code>" + (st["mailbox"] or "") + "</code></p>"
+               + ("<ul>" + "".join("<li>" + billboard._esc(m["text"]) + " <small>&mdash; " + m["from"][:8]
+                                   + "…</small></li>" for m in reversed(inbox)) + "</ul>"
+                  if inbox else "<p class='sub'><small>" + i18n.t("admin_pn_mailbox_none", lang) + "</small></p>"))
+    leave = ("<form method='POST' action='/admin/propagation' class='post-form' autocomplete='off'>" + hid +
+             "<input type='hidden' name='action' value='leave'>"
+             "<label>" + i18n.t("admin_pn_leave_to", lang) + "<br><input name='to' maxlength='32' "
+             "placeholder='53d91d2f…'></label>"
+             "<label>" + i18n.t("admin_pn_leave_text", lang) + "<br><input name='text' maxlength='200'></label>"
+             "<button type='submit'>" + i18n.t("admin_pn_leave_button", lang) + "</button></form>")
+    return head + body + toggle + mailbox + leave
+
+
+def _render_admin_radio_section(lang, pw):
+    """The Heltec Bridge's radio settings (radio.py). Shows what the
+    bridge is using right now; applying sends them to the Heltec at once
+    if it's connected, and saves them so they survive a reboot."""
+    cur = radio.current()
+    head = "<h2 class='sub'>" + i18n.t("admin_radio_header", lang) + "</h2>"
+    if cur is None:
+        return head + "<p class='sub'>" + i18n.t("admin_radio_none", lang) + "</p>"
+
+    def opts(values, selected, label=str):
+        return "".join("<option value='%d'%s>%s</option>" % (v, " selected" if v == selected else "", label(v))
+                       for v in values)
+
+    def field(label_key, control):
+        return "<label>" + i18n.t(label_key, lang) + "<br>" + control + "</label>"
+
+    return (
+        head +
+        "<p class='sub'>" + i18n.t("admin_radio_intro", lang) + "</p>"
+        "<form method='POST' action='/admin/radio' class='post-form' autocomplete='off'>"
+        "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+        + field("radio_txp", "<input name='txp' type='number' min='%d' max='%d' value='%d'>"
+                % (radio.TXP_MIN, radio.TXP_MAX, cur["txpower"]))
+        + field("radio_freq", "<input name='freq' inputmode='decimal' value='" + radio.hz_to_mhz(cur["frequency"]) + "'>")
+        + field("radio_bw", "<select name='bw'>" + opts(radio.BANDWIDTHS, cur["bandwidth"],
+                lambda v: ("%g" % (v / 1000)) + " kHz") + "</select>")
+        + field("radio_sf", "<select name='sf'>" + opts(range(radio.SF_MIN, radio.SF_MAX + 1), cur["sf"]) + "</select>")
+        + field("radio_cr", "<select name='cr'>" + opts(range(radio.CR_MIN, radio.CR_MAX + 1), cur["cr"],
+                lambda v: "4/%d" % v) + "</select>")
+        + "<button type='submit'>" + i18n.t("admin_radio_save", lang) + "</button>"
+        "</form>"
     )
 
 
@@ -984,7 +1196,7 @@ def _render_files_page(lang):
         "<p class='sub'>" + i18n.t("files_tap_to_download", lang) + "</p>"
         "<div class='panel' id='file-list'>" + rows + "</div>"
         + upload
-        + _nav(lang, "home", "chat", "board", "tools", "about")
+        + _nav_except(lang, "files")
     )
 
 
@@ -1048,7 +1260,17 @@ def _render_tools_page(lang):
     Provisioner needs esptool, mpremote and rnodeconf, which are CPython
     programs; none of that changes, and none of it runs on the board.
     """
-    tools = fserv.list_tools()
+    apps = fserv.find_apps()
+    app_items = []
+    for key, h2, title, desc, note, gh_label, gh_url, icon in _APP_INFO:
+        a = apps.get(key)
+        if a:
+            app_items.append(
+                "<li><a href='/tool?f=" + _url_encode(a["file"]) + "'>"
+                + _ICON_DOWNLOAD + "<span>" + billboard._esc(a["file"]) + "</span></a>"
+                "<small>" + _human_size(a["size"]) + " · " + i18n.t(title, lang) + "</small></li>"
+            )
+    tools = [t for t in fserv.list_tools() if not fserv.is_app_file(t)]
     items = []
     for t in tools:
         try:
@@ -1065,12 +1287,17 @@ def _render_tools_page(lang):
     else:
         listing = "<div class='panel'><p class='sub'>" + i18n.t("tools_none_installed", lang) + "</p></div>"
 
+    apps_listing = (
+        "<h2>" + i18n.t("tools_apps_h2", lang) + "</h2>"
+        "<div class='panel'><ul class='files'>" + "".join(app_items) + "</ul></div>"
+        "<h2>" + i18n.t("tools_tech_h2", lang) + "</h2>"
+    ) if app_items else ""
     return (
         "<h1>" + i18n.t("tools_header", lang) + "</h1>"
         + _lang_switcher(lang, "/tools") +
         "<p class='sub'>" + i18n.t("tools_intro", lang) + "</p>"
-        + listing
-        + _nav(lang, "home", "files", "chat", "about")
+        + apps_listing + listing
+        + _nav_except(lang, "tools")
     )
 
 
@@ -1088,28 +1315,83 @@ def _current_ap_ip():
         return "192.168.4.1"
 
 
+def _current_ap_ssid():
+    """The name this node's Wi-Fi actually broadcasts, read live -- the
+    connect steps name it instead of guessing a prefix (a technician can
+    choose any name)."""
+    try:
+        import network
+        name = network.WLAN(network.AP_IF).config("essid")
+        if name:
+            return name
+    except Exception:
+        pass
+    # Not readable live: the same choice the node made at boot --
+    # config.SSID_NAME, or the default hosted-page name when it's None.
+    try:
+        from config import SSID_NAME
+        if SSID_NAME:
+            return SSID_NAME
+    except Exception:
+        pass
+    try:
+        import captive_portal
+        return captive_portal.DEFAULT_SSID
+    except Exception:
+        return "LaBuche-Stump.web.app"
+
+
+_ICON_PHONE = ("<rect x='5' y='2' width='14' height='20' rx='2' ry='2'></rect>"
+               "<line x1='12' y1='18' x2='12.01' y2='18'></line>")
+_ICON_HANDHELD = ("<rect x='2' y='6' width='20' height='12' rx='2'></rect><line x1='6' y1='12' x2='10' y2='12'></line>"
+                  "<line x1='8' y1='10' x2='8' y2='14'></line><line x1='15' y1='13' x2='15.01' y2='13'></line>"
+                  "<line x1='18' y1='11' x2='18.01' y2='11'></line>")
+_APP_INFO = (   # key, heading, title, description, install note, GitHub label, GitHub URL, icon
+    ("android", "about_app1_h2", "about_app1_title", "about_app1_desc", "about_app1_install", "about_app1_github",
+     "https://github.com/ruderigo/FireFly-Android", _ICON_PHONE),
+    ("rk3326", "about_app2_h2", "about_app2_title", "about_app2_desc", "about_app2_install", "about_app2_github",
+     "https://github.com/ruderigo/FireFly_RK3326_R36MAX_R36S", _ICON_HANDHELD),
+)
+
+
+def _render_app_cards(lang):
+    """The apps pane: the site's cards, plus what matters on the Stump's own
+    Wi-Fi, where there's no internet -- a download from this node (when the
+    file is on its card), with GitHub kept as the second, online-only link."""
+    apps = fserv.find_apps()
+    out = "<p class='sub'>" + i18n.t("about_apps_tagline", lang) + "</p>"
+    for key, h2, title, desc, note, gh_label, gh_url, icon in _APP_INFO:
+        a = apps.get(key)
+        if a:
+            local = ("<a class='device-btn' href='/tool?f=" + _url_encode(a["file"]) + "'>"
+                     "<span>" + i18n.t("about_app_download", lang) + "</span> "
+                     "<small>v" + billboard._esc(a["version"]) + " · " + _human_size(a["size"]) + "</small></a>"
+                     "<p class='device-note'>" + i18n.t(note, lang) + "</p>")
+        else:
+            local = "<p class='device-note'>" + i18n.t("about_app_missing", lang) + "</p>"
+        out += (
+            "<h2>" + i18n.t(h2, lang) + "</h2>"
+            "<div class='device-card'>"
+            "<div class='device-header'><svg class='device-icon' viewBox='0 0 24 24'>" + icon + "</svg>"
+            "<div class='device-title'>" + i18n.t(title, lang) + "</div></div>"
+            "<p class='device-desc'>" + i18n.t(desc, lang) + "</p>"
+            + local +
+            "<a class='device-btn secondary' href='" + gh_url + "' target='_blank' rel='noopener'>"
+            "<span>" + i18n.t(gh_label, lang) + "</span> &rarr; <small>" + i18n.t("about_app_github_note", lang) + "</small></a>"
+            "</div>"
+        )
+    return out
+
+
 def _render_about_page(lang):
-    """The About page: what Stump/Fireflies are, how to connect, and a
-    hardware gallery -- three views in one page, switched client-side
-    (a real UI interaction, not a navigation -- no reason to round-trip
-    the server for it), with the SAME server-side language handling
-    every other page uses, replacing the standalone client-side
-    language toggle the source page shipped with. One language
-    mechanism for the whole site, not two that could drift out of sync.
-
-    Content is the PR/marketing team's own copy, ported not rewritten,
-    with two corrections made deliberately rather than silently: the
-    connect instructions no longer assume the SSID "starts with
-    LaBuche" (stale against this build's actual default, which is
-    either the full hosted-page domain or a technician-chosen custom
-    name), and the example IP is the AP's real, live address instead of
-    a hardcoded placeholder from wherever the page was originally drafted.
-
-    Gallery images are served from the SD card (see /about/img),
-    not baked into the firmware -- a technician copies the two photos
-    onto the card; nothing here assumes they're already present, and a
-    missing photo just renders as a broken image, the same as any other
-    web page missing an asset.
+    """The About page, mirroring the public site (labuche-stump.web.app):
+    three views switched client-side -- the project, how to connect, and
+    the FireFly apps -- in the same server-side language as every other
+    page. The site's copy, with what only the node can do better: the
+    connect steps name the network it actually broadcasts and its live
+    address, and the apps view offers each FireFly as a download from
+    this node (found on its SD card by name, see fserv.find_apps), since
+    on its own Wi-Fi there is no internet to reach GitHub.
     """
     ip_html = "<code class='ip-tag'>http://" + _current_ap_ip() + "</code>"
 
@@ -1147,7 +1429,11 @@ def _render_about_page(lang):
         "<p>" + i18n.t("about_creator_p", lang) + "</p>"
         "<div class='links-grid'>"
         "<a class='link-tile' href='https://github.com/ruderigo/LaBuche-Stump' target='_blank' rel='noopener'>"
-        "<div class='title'>GitHub</div><div class='desc'>" + i18n.t("about_link_github_desc", lang) + "</div></a>"
+        "<div class='title'>LaBuche-Stump</div><div class='desc'>" + i18n.t("about_link_stump_desc", lang) + "</div></a>"
+        "<a class='link-tile' href='https://github.com/ruderigo/FireFly-Android' target='_blank' rel='noopener'>"
+        "<div class='title'>FireFly-Android</div><div class='desc'>" + i18n.t("about_link_android_desc", lang) + "</div></a>"
+        "<a class='link-tile' href='https://github.com/ruderigo/FireFly_RK3326_R36MAX_R36S' target='_blank' rel='noopener'>"
+        "<div class='title'>FireFly_RK3326</div><div class='desc'>" + i18n.t("about_link_rk_desc", lang) + "</div></a>"
         "<a class='link-tile' href='https://www.linkedin.com/in/rodrigo-gl' target='_blank' rel='noopener'>"
         "<div class='title'>LinkedIn</div><div class='desc'>rodrigo-gl</div></a>"
         "<a class='link-tile' href='mailto:Rodrigoandresgl@gmail.com'>"
@@ -1174,7 +1460,8 @@ def _render_about_page(lang):
         "<div class='steps-container'>"
         + step("<path d='M5 12.55a11 11 0 0 1 14.08 0'/><path d='M1.42 9a16 16 0 0 1 21.16 0'/>"
                "<path d='M8.53 16.11a6 6 0 0 1 6.95 0'/><line x1='12' y1='20' x2='12.01' y2='20'/>",
-               "about_connect_step1_title", "about_connect_step1_text")
+               "about_connect_step1_title", "about_connect_step1_text",
+               ssid="<strong>" + billboard._esc(_current_ap_ssid()) + "</strong>")
         + step("<rect x='3' y='11' width='18' height='11' rx='2' ry='2'/><path d='M7 11V7a5 5 0 0 1 9.9-1'/>",
                "about_connect_step2_title", "about_connect_step2_text")
         + step("<circle cx='12' cy='12' r='10'/><polygon points='12 8 8 12 12 16 12 8'/><line x1='16' y1='12' x2='8' y2='12'/>",
@@ -1182,33 +1469,15 @@ def _render_about_page(lang):
         + "</div>"
     )
 
-    def gallery_card(fname, alt_key, title_key, sub_key):
-        return (
-            "<div class='gallery-card'>"
-            "<img src='/about/img?f=" + _url_encode(fname) + "' alt='" + i18n.t(alt_key, lang) + "'>"
-            "<div class='caption'><span>" + i18n.t(title_key, lang) + "</span>"
-            "<span>" + i18n.t(sub_key, lang) + "</span></div>"
-            "</div>"
-        )
-
-    hardware_pane = (
-        "<p class='sub'>" + i18n.t("about_hardware_tagline", lang) + "</p>"
-        "<h2>" + i18n.t("about_hardware_h2", lang) + "</h2>"
-        "<p class='sub'>" + i18n.t("about_hardware_intro", lang) + "</p>"
-        "<div class='gallery-grid'>"
-        + gallery_card("examplenode.jpg", "about_hardware_img1_alt", "about_hardware_img1_title", "about_hardware_img1_sub")
-        + gallery_card("examplenode2.jpg", "about_hardware_img2_alt", "about_hardware_img2_title", "about_hardware_img2_sub")
-        + "</div>"
-    )
-
+    apps_pane = _render_app_cards(lang)
     tabs = (
         "<div class='tab-bar'>"
         "<button class='view-btn active' id='tab-about' onclick=\"switchAboutView('about')\">"
         + i18n.t("about_tab_about", lang) + "</button>"
         "<button class='view-btn' id='tab-connect' onclick=\"switchAboutView('connect')\">"
         + i18n.t("about_tab_connect", lang) + "</button>"
-        "<button class='view-btn' id='tab-hardware' onclick=\"switchAboutView('hardware')\">"
-        + i18n.t("about_tab_hardware", lang) + "</button>"
+        "<button class='view-btn' id='tab-apps' onclick=\"switchAboutView('apps')\">"
+        + i18n.t("about_tab_apps", lang) + "</button>"
         "</div>"
     )
 
@@ -1229,14 +1498,14 @@ def _render_about_page(lang):
         + tabs +
         "<div class='view-pane active' id='pane-about'>" + about_pane + "</div>"
         "<div class='view-pane' id='pane-connect'>" + connect_pane + "</div>"
-        "<div class='view-pane' id='pane-hardware'>" + hardware_pane + "</div>"
-        + _nav(lang, "home", "chat", "board", "files")
+        "<div class='view-pane' id='pane-apps'>" + apps_pane + "</div>"
+        + _nav_except(lang, "about")
         + script
     )
 
 
 def _render_billboard_page(lang):
-    return billboard._render_page(lang) + _nav(lang, "home", "chat", "files", "about")
+    return billboard._render_page(lang) + _nav_except(lang, "board")
 
 
 async def _send(writer, status, body, content_type="text/html"):
@@ -1287,6 +1556,22 @@ MIME_TYPES = {
     "gif": "image/gif", "webp": "image/webp", "svg": "image/svg+xml",
     "pdf": "application/pdf", "txt": "text/plain", "md": "text/plain",
     "zip": "application/zip", "epub": "application/epub+zip",
+    "wasm": "application/wasm",
+    "js": "application/javascript",
+    "apk": "application/vnd.android.package-archive",
+    # For a home page's own section (docs/HOME_BRANDING.md): a browser refuses a
+    # stylesheet sent as generic data, and fonts need their own types.
+    "css": "text/css",
+    "woff2": "font/woff2",
+    "woff": "font/woff",
+    "ttf": "font/ttf",
+    "otf": "font/otf",
+    "ico": "image/x-icon",
+    "avif": "image/avif",
+    # A complete page dropped in home/ is shown in a frame: it has to be
+    # served as a page, or the browser downloads it instead.
+    "html": "text/html; charset=utf-8",
+    "htm": "text/html; charset=utf-8",
 }
 
 
@@ -1330,9 +1615,8 @@ async def _send_file(writer, fpath, size, filename, chunk=16384, inline=False):
     as it isn't "attachment", so simply not sending it is enough, and
     it avoids asserting a disposition value this function has never
     tested against every browser's handling of it. Downloads (the
-    default) keep forcing Save-As, unchanged from before -- this exists
-    for the about-page gallery, which needs the opposite behaviour: a
-    photo that renders on the page, not one that pops a save dialog.
+    default) keep forcing Save-As; inline is for files a page loads itself
+    -- the voice codecs (codec2.wasm, opus.wasm and their scripts).
 
     16KB chunks, not 2KB: a 10MB transfer at 2KB is over 5000
     read/write/await cycles, and every await hands control to the DNS
@@ -1357,6 +1641,21 @@ async def _send_file(writer, fpath, size, filename, chunk=16384, inline=False):
             await writer.awrite(buf)
 
 
+def _voice_gate(identifier, to):
+    """The refusal a /msg to `to` would get from stumpid's access mode, or
+    None -- a voice note obeys the same rule as the text it replaces."""
+    try:
+        import stumpid.install as sid_install
+        if sid_install._original is None:
+            return None
+        from stumpid import core as sid
+        if sid.requires_verification(identifier, "/msg " + (to or "x") + " x"):
+            return i18n.t("auth_required_generic", i18n.get_lang(identifier))
+    except ImportError:
+        pass
+    return None
+
+
 def _query(path, key):
     """Pulls one value out of a query string. MicroPython has no
     urllib.parse, and the existing ad-hoc split('f=') pattern elsewhere
@@ -1379,7 +1678,7 @@ MAX_HEADERS = 40
 MAX_SMALL_BODY = 8192
 
 
-async def _read_small_body(reader, length, chunk=1024):
+async def _read_small_body(reader, length, chunk=1024, cap=None):
     """Reads a small request body, bounded and EOF-safe.
 
     Not readexactly(): that blocks indefinitely if a client sends a
@@ -1391,8 +1690,9 @@ async def _read_small_body(reader, length, chunk=1024):
     length correctly."""
     if length <= 0:
         return b""
-    if length > MAX_SMALL_BODY:
-        length = MAX_SMALL_BODY
+    cap = MAX_SMALL_BODY if cap is None else cap
+    if length > cap:
+        length = cap
     out = bytearray()
     while len(out) < length:
         want = length - len(out)
@@ -1405,7 +1705,38 @@ async def _read_small_body(reader, length, chunk=1024):
     return bytes(out)
 
 
-async def _handle(reader, writer):
+# Requests that are part of an already-open page (polls, uploads, audio,
+# downloads, data). Only whole pages are redirected to HTTPS: redirecting
+# these would break a page still open over HTTP, since the browser
+# refuses a cross-origin redirect for them.
+_NO_REDIRECT = ("/home-file", "/tls-ok", "/rrc/poll", "/rrc/voice", "/rrc/send", "/download", "/codec2", "/opus.", "/billboard.json",
+                "/files.json", "/fw", "/tool?", "/lang", "/upload", "/post", "/chat")
+
+
+def _https_upgrade_page(target, path):
+    """A tiny page that tries HTTPS first. If the browser can fetch
+    https://<host>/tls-ok -- certificate valid, by the phone's own clock --
+    it moves to the HTTPS address; otherwise (expired, wrong clock, no
+    answer within 3 s) it reloads the same page over HTTP with plain=1,
+    which skips this check. The flow never shows a certificate warning."""
+    host = target.split("/")[2]
+    back = path + ("&" if "?" in path else "?") + "plain=1"
+    return ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Stump</title>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'></head><body><script>"
+            "var go=window.__stumpGo||function(u){location.replace(u);},done=false;"
+            "function to(u){if(!done){done=true;go(u);}}"
+            "fetch('https://" + host + "/tls-ok',{mode:'no-cors',cache:'no-store'})"
+            ".then(function(){to(" + json.dumps(target) + ");},function(){to(" + json.dumps(back) + ");});"
+            "setTimeout(function(){to(" + json.dumps(back) + ");},3000);"
+            "</script><noscript><meta http-equiv='refresh' content=\"0;url=" + billboard._esc(back) + "\"></noscript>"
+            "</body></html>")
+
+
+async def _handle_tls(reader, writer):
+    await _handle(reader, writer, secure=True)
+
+
+async def _handle(reader, writer, secure=False):
     try:
         request_line = await reader.readline()
         # Parse defensively: a phone's captive-portal probe, a port
@@ -1452,6 +1783,27 @@ async def _handle(reader, writer):
         peer = writer.get_extra_info("peername")
         identifier = billboard._extract_ip(peer)
 
+        # With HTTPS set up (stump_tls.py), a page opened over plain HTTP on
+        # the Stump's own Wi-Fi moves to https://<hostname>/ -- a secure
+        # page, which is what lets browsers open the microphone -- but only
+        # if the BROWSER finds the certificate valid. A server-side redirect
+        # used to send visitors into a full-page warning once a certificate
+        # lapsed (or on a phone with a wrong clock). Now the phone checks,
+        # against its own clock, and stays on HTTP silently if anything is
+        # off. No redirect also leaves captive-portal detection as it was.
+        if not secure and method == "GET" and "plain=1" not in path \
+                and not any(path.startswith(p) for p in _NO_REDIRECT):
+            target = tls.https_redirect(identifier, path)
+            if target:
+                await _send(writer, "200 OK", _https_upgrade_page(target, path))
+                return
+
+        if method == "GET" and path.startswith("/tls-ok"):
+            # What the upgrade page fetches over HTTPS: reaching it at all
+            # means the browser accepted the certificate.
+            await _send(writer, "200 OK", "ok", "text/plain")
+            return
+
         # A feature the technician turned off (features.py) is gone,
         # not just unlinked: every one of its addresses answers 404.
         if features.path_blocked(path):
@@ -1493,6 +1845,102 @@ async def _handle(reader, writer):
             # No link anywhere points here on purpose -- see
             # _render_admin_login_page's own docstring.
             await _send(writer, "200 OK", _page(_render_admin_login_page(i18n.get_lang(identifier))))
+
+        elif method == "POST" and path.startswith("/admin/home"):
+            # Before the generic POST /admin (login) branch, like the others.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields = {}
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) == 2:
+                    fields[parts[0]] = billboard._url_decode(parts[1])
+            pw = fields.get("admin_pass", "")
+            if not _check_admin_pw(pw):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                lang = i18n.get_lang(identifier)
+                try:
+                    height = int(fields.get("height", "280"))
+                except ValueError:
+                    height = -1
+                # An unticked checkbox sends nothing: no "show" means hide.
+                why = fserv.save_home_config(fields.get("place", ""), height, fields.get("show") != "1")
+                msg = i18n.t("admin_home_saved", lang) if why is None else i18n.t("admin_home_failed", lang, why=why)
+                names = fserv._list_files() if fserv.sd_ok else []
+                notice = "<p class='sub'>" + billboard._esc(msg) + "</p>"
+                await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
+
+        elif method == "POST" and path.startswith("/admin/propagation"):
+            # Before the generic POST /admin (login) branch, like /admin/radio.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields = {}
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) == 2:
+                    fields[parts[0]] = billboard._url_decode(parts[1])
+            pw = fields.get("admin_pass", "")
+            if not _check_admin_pw(pw):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                lang = i18n.get_lang(identifier)
+                action = fields.get("action", "")
+                if action == "on":
+                    propagation.save_setting(True)
+                    if propagation.enable():
+                        propagation.announce()
+                        msg = i18n.t("admin_pn_enabled", lang)
+                    else:
+                        msg = i18n.t("admin_pn_no_sd", lang)
+                elif action == "off":
+                    propagation.save_setting(False)
+                    propagation.disable()
+                    msg = i18n.t("admin_pn_disabled", lang)
+                elif action == "leave":
+                    err = propagation.leave_message(fields.get("to", ""), fields.get("text", "").strip() or "test")
+                    msg = i18n.t({None: "admin_pn_left", "off": "admin_pn_off_state", "address": "admin_pn_bad_address",
+                                  "unknown": "admin_pn_unknown"}.get(err, "admin_pn_unknown"), lang)
+                else:
+                    msg = ""
+                names = fserv._list_files() if fserv.sd_ok else []
+                notice = "<p class='sub'>" + billboard._esc(msg) + "</p>" if msg else ""
+                await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
+
+        elif method == "POST" and path.startswith("/admin/radio"):
+            # Must come before the generic POST /admin (login) branch
+            # below, which catches every other /admin POST.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields = {}
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) == 2:
+                    fields[parts[0]] = billboard._url_decode(parts[1])
+            pw = fields.get("admin_pass", "")
+            if not _check_admin_pw(pw):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                lang = i18n.get_lang(identifier)
+                settings, bad = radio.parse_form(fields)
+                if bad:
+                    label = {"frequency": "radio_freq", "bandwidth": "radio_bw", "txpower": "radio_txp",
+                             "sf": "radio_sf", "cr": "radio_cr"}[bad]
+                    msg = i18n.t("admin_radio_invalid", lang, field=i18n.t(label, lang))
+                else:
+                    result = radio.apply(settings)
+                    saved = radio.save(settings)
+                    if not saved:
+                        msg = i18n.t("admin_radio_not_saved", lang)
+                    elif result == "sent":
+                        msg = i18n.t("admin_radio_sent", lang)
+                    elif result == "pending":
+                        msg = i18n.t("admin_radio_pending", lang)
+                    else:
+                        msg = i18n.t("admin_radio_none", lang)
+                names = fserv._list_files() if fserv.sd_ok else []
+                notice = "<p class='sub'>" + billboard._esc(msg) + "</p>"
+                await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
 
         elif method == "POST" and path.startswith("/admin") and not path.startswith("/admin/delete"):
             length = int(headers.get("content-length", "0"))
@@ -1620,7 +2068,7 @@ async def _handle(reader, writer):
             payload = {
                 "room": actual,
                 "nick": user["nick"],
-                "topic": rrc.topic(actual),
+                "topic": rrc.topic(actual, i18n.get_lang(identifier)),
                 "rooms": rrc.room_names(),
                 "messages": rrc.since(actual, since_id),
                 # Private messages ride the same poll rather than a
@@ -1628,7 +2076,9 @@ async def _handle(reader, writer):
                 # on a board where each connection costs real work, and
                 # they share the message-id sequence so the client's
                 # existing since/lastId bookkeeping covers both.
-                "dms": rrc.dms_since(identifier, since_id),
+                # Voice notes are described here; their audio is fetched
+                # separately from /rrc/voice (it isn't JSON).
+                "dms": [rrc.dm_public(m) for m in rrc.dms_since(identifier, since_id)],
                 # Who's actually in this room right now -- lets the
                 # client offer "select someone to DM" instead of
                 # requiring the exact nick typed blind into /msg. Sent
@@ -1645,8 +2095,57 @@ async def _handle(reader, writer):
                 # Which of those are other Stump nodes (from their
                 # stump.node beacons), so the UI can label them.
                 "stumps": rrc.stump_nicks(),
+                # Which node this is -- a client reaching it over Wi-Fi
+                # and LoRa matches the two by this LXMF address.
+                "node": rrc.NODE,
             }
             await _send(writer, "200 OK", json.dumps(payload), "application/json")
+
+        elif method == "POST" and path.startswith("/rrc/voice"):
+            # A voice note: raw Codec 2 frames as the body, ?to=<nick>&mode=<n>.
+            # Same access rule as the /msg it stands in for.
+            # Its own, larger limit: a 15 s Opus note (FireFly's default) is
+            # ~13.4 KB, past the 8 KB every other small body gets.
+            length = int(headers.get("content-length", "0"))
+            if length > rrc.VOICE_MAX_BYTES:
+                await _send(writer, "413 Payload Too Large", json.dumps({"replies": ["too large"], "room": None}),
+                            "application/json")
+                return
+            audio = await _read_small_body(reader, length, cap=rrc.VOICE_MAX_BYTES)
+            to = billboard._url_decode(_query(path, "to") or "")
+            try:
+                mode = int(_query(path, "mode") or "4")
+            except ValueError:
+                mode = 0
+            refused = _voice_gate(identifier, to)
+            replies = [refused] if refused else rrc.send_voice(identifier, to, mode, audio)
+            await _send(writer, "200 OK", json.dumps({"replies": replies, "room": None}), "application/json")
+
+        elif method == "GET" and path.startswith("/rrc/voice"):
+            # The audio of a voice note in this client's own inbox, as raw
+            # Codec 2 frames; its mode is in the poll's "voice" object.
+            try:
+                m = rrc.find_dm(identifier, int(_query(path, "id") or "-1"))
+            except ValueError:
+                m = None
+            if m is None or "audio" not in m:
+                await _send(writer, "404 Not Found", "no such voice note", "text/plain")
+            else:
+                await _send(writer, "200 OK", m["audio"][1],
+                            "audio/ogg" if m["audio"][0] == rrc.OPUS_OGG else "application/octet-stream")
+
+        elif method == "GET" and path.split("?")[0] in ("/codec2.wasm", "/codec2.js", "/opus.wasm", "/opus.js"):
+            # The voice codecs for the browser -- Codec 2 (LGPL-2.1) and Opus
+            # (BSD) -- served from the board so voice notes work offline.
+            name = path.split("?")[0][1:]
+            # Streamed in chunks: opus.wasm is 333 KB, and reading it whole
+            # needed one contiguous 333 KB allocation -- a MemoryError on a
+            # fragmented heap, right when someone taps play.
+            try:
+                size = os.stat("web/" + name)[6]
+                await _send_file(writer, "web/" + name, size, name, inline=True)
+            except OSError:
+                await _send(writer, "404 Not Found", "missing " + name, "text/plain")
 
         elif method == "POST" and path.startswith("/rrc/send"):
             length = int(headers.get("content-length", "0"))
@@ -1713,26 +2212,22 @@ async def _handle(reader, writer):
                 "HTTP/1.1 303 See Other\r\nLocation: " + next_path +
                 "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
 
-        elif method == "GET" and path.startswith("/about/img"):
-            # Checked before the general /about route below -- /about/img
-            # would otherwise be swallowed by a startswith("/about")
-            # match, exactly the /tools-before/tool ordering already
-            # established elsewhere in this file: the more specific
-            # path always has to be checked first.
-            raw_f = path.split("f=", 1)[-1] if "f=" in path else ""
-            iname = _clean_filename(billboard._url_decode(raw_f))
-            ipath = fserv.ABOUT_DIR + "/" + iname
-            try:
-                size = os.stat(ipath)[6]
-                await _send_file(writer, ipath, size, iname, inline=True)
-            except OSError:
-                await _send(writer, "404 Not Found", "not found", "text/plain")
-
         elif method == "GET" and path.startswith("/about"):
             await _send(writer, "200 OK", _page(_render_about_page(i18n.get_lang(identifier))))
 
         elif method == "GET" and path.startswith("/tools"):
             await _send(writer, "200 OK", _page(_render_tools_page(i18n.get_lang(identifier))))
+
+        elif method == "GET" and path.startswith("/home-file"):
+            # Files the home page's branding uses (images, a font...), from
+            # the card's home/ folder only: the same name guard as /tool.
+            raw_f = path.split("f=", 1)[-1] if "f=" in path else ""
+            hname = _clean_filename(billboard._url_decode(raw_f))
+            try:
+                size = os.stat(fserv.HOME_DIR + "/" + hname)[6]
+                await _send_file(writer, fserv.HOME_DIR + "/" + hname, size, hname, inline=True)
+            except OSError:
+                await _send(writer, "404 Not Found", "no such file", "text/plain")
 
         elif method == "GET" and path.startswith("/tool"):
             raw_f = path.split("f=", 1)[-1] if "f=" in path else ""
@@ -1747,6 +2242,29 @@ async def _handle(reader, writer):
                 await _send_file(writer, tpath, size, tname)
             except OSError:
                 await _send(writer, "404 Not Found", "no such tool", "text/plain")
+
+        elif method == "GET" and path.startswith("/billboard.json"):
+            # The billboard as data: newest first, as the page shows it.
+            # "id" is the post id (null for a post written before ids
+            # existed, until the next rewrite gives it one).
+            posts = [{"id": pid, "title": title, "body": body, "sig": sig}
+                     for sig, title, body, ts, pid in reversed(billboard._read_entries())]
+            await _send(writer, "200 OK", json.dumps({"posts": posts}), "application/json")
+
+        elif method == "GET" and path.startswith("/files.json"):
+            # The shelf as data. Download with /download?f=<name>, the
+            # name percent-encoded as UTF-8.
+            files = []
+            if fserv.sd_ok:
+                for n in fserv._list_files():
+                    try:
+                        size = os.stat(fserv.SHARED_DIR + "/" + n)[6]
+                    except OSError:
+                        size = None
+                    files.append({"name": n, "size": size, "class": fserv.guess_class(n),
+                                  "cost": fserv.credit_cost(n) if fserv.CREDITS_ENABLED else 0})
+            await _send(writer, "200 OK", json.dumps({"sd": fserv.sd_ok, "credits": fserv.CREDITS_ENABLED,
+                                                      "files": files}), "application/json")
 
         elif method == "GET" and path.startswith("/files"):
             await _send(writer, "200 OK", _page(_render_files_page(i18n.get_lang(identifier))))
@@ -1878,4 +2396,16 @@ async def run_barkeep_server(port=80):
         print("[web] FAILED to bind port %d: %s" % (port, e))
         print("[web] the billboard, chat and file pages are NOT available.")
         raise
+    # HTTPS on 443, when a certificate is installed (tls.py). Failing here
+    # never takes plain HTTP down with it.
+    ctx = tls.context()
+    if ctx is not None:
+        try:
+            await asyncio.start_server(_handle_tls, "0.0.0.0", 443, ssl=ctx)
+            print("[web] HTTPS on 443 for", tls.status()["host"])
+        except Exception as e:
+            tls.mark_failed("couldn't open port 443: %s" % e)
+            print("[web] HTTPS not started:", e)
+    else:
+        print("[web] HTTPS off:", tls.status()["reason"])
     print("[web] serving on port", port)

@@ -200,25 +200,28 @@ DEFAULT_CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
 #   [print(f'    {str(f.relative_to(\"final_firmware\"))!r}: {hashlib.sha256(f.read_bytes()).hexdigest()[:16]!r},')
 #    for f in sorted(Path('final_firmware').rglob('*')) if f.is_file()]"
 EXPECTED_FILE_HASHES = {
-    "barkeep.py": "e2e88df565f1e62c",
+    "barkeep.py": "5908df8090cb34ac",
     "billboard.py": "5691a6248c0fba4e",
     "boot_common.py": "d1f60dd4434752bf",
     "captive_portal.py": "8c2a0ee90cdc1e04",
     "config.py": "40524df2178b7afe",
-    "docs/CLIENT_QUICKSTART.md": "6d7cd7434ba8cc66",
-    "docs/COMMANDS.md": "4735cd01e77cdbd0",
-    "docs/HIDDEN_FEATURES.md": "b9e0f96d83e25fa8",
-    "example_node.py": "e0e1162df21c3bff",
-    "features.py": "d9004bcd560f8799",
+    "docs/CLIENT_QUICKSTART.md": "b4aea1cd582392f5",
+    "docs/COMMANDS.md": "8859d480d2ef9d36",
+    "docs/FIELD_TEST.md": "45ff21e00911d3d0",
+    "docs/HIDDEN_FEATURES.md": "053479ae239e0891",
+    "docs/HOME_BRANDING.md": "9200d8191366cb09",
+    "docs/HTTPS_SETUP.md": "30171f88d7a75712",
+    "example_node.py": "357ee8825c743a35",
+    "features.py": "7fca96873d59d2d3",
     "flasher_ui.py": "f0af338707d46d25",
-    "fserv.py": "88a2722727eed728",
+    "fserv.py": "181079ff776aa8be",
     "fservbot/README.md": "4ab77b9e51dd5edc",
     "fservbot/__init__.py": "f164090d81312df8",
-    "fservbot/core.py": "18ed35f2e0710d37",
-    "fservbot/install.py": "8d6f5e5870ce5437",
+    "fservbot/core.py": "e15c9f442cd20fb3",
+    "fservbot/install.py": "337dd2b146bb4d48",
     "fservbot/plugin.json": "bc8aca2fefb8b9e7",
-    "fservbot/templates.py": "bfac06fa94d01f62",
-    "i18n.py": "97a6085299a21546",
+    "fservbot/templates.py": "0a49f19852575370",
+    "i18n.py": "121b5f60c03c32fa",
     "lib/bz2_fast_xtensawin.mpy": "ac55d9eda2126432",
     "lib/ed25519_fast_xtensawin.mpy": "96e74dac45f91687",
     "lib/ed25519_iram.mpy": "96e74dac45f91687",
@@ -227,15 +230,141 @@ EXPECTED_FILE_HASHES = {
     "node_common.py": "e1e748a3283da2f4",
     "peripherals/__init__.py": "d2bdac4de6de79de",
     "peripherals/adc_reader.py": "50a393bfa61641d4",
-    "rrc.py": "f8ac3759f80929a4",
-    "rrc_mesh.py": "2d2725fc99ecfb48",
-    "rrc_ui.py": "1892571687e59726",
+    "propagation.py": "0fbf13b1d6167ad3",
+    "radio.py": "feb621dfb9d1e95b",
+    "rrc.py": "cf0d80ae18184071",
+    "rrc_mesh.py": "a926d886fdeb0c15",
+    "rrc_ui.py": "8cb58930f02ac5e3",
+    "stump_tls.py": "992fd3b60d87ce85",
     "stumpid/README.md": "da60b797b09855c3",
     "stumpid/__init__.py": "83462abf471caca1",
     "stumpid/core.py": "d7f755af8f6b5494",
-    "stumpid/install.py": "7b218d5825cf1ecc",
+    "stumpid/install.py": "a9307db4a230ef2b",
     "stumpid/plugin.json": "049f73bbf3ccfd03",
     "theme.py": "4a21ea855a1fa92d",
+    "third_party/codec2/COPYING": "9ebb6f82b7380a62",
+    "third_party/codec2/build_codec2_wasm.sh": "11aafe7aca8e7a71",
+    "third_party/codec2/generated/codebook.c": "be54d9b8e15504d8",
+    "third_party/codec2/generated/codebookd.c": "4981d6b5c51b41a5",
+    "third_party/codec2/generated/codebookge.c": "0e61b65676858284",
+    "third_party/codec2/generated/codebookjmv.c": "622d5a7128cfaf83",
+    "third_party/codec2/generated/codebooknewamp1.c": "d4f07fd25bf4d427",
+    "third_party/codec2/generated/codebooknewamp1_energy.c": "7b8048e545b797d5",
+    "third_party/codec2/generated/codebooknewamp2.c": "d92160a2a80821c0",
+    "third_party/codec2/generated/codebooknewamp2_energy.c": "98b479338e8b13ed",
+    "third_party/codec2/generated/codec2/version.h": "b0b25e8d1ffc797a",
+    "third_party/codec2/src/H2064_516_sparse_test.h": "69d674e949ee0ac0",
+    "third_party/codec2/src/HRA_112_112.h": "06e6c3343b739755",
+    "third_party/codec2/src/HRA_112_112_test.h": "f3d15938d0a08a4f",
+    "third_party/codec2/src/HRA_56_56.h": "bd1c135533e1ecaa",
+    "third_party/codec2/src/HRAa_1536_512.h": "753d6dcf2560c5e5",
+    "third_party/codec2/src/HRAb_396_504.h": "bcf2e19c177ec4c2",
+    "third_party/codec2/src/H_1024_2048_4f.h": "38827d0b55fe063a",
+    "third_party/codec2/src/H_128_256_5.h": "552cfee49555bb2d",
+    "third_party/codec2/src/H_16200_9720.h": "6f07bdcdb799672a",
+    "third_party/codec2/src/H_2064_516_sparse.h": "64b1d2508e276725",
+    "third_party/codec2/src/H_212_158.h": "b584670a36b2fc4d",
+    "third_party/codec2/src/H_256_512_4.h": "b303e11176ac8fb8",
+    "third_party/codec2/src/H_256_768_22.h": "5be708d644fd71c1",
+    "third_party/codec2/src/H_4096_8192_3d.h": "4795314f0d754f13",
+    "third_party/codec2/src/_kiss_fft_guts.h": "25fbd1b559e52dd2",
+    "third_party/codec2/src/bpf.h": "3fd6a2d74603d3ae",
+    "third_party/codec2/src/bpfb.h": "92788e0ccc90f6ba",
+    "third_party/codec2/src/c2file.h": "d7ef60d096f8709d",
+    "third_party/codec2/src/codec2.c": "de5b4f46a2081b3f",
+    "third_party/codec2/src/codec2.h": "b8d2c2a18f03aff2",
+    "third_party/codec2/src/codec2_cohpsk.h": "4cf45703c76a30ae",
+    "third_party/codec2/src/codec2_fdmdv.h": "f99bb1efa5a06fdb",
+    "third_party/codec2/src/codec2_fft.c": "9190b741cb5ef609",
+    "third_party/codec2/src/codec2_fft.h": "91d88c42998a743d",
+    "third_party/codec2/src/codec2_fifo.h": "0c10e4dc3c0d857d",
+    "third_party/codec2/src/codec2_fm.h": "3d9705885fdedaf3",
+    "third_party/codec2/src/codec2_internal.h": "c0152b27e891d619",
+    "third_party/codec2/src/codec2_math.h": "fef02608750794b8",
+    "third_party/codec2/src/codec2_ofdm.h": "b1b55861bb516dee",
+    "third_party/codec2/src/cohpsk_defs.h": "7f61b54f5b238cab",
+    "third_party/codec2/src/cohpsk_internal.h": "1af7efffeb8de988",
+    "third_party/codec2/src/comp.h": "72165b1e50364f6b",
+    "third_party/codec2/src/comp_prim.h": "47be51e70813ba6d",
+    "third_party/codec2/src/debug_alloc.h": "959f7a016f32da86",
+    "third_party/codec2/src/defines.h": "2823ad9940f51043",
+    "third_party/codec2/src/dump.c": "17286a0aa2427a46",
+    "third_party/codec2/src/dump.h": "691d027b44b86870",
+    "third_party/codec2/src/fdmdv_internal.h": "8c1886b0cbff6d16",
+    "third_party/codec2/src/filter.h": "65e5dc70ffb60b20",
+    "third_party/codec2/src/filter_coef.h": "abc1d4e7f7cbf8c9",
+    "third_party/codec2/src/fm_fir_coeff.h": "a0849ec015fd4679",
+    "third_party/codec2/src/fmfsk.h": "2678c92cfacb188b",
+    "third_party/codec2/src/freedv_api.h": "642dd2360a2ca72f",
+    "third_party/codec2/src/freedv_api_internal.h": "09f5204bfcdb303a",
+    "third_party/codec2/src/freedv_data_channel.h": "bcb0956bba3fff77",
+    "third_party/codec2/src/freedv_vhf_framing.h": "dc52c4ccf6a364e8",
+    "third_party/codec2/src/fsk.h": "1ce449ee1b016f1f",
+    "third_party/codec2/src/golay23.h": "035a3214fadb933f",
+    "third_party/codec2/src/golaydectable.h": "d80309086ebee043",
+    "third_party/codec2/src/golayenctable.h": "0de9a8cd2d7fcc45",
+    "third_party/codec2/src/gp_interleaver.h": "86c618b6619816fd",
+    "third_party/codec2/src/hanning.h": "0159dd5ef592493b",
+    "third_party/codec2/src/ht_coeff.h": "7c83ba631721f0d8",
+    "third_party/codec2/src/interldpc.h": "aad7f4c1fd86f183",
+    "third_party/codec2/src/interp.c": "27cac5a3d055d2d6",
+    "third_party/codec2/src/interp.h": "6d81020040ab5cc0",
+    "third_party/codec2/src/kiss_fft.c": "f16ca65e00a766c8",
+    "third_party/codec2/src/kiss_fft.h": "cef46109553a4208",
+    "third_party/codec2/src/kiss_fftr.c": "fcd5fb59beae112c",
+    "third_party/codec2/src/kiss_fftr.h": "6c44114389a80c55",
+    "third_party/codec2/src/ldpc_codes.h": "f654bacf0a989c49",
+    "third_party/codec2/src/linreg.h": "9329f742bc7669e3",
+    "third_party/codec2/src/lpc.c": "875360ef3b44a06c",
+    "third_party/codec2/src/lpc.h": "76abd1c359e204c8",
+    "third_party/codec2/src/lpcnet_freq.h": "1c10ea2cf1c1b039",
+    "third_party/codec2/src/lsp.c": "81ea0264c9827543",
+    "third_party/codec2/src/lsp.h": "bf70456661d9a9f2",
+    "third_party/codec2/src/machdep.h": "f6cee89f708494cb",
+    "third_party/codec2/src/mbest.c": "91e0126fc7a001d9",
+    "third_party/codec2/src/mbest.h": "c501ae2b2443c729",
+    "third_party/codec2/src/modem_probe.h": "da48b4e6d8ae2171",
+    "third_party/codec2/src/modem_stats.h": "8a822270a1923b77",
+    "third_party/codec2/src/mpdecode_core.h": "51c5b962ca63de56",
+    "third_party/codec2/src/newamp1.c": "8df144b2ef72abdf",
+    "third_party/codec2/src/newamp1.h": "457f8357a8ca2f06",
+    "third_party/codec2/src/newamp2.h": "d0848ca72de8a7c3",
+    "third_party/codec2/src/nlp.c": "5c35a44bc3093bd7",
+    "third_party/codec2/src/nlp.h": "0ba662b3d14ba456",
+    "third_party/codec2/src/noise_samples.h": "15a35063401eb6db",
+    "third_party/codec2/src/octave.h": "9fdee726408cf69f",
+    "third_party/codec2/src/ofdm_internal.h": "9ba259557a4bce69",
+    "third_party/codec2/src/optparse.h": "7101d7cf7cc009bf",
+    "third_party/codec2/src/os.h": "27115da4a8401b71",
+    "third_party/codec2/src/pack.c": "cfeeda4561b6a06a",
+    "third_party/codec2/src/phase.c": "751d3123d070c42f",
+    "third_party/codec2/src/phase.h": "00a03705088e4767",
+    "third_party/codec2/src/phi0.h": "ad90c2854cdbd048",
+    "third_party/codec2/src/pilot_coeff.h": "a0461af5299f21e5",
+    "third_party/codec2/src/pilots_coh.h": "684447956c021723",
+    "third_party/codec2/src/postfilter.c": "52fd7d3131e947b7",
+    "third_party/codec2/src/postfilter.h": "4304bc99e33dcdea",
+    "third_party/codec2/src/quantise.c": "a9b6dbadfee5c79b",
+    "third_party/codec2/src/quantise.h": "97fe76969a82bc1e",
+    "third_party/codec2/src/reliable_text.h": "c8b59b2352a19b72",
+    "third_party/codec2/src/rn.h": "39b649e96ffdccb8",
+    "third_party/codec2/src/rn_coh.h": "4b8364f9cfc4ce6b",
+    "third_party/codec2/src/rxdec_coeff.h": "9ec977cd6be0e731",
+    "third_party/codec2/src/sd.h": "aad47d6a5899d99d",
+    "third_party/codec2/src/sine.c": "9d286a353734f696",
+    "third_party/codec2/src/sine.h": "ca6a177e4382bd63",
+    "third_party/codec2/src/ssbfilt_coeff.h": "6b3aad615fe7e1a2",
+    "third_party/codec2/src/test_bits.h": "0a5b517042e3c0b1",
+    "third_party/codec2/src/test_bits_coh.h": "8f1fe41c78e30a22",
+    "third_party/codec2/src/test_bits_ofdm.h": "64ddffa5b313f3c4",
+    "third_party/codec2/src/varicode.h": "af1752e8758cce05",
+    "third_party/codec2/src/varicode_table.h": "47d96cae8e3bb1db",
+    "third_party/codec2/src/wval.h": "89b525e480f284ca",
+    "third_party/codec2/stump_codec2.c": "7d26c043d8ada58a",
+    "third_party/opus/COPYING": "01e1167d54a096d1",
+    "third_party/opus/build_opus_wasm.sh": "e42a07ee5e114e14",
+    "third_party/opus/stump_opus.c": "833eb43c52d6c1b2",
+    "tools_payload/apps/FireFly-RK3326-0.6.2.zip": "8d0277ddec4d715b",
     "tools_payload/flasher/catalog.json": "8dc38061d6bf49a3",
     "tools_payload/flasher/esptool-bundle.js": "ef7d5a237d3f273e",
     "tools_payload/flasher/esptool-js-LICENSE.txt": "1c25f29242785d63",
@@ -269,7 +398,7 @@ EXPECTED_FILE_HASHES = {
     "urns/interfaces/tcp.py": "a29d90caa017764a",
     "urns/interfaces/udp.py": "1de3688c42ad0eb1",
     "urns/interfaces/wifi_serial.py": "fdb89bf39095a2fe",
-    "urns/link.py": "a562be337b6f8137",
+    "urns/link.py": "3cb7d2dafe5bdbb6",
     "urns/log.py": "4b5576693991c7a6",
     "urns/lxmf.py": "0d0c1d4bb42449c2",
     "urns/packet.py": "7a14b682d9b1c619",
@@ -277,6 +406,10 @@ EXPECTED_FILE_HASHES = {
     "urns/reticulum.py": "43d0722fde6cb715",
     "urns/transport.py": "33734cf8b72a91a0",
     "urns/umsgpack.py": "7df3983d6abcf149",
+    "web/codec2.js": "2caf391c54505c61",
+    "web/codec2.wasm": "342264605478d63f",
+    "web/opus.js": "1cb7a20504785a6d",
+    "web/opus.wasm": "4aecdb72f03d2486",
 }
 
 # The exact set of files (relative paths, including subdirectories) that
@@ -295,7 +428,10 @@ BOARD_EXCLUDE_NAMES = ("plugin.json",)
 # pushed to the node's SD card, never written to its flash. The board
 # has megabytes; the flash partition does not, and a 218KB JS bundle
 # plus firmware images have no business competing with the app for it.
-BOARD_EXCLUDE_DIRS = ("tools_payload",)
+# third_party/ holds the Codec 2 sources web/codec2.wasm is built from
+# (LGPL-2.1 asks that they ship with it); they belong in the project, not
+# on the board.
+BOARD_EXCLUDE_DIRS = ("tools_payload", "third_party")
 
 
 def _belongs_on_board(relpath):
@@ -599,6 +735,87 @@ def ask_choice(prompt, options):
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return options[int(raw) - 1]
         print("  invalid choice, try again")
+
+
+def check_cert(cert_path, key_path, host=None):
+    """Checks a certificate and key on this computer before they go near a
+    board. Returns (info, problems, warnings): info = {"host", "not_after"}."""
+    import ssl, time as _time
+    problems, warnings = [], []
+    try:
+        pem = Path(cert_path).read_text()
+        key = Path(key_path).read_text()
+    except OSError as e:
+        return None, ["can't read the files: %s" % e], []
+    try:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(cert_path, key_path)       # also proves the key matches
+    except ssl.SSLError as e:
+        return None, ["the key doesn't match the certificate, or a file isn't PEM: %s" % e], []
+    try:
+        d = ssl._ssl._test_decode_cert(cert_path)       # first certificate in the file
+    except Exception as e:
+        return None, ["can't read the certificate: %s" % e], []
+    names = [v for k, v in d.get("subjectAltName", ()) if k == "DNS"]
+    not_after = int(ssl.cert_time_to_seconds(d["notAfter"]))
+    days = (not_after - int(_time.time())) // 86400
+    if host is None:
+        exact = [n for n in names if not n.startswith("*.")]
+        if not exact:
+            problems.append("the certificate only has wildcard names (%s): add --host stump.example.app"
+                            % ", ".join(names))
+        else:
+            host = exact[0]
+    elif not any(n == host or (n.startswith("*.") and host.endswith(n[1:]) and host.count(".") == n.count("."))
+                 for n in names):
+        problems.append("%s isn't one of the certificate's names (%s)" % (host, ", ".join(names)))
+    if days < 0:
+        problems.append("the certificate expired %d days ago" % -days)
+    elif days < 21:
+        warnings.append("the certificate expires in %d days -- renew soon" % days)
+    if pem.count("BEGIN CERTIFICATE") < 2:
+        warnings.append("only one certificate in the file: use fullchain.pem (with the intermediate), "
+                        "not cert.pem -- phones often reject a chain without it")
+    if "BEGIN EC PRIVATE KEY" not in key and "EC" not in key.split("\n")[0]:
+        try:
+            from cryptography.hazmat.primitives.serialization import load_pem_private_key
+            from cryptography.hazmat.primitives.asymmetric import ec
+            if not isinstance(load_pem_private_key(key.encode(), None), ec.EllipticCurvePrivateKey):
+                warnings.append("RSA key: ECDSA (certbot --key-type ecdsa) makes each HTTPS connection "
+                                "much faster on the ESP32")
+        except Exception:
+            pass
+    return {"host": host, "not_after": not_after}, problems, warnings
+
+
+def install_cert(port, cert_path, key_path, host=None):
+    """--install-cert: checks the certificate here, then copies it to the
+    board's /tls/ (internal flash). The node uses it from its next boot."""
+    print(bold("\nInstalling HTTPS certificate"))
+    info, problems, warnings = check_cert(cert_path, key_path, host)
+    for w in warnings:
+        print(yellow("  warning: " + w))
+    if problems:
+        for p in problems:
+            print("  " + p)
+        print("Nothing was copied to the board.")
+        return False
+    import time as _time
+    print("  host: %s | valid until %s (%d days)" % (
+        info["host"], _time.strftime("%Y-%m-%d", _time.gmtime(info["not_after"])),
+        (info["not_after"] - int(_time.time())) // 86400))
+    with tempfile.TemporaryDirectory() as tmp:
+        info_path = Path(tmp) / "info.json"
+        info_path.write_text(json.dumps(info))
+        run(["mpremote", "connect", port, "fs", "mkdir", ":/tls"], timeout=15)
+        for src, dst in ((cert_path, ":/tls/fullchain.pem"), (key_path, ":/tls/privkey.pem"),
+                         (str(info_path), ":/tls/info.json")):
+            ok, out = run(["mpremote", "connect", port, "fs", "cp", str(src), dst], timeout=60)
+            if not ok:
+                print("  FAILED copying %s: %s" % (src, out))
+                return False
+    print(green("  Installed. Reboot the node; its boot log should say \"[web] HTTPS on 443 for %s\"." % info["host"]))
+    return True
 
 
 def run(cmd, **kwargs):
@@ -1411,6 +1628,18 @@ def _check_local_files_current(resolved):
     return stale
 
 
+def _cp_timeout(path):
+    """Seconds to allow one `mpremote fs cp`. A flat 60 s was too short for
+    web/codec2.wasm (210 KB): copying to the board runs at roughly
+    2-3 KB/s over USB, and the copy stopped at 146 KB. Allow 60 s plus a
+    second per KB, which covers a board running at half that speed."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return 60
+    return 60 + size // 1000
+
+
 def upload_stump_app(port, app_dir=None):
     """Push the Reticulum-rooted firmware tree via mpremote.
 
@@ -1482,8 +1711,13 @@ def upload_stump_app(port, app_dir=None):
     all_ok = True
     for fname in present:
         f = resolved / fname
-        print(f"  uploading {fname} ...")
-        ok, out = run(["mpremote", "connect", port, "fs", "cp", str(f), f":{fname}"], timeout=60)
+        size_kb = f.stat().st_size // 1024 if f.exists() else 0
+        if size_kb >= 50:
+            # The codec takes a minute or two: say so, or it looks hung.
+            print(f"  uploading {fname} ({size_kb} KB, may take 1-2 minutes) ...")
+        else:
+            print(f"  uploading {fname} ...")
+        ok, out = run(["mpremote", "connect", port, "fs", "cp", str(f), f":{fname}"], timeout=_cp_timeout(f))
         if not ok:
             print(f"    FAILED: {out.strip()}")
             all_ok = False
@@ -1509,7 +1743,7 @@ def upload_stump_app(port, app_dir=None):
             for fname, _ in problems:
                 f = resolved / fname
                 print(f"    retrying {fname} ...")
-                run(["mpremote", "connect", port, "fs", "cp", str(f), f":{fname}"], timeout=60)
+                run(["mpremote", "connect", port, "fs", "cp", str(f), f":{fname}"], timeout=_cp_timeout(f))
             device_sizes2 = _get_device_file_sizes(port) or {}
             still_bad = _diff_against_device(resolved, [f for f, _ in problems], device_sizes2)
             if still_bad:
@@ -1549,11 +1783,85 @@ def _build_firmware_zip(dest_path, source_dir):
     """
     with zipfile.ZipFile(dest_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in sorted(source_dir.rglob("*")):
+            rel = f.relative_to(source_dir)
+            # third_party/ (the Codec 2 sources, ~3 MB) stays in the
+            # downloadable project; on the node it only made this copy
+            # take ~11 minutes over USB. Caches never belong here.
+            if rel.parts and rel.parts[0] in ("third_party",) or "__pycache__" in rel.parts \
+                    or rel.parts[:2] == ("tools_payload", "apps"):
+                continue
             if f.is_file():
-                zf.write(f, arcname=str(Path("final_firmware") / f.relative_to(source_dir)))
+                zf.write(f, arcname=str(Path("final_firmware") / rel))
+
+
+def _node_has_same_file(port, mount, node_path, local_path):
+    """True if the node already holds a byte-identical copy (SHA-256
+    computed on the board, read in chunks)."""
+    import hashlib
+    want = hashlib.sha256(Path(local_path).read_bytes()).hexdigest()
+    code = (mount + "import hashlib, binascii\n"
+            "try:\n"
+            " h = hashlib.sha256()\n"
+            " with open(%r, 'rb') as f:\n"
+            "  while True:\n"
+            "   b = f.read(4096)\n"
+            "   if not b: break\n"
+            "   h.update(b)\n"
+            " print('SHA:' + binascii.hexlify(h.digest()).decode())\n"
+            "except OSError:\n"
+            " print('SHA:none')\n") % node_path
+    ok, out = run(["mpremote", "connect", port, "exec", code], timeout=120)
+    if not ok:
+        return False
+    for line in out.splitlines():
+        if line.startswith("SHA:"):
+            return line[4:].strip() == want
+    return False
+
+
+APP_USB_MAX = 1000000   # app files larger than this go on the card by card reader
 
 
 def install_tools_on_node(port):
+    """Copies the technician tools (served on the node's /tools page) to
+    its SD card. The slowest part of an upload -- roughly 1 MB at ~1 KB/s
+    the first time -- so it says so up front, skips files already on the
+    card, can be skipped entirely with --skip-tools, and Ctrl+C stops it
+    cleanly instead of with a traceback: the app is already installed by
+    the time this runs."""
+    if "--skip-tools" in sys.argv:
+        print("\n  Technician tools: skipped (--skip-tools). The node works without them;")
+        print("  only its /tools download page is affected.")
+        return
+    here = Path(__file__).resolve().parent
+    total = 0
+    for f in [here / "provisioner.py", here / "README.md", here / "LICENSE"] + \
+             [f for f in (here / "final_firmware" / "tools_payload").rglob("*") if f.is_file()]:
+        if f.is_file() and not (f.parent.name == "apps" and f.stat().st_size > APP_USB_MAX):
+            total += f.stat().st_size
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            z = Path(tmpdir) / "z.zip"
+            _build_firmware_zip(z, here / "final_firmware")
+            total += z.stat().st_size
+    except Exception:
+        pass
+    print("\n  Technician tools for the node's /tools page: about %d KB to copy to its SD card."
+          % (total // 1024))
+    print("  Copies to the card are slow (~1 KB/s): up to %d minutes the first time; files"
+          % max(1, round(total / 1000 / 60)))
+    print("  already there are skipped. The app is installed already -- Ctrl+C here is safe,")
+    print("  and --skip-tools skips this step next time.")
+    try:
+        return _install_tools_on_node(port)
+    except KeyboardInterrupt:
+        print("\n\n  Stopped. The app is installed and the node works normally; only the")
+        print("  technician tools on its SD card are incomplete. Re-run --upload-app later")
+        print("  to finish them (files already copied are skipped).")
+        return
+
+
+def _install_tools_on_node(port):
     """Copies this Provisioner onto the node's SD card.
 
     So the node carries the tool that configures it. A technician can
@@ -1585,7 +1893,7 @@ def install_tools_on_node(port):
                       timeout=25)
         return ok and "SD:yes" in out, out
 
-    print("\n  Installing technician tools onto the node...")
+    print("  Copying:")
     ready, detail = sd_ready()
     if not ready:
         # Say WHY, and say it once, instead of four identical failures
@@ -1601,37 +1909,43 @@ def install_tools_on_node(port):
     for d in (":/sd/tools", ":/sd/fw"):
         run(["mpremote", "connect", port, "exec", MOUNT, "fs", "mkdir", d], timeout=25)
 
-    installed, failed = [], []
+    installed, failed, by_card = [], [], []
 
-    def push(src, dest, label, timeout=180):
+    def push(src, dest, label, timeout=None):
+        """Copies one file to the SD card, saying what it's doing. Copies to
+        the card run at roughly 1 KB/s over USB, so a large file takes
+        minutes: each one prints its name and size first and its result
+        after, and one already on the card byte for byte is skipped."""
         if not Path(src).is_file():
             return
+        size = Path(src).stat().st_size
+        print("    %s (%d KB) ..." % (label, max(1, size // 1024)), end=" ", flush=True)
+        if _node_has_same_file(port, MOUNT, dest.lstrip(":"), src):
+            print("unchanged, skipped")
+            installed.append(label)
+            return
+        if timeout is None:
+            timeout = 120 + size // 800          # allows down to ~0.8 KB/s
+        t0 = time.time()
         # exec + fs cp in ONE invocation so the mount is still live when
         # the copy runs.
         ok, out = run(["mpremote", "connect", port, "exec", MOUNT,
                        "fs", "cp", str(src), dest], timeout=timeout)
+        took = int(time.time() - t0)
         if ok:
+            print("ok (%dm%02ds)" % (took // 60, took % 60))
             installed.append(label)
         else:
-            # "command timed out: <the whole mpremote invocation>" is
-            # run()'s own message on a real subprocess timeout -- and
-            # since MOUNT is itself a multi-line Python snippet embedded
-            # in that command, splitlines()[-1] on it doesn't land on
-            # anything resembling an error, it lands on whatever
-            # fragment of the command happened to follow the last
-            # newline. Confirmed directly: this is EXACTLY what produced
-            # the garbled "fs cp /var/folders/.../tmpXXXX/St" a real
-            # failed run reported -- the truncated tail of the command
-            # itself, not a description of what went wrong. Detected and
-            # given a real message instead of extracting a "last line"
-            # that was never a line describing an error in the first
-            # place.
+            # run()'s timeout message embeds the whole mpremote command
+            # (MOUNT is multi-line), so its "last line" is a fragment of
+            # the command, not an error: report timeouts in plain words.
             if out.startswith("command timed out"):
                 reason = "timed out after %ds" % timeout
             elif out.strip():
                 reason = out.strip().splitlines()[-1][:70]
             else:
                 reason = "no output"
+            print("FAILED (%s)" % reason)
             failed.append((label, reason))
 
     if me.is_file():
@@ -1680,10 +1994,7 @@ def install_tools_on_node(port):
                 # since a silent multi-minute wait reads as a hang
                 # otherwise -- the other pushes are fast enough that
                 # nobody's watched the clock on them before now.
-                size_kb = zip_path.stat().st_size // 1024
-                print(f"  Copying Stump_Beta_A.zip ({size_kb} KB) onto the SD card --")
-                print("  this one's bigger than the other tools, give it a minute...")
-                push(zip_path, ":/sd/tools/Stump_Beta_A.zip", "Stump_Beta_A.zip", timeout=600)
+                push(zip_path, ":/sd/tools/Stump_Beta_A.zip", "Stump_Beta_A.zip")
         except Exception as e:
             failed.append(("Stump_Beta_A.zip", str(e)[:70]))
 
@@ -1699,13 +2010,44 @@ def install_tools_on_node(port):
         if img_dir.is_dir():
             for img in sorted(img_dir.glob("*.bin")):
                 push(img, ":/sd/fw/" + img.name, img.name)
+        # FireFly apps for the About page and /tools, found there by name
+        # (FireFly-Android-<version>.apk, FireFly-RK3326-<version>.zip).
+        # Small ones go over USB; big ones never do -- the Android APK is
+        # ~50 MB, about 14 hours at USB speed, seconds with a card reader.
+        apps_dir = payload / "apps"
+        if apps_dir.is_dir():
+            for app in sorted(apps_dir.iterdir()):
+                if not app.is_file():
+                    continue
+                if app.stat().st_size > APP_USB_MAX:
+                    print("    %s (%d MB): too big to copy over USB -- put it on the SD card"
+                          % (app.name, app.stat().st_size // 1000000))
+                    print("      with a card reader, in the 'tools' folder at the card's top level.")
+                    by_card.append("tools/" + app.name)
+                    continue
+                push(app, ":/sd/tools/" + app.name, app.name)
+    # Home-page branding (docs/HOME_BRANDING.md): a "home" folder next to
+    # this provisioner goes to home/ on the card, like the tools. The node
+    # creates that folder on the card when it mounts it (fserv.mount_sd).
+    brand = here / "home"
+    if brand.is_dir():
+        for f in sorted(brand.iterdir()):
+            if not f.is_file():
+                continue
+            if f.stat().st_size > APP_USB_MAX:
+                print("    home/%s (%d MB): too big to copy over USB -- put it in home/ on the SD card"
+                      % (f.name, f.stat().st_size // 1000000))
+                print("      with a card reader.")
+                by_card.append("home/" + f.name)
+                continue
+            push(f, ":/sd/home/" + f.name, "home/" + f.name)
     else:
         print("  (no tools_payload folder found next to the firmware --")
         print("   the browser flasher won't be available on this node)")
 
     if installed:
         print("  Installed: " + ", ".join(installed))
-        print("  Tools at   http://<node>/files")
+        print("  Tools at   http://<node>/tools")
         # Only claimed if the flasher's own assets are actually among
         # what got installed -- this used to print unconditionally
         # whenever ANYTHING installed, including a run where
@@ -1717,6 +2059,9 @@ def install_tools_on_node(port):
             print("  Flasher at http://<node>/flash")
     for label, why in failed:
         print("  Could not copy %s: %s" % (label, why))
+    if by_card:
+        # Each with the folder it belongs in on the card.
+        print("  Copy with a card reader, onto the SD card at: " + ", ".join(by_card))
     return bool(installed)
 
 
@@ -2064,6 +2409,13 @@ def config_wizard(board_type):
                 print("  OK -- all four features enabled.")
         profile["features"] = picked
 
+        # ---- Propagation node ----
+        print("\nRun an LXMF propagation node? It holds messages for people who")
+        print("are offline (FireFly, Sideband) and hands them over when they're")
+        print("back. Needs the SD card. Each stored message costs ~30 s of")
+        print("background work on this board. Can be switched later in /admin.")
+        profile["propagation_node"] = ask_yes_no("  Run a propagation node?", False)
+
         # ---- Look ----
         # Site-wide: every page and the chat use it, for every visitor.
         # A browser can still pick its own from /admin; that only
@@ -2204,6 +2556,7 @@ def push_config_to_board(port, board_type, profile):
             ssid_name=profile.get("ssid_name", _UNSET),
             theme=profile.get("theme"),
             features=profile.get("features"),
+            propagation_node=profile.get("propagation_node"),
         )
     except Exception as e:
         print(f"FAILED to generate config.py: {e}")
@@ -2225,7 +2578,7 @@ def push_config_to_board(port, board_type, profile):
 def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, heltec_host, heltec_port,
                          credits_enabled=None, credit_weights=None, bot_name=None,
                          mesh_greeting=None, plugin_config=None, ssid_include_ip=None,
-                         ssid_name=_UNSET, theme=None, features=None):
+                         ssid_name=_UNSET, theme=None, features=None, propagation_node=None):
     """
     Substitutes WIFI_SSID/WIFI_PASS/NODE_NAME and the Heltec Bridge
     interface's target_host/target_port into the existing config.py
@@ -2247,6 +2600,7 @@ def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, helt
     saw_ssid_name = False
     saw_theme = False
     saw_features = False
+    saw_pn = False
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("WIFI_SSID"):
@@ -2277,6 +2631,10 @@ def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, helt
         if stripped.startswith("MESH_GREETING =") and mesh_greeting is not None:
             out.append("MESH_GREETING = %r\n" % mesh_greeting)
             saw_greeting = True
+            continue
+        if propagation_node is not None and stripped.split("=", 1)[0].strip() == "PROPAGATION_NODE":
+            out.append("PROPAGATION_NODE = %r\n" % bool(propagation_node))
+            saw_pn = True
             continue
         if features is not None and stripped.split("=", 1)[0].strip() == "FEATURES":
             out.append("FEATURES = %r\n" % list(features))
@@ -2351,6 +2709,9 @@ def _generate_config_py(local_config_path, node_name, wifi_ssid, wifi_pass, helt
     if ssid_name is not _UNSET and not saw_ssid_name:
         out.append("\n# ---- Walk-up AP hotspot name (added by the Provisioner) ----\n")
         out.append("SSID_NAME = %r\n" % ssid_name)
+    if propagation_node is not None and not saw_pn:
+        out.append("\n# ---- LXMF propagation node: store-and-forward (added by the Provisioner) ----\n")
+        out.append("PROPAGATION_NODE = %r\n" % bool(propagation_node))
     if features is not None and not saw_features:
         out.append("\n# ---- Features offered: any of chat, billboard, files, about (added by the Provisioner) ----\n")
         out.append("FEATURES = %r\n" % list(features))
@@ -2880,6 +3241,13 @@ def main():
             wipe_sd_card(args[idx + 1], board_type="cam")
         else:
             print("Cancelled -- card untouched. Neither Heltec role has an SD card at all.")
+    elif "--install-cert" in args:
+        idx = args.index("--install-cert")
+        if len(args) < idx + 4:
+            print("Usage: provisioner.py --install-cert PORT fullchain.pem privkey.pem [--host stump.example.app]")
+            sys.exit(1)
+        host = args[args.index("--host") + 1] if "--host" in args and args.index("--host") + 1 < len(args) else None
+        sys.exit(0 if install_cert(args[idx + 1], args[idx + 2], args[idx + 3], host) else 1)
     elif "--upload-app" in args:
         idx = args.index("--upload-app")
         if idx + 1 >= len(args):

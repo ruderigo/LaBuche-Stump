@@ -52,8 +52,220 @@ MESH_ROOM = "lxmf"
 # room -> list of {"id", "ts", "nick", "body", "kind"}
 # kind: "msg" (normal), "action" (/me), "system" (joins, parts, topic)
 _rooms = {DEFAULT_ROOM: [], MESH_ROOM: []}
-_topics = {DEFAULT_ROOM: "General. Be decent.",
-           MESH_ROOM: "Mesh/LoRa traffic lands here by default."}
+# Topics someone has set. The two built-in rooms' default topics aren't
+# stored: topic() shows them in the reader's language until someone sets
+# a real one (which then shows as written, for everyone).
+_topics = {}
+_DEFAULT_TOPIC_KEYS = {DEFAULT_ROOM: "topic_default_main", MESH_ROOM: "topic_default_lxmf"}
+
+
+# Room activity and DM lines are symbols, not sentences: every reader
+# sees the same line whatever their language, and they stay short on
+# LoRa. Web chat and mesh bridge both build them here, so the notation
+# can't drift between the two.
+#   ✓ joined   ✗ left   ✎ changed   → moved to (reply to you)
+#   ⊖ no one by that name   ~ in front of a name: on the mesh
+#   [DM] <author>: text -- a private message, always naming who wrote it
+def ev_join(who):
+    return "✓ " + who
+
+
+def ev_leave(who):
+    return "✗ " + who
+
+
+def ev_rename(old, new):
+    return "✎ " + old + " → " + new
+
+
+def ev_topic(room, text):
+    return "✎ #" + room + " " + text
+
+
+def dm_line(author, body):
+    """A DM, as its sender and recipient both see it: "[DM] <rod>: hi".
+    Always the AUTHOR's nick, never the recipient's -- so a thread reads
+    as a conversation, and the confirmation of a DM you sent is your own
+    line ("[DM] <you>: ..."), not an arrow toward them."""
+    return "[DM] <" + author + ">: " + body
+
+
+def no_such(nick):
+    return "⊖ " + nick
+
+
+def moved(room):
+    return "→ #" + room
+
+
+# Replies a client acts on start with a stable token, the same in every
+# language, so a client can react without reading the sentence; the
+# sentence follows " — " for people. (Like AUTH-OK, but in the same
+# symbol family as the room activity above.)
+#   = #room            you're already there
+#   ? /cmd             no such command
+#   ⊘ #room <tier>     that room's tier refused you
+def tok_already(room, sentence):
+    return "= #" + room + " — " + sentence
+
+
+def tok_unknown(cmd, sentence):
+    return "? /" + cmd + " — " + sentence
+
+
+def tok_refused(room, tier, sentence):
+    return "⊘ #" + room + " " + tier + " — " + sentence
+
+
+#   ⧗                  slow down (rate limited)
+def tok_rate(sentence):
+    return "⧗ — " + sentence
+
+
+# ---- Voice notes ----
+# A voice note is a DM with an "audio" attachment [LXMF mode, bytes], the
+# LXMF FIELD_AUDIO convention FireFly and Sideband share (FireFly client
+# quickstart, 0.2.10):
+#   mode 16 (AM_OPUS_OGG): a complete Ogg Opus file, RFC 7845 -- FireFly's
+#                          default, on every link and in Stump voice DMs
+#   modes 3-9:             raw Codec 2 1.2.0 frames, back to back
+# A note's length comes from its bytes, in whole milliseconds, exactly as
+# that spec defines it, so every client gets the same number, the same
+# limits and the same label. Notes are relayed byte for byte unchanged.
+OPUS_OGG = 16
+CODEC2_MODES = {3: (4, 40), 4: (6, 40), 5: (7, 40), 6: (7, 40), 7: (8, 40), 8: (6, 20), 9: (8, 20)}
+VOICE_MIN_MS = 600
+VOICE_MAX_MS_CODEC2 = 15000
+VOICE_MAX_MS_OPUS = 15100      # 60 ms Opus frames don't land exactly on 15 s
+VOICE_MAX_BYTES = 16384        # a 15 s Opus note at 8 kbit/s is ~13.4 KB
+VOICE_MIN_GAP = 5              # seconds between one sender's notes
+VOICE_PER_HOUR = 30            # per sender
+VOICE_PER_RECIPIENT = 10       # voice notes held per inbox (RAM)
+VOICE_TOTAL_BYTES = 2000000    # voice audio held across all inboxes (RAM)
+_voice_sent = {}               # client_id -> [times]
+
+
+def opus_ms(data):
+    """Length of an Ogg Opus file in ms, or None if it isn't one we accept.
+    RFC 7845: pages of the first logical stream only; its first packet must
+    be OpusHead with 1 or 2 channels and mapping family 0; length =
+    (last granule position - pre-skip) / 48, rounded down -- both in 48 kHz
+    samples. Pages whose granule is -1 (no packet ends there) don't count."""
+    n, i = len(data), 0
+    serial = pre_skip = last = None
+    while i < n:
+        if i + 27 > n or data[i:i + 4] != b"OggS":
+            return None
+        nseg = data[i + 26]
+        body = i + 27 + nseg
+        if body > n:
+            return None
+        size = 0
+        for k in range(i + 27, body):
+            size += data[k]
+        if body + size > n:
+            return None
+        sn = int.from_bytes(data[i + 14:i + 18], "little")
+        if serial is None:
+            serial = sn
+        if sn == serial:
+            if pre_skip is None:
+                head = data[body:body + size]
+                if len(head) < 19 or head[:8] != b"OpusHead" or head[9] not in (1, 2) or head[18] != 0:
+                    return None
+                pre_skip = head[10] | (head[11] << 8)
+            else:
+                g = int.from_bytes(data[i + 6:i + 14], "little")
+                if g != 0xFFFFFFFFFFFFFFFF:
+                    last = g
+        i = body + size
+    if pre_skip is None or last is None or last < pre_skip:
+        return None
+    return (last - pre_skip) // 48
+
+
+def voice_ms(mode, audio):
+    """A note's length in whole ms, or None if the mode isn't supported or
+    the bytes aren't a valid note of that mode."""
+    if mode == OPUS_OGG:
+        return opus_ms(audio)
+    if mode in CODEC2_MODES:
+        bpf, frame_ms = CODEC2_MODES[mode]
+        return (len(audio) // bpf) * frame_ms
+    return None
+
+
+def voice_label_ms(ms):
+    """"♪ 5.0 s": U+266A, a space, the seconds with one decimal and a dot,
+    a space, "s". Rounded half up, in integers -- no floats on the node."""
+    tenths = (ms + 50) // 100
+    return "♪ %d.%d s" % (tenths // 10, tenths % 10)
+
+
+def send_voice(client_id, to_nick, mode, audio):
+    """A voice note from client_id to to_nick. Returns reply lines, the same
+    shapes as /msg: "[DM] <you>: ♪ 5.0 s" on success, "⊖ name", the
+    rate-limit token, or a sentence."""
+    lang = i18n.get_lang(client_id)
+    user = touch_user(client_id)
+    if not isinstance(audio, (bytes, bytearray)) or not audio or len(audio) > VOICE_MAX_BYTES:
+        return [i18n.t("voice_bad", lang)]
+    audio = bytes(audio)
+    ms = voice_ms(mode, audio)
+    if ms is None:
+        return [i18n.t("voice_bad", lang)]
+    limit = VOICE_MAX_MS_OPUS if mode == OPUS_OGG else VOICE_MAX_MS_CODEC2
+    if ms < VOICE_MIN_MS or ms > limit:
+        return [i18n.t("voice_length", lang)]
+    now = time.time()
+    recent = [t for t in _voice_sent.get(client_id, []) if now - t < 3600]
+    if (recent and now - recent[-1] < VOICE_MIN_GAP) or len(recent) >= VOICE_PER_HOUR:
+        _voice_sent[client_id] = recent
+        return [tok_rate(i18n.t("voice_rate", lang))]
+    target = (to_nick or "").lstrip("~")
+    if target.lower() == user["nick"].lower():
+        return [i18n.t("msg_self", lang)]
+    label = voice_label_ms(ms)
+    ok, info = send_dm(user["nick"], target, label, audio=[mode, audio, ms])
+    if not ok:
+        return [no_such(target)]
+    recent.append(now)
+    _voice_sent[client_id] = recent
+    return [dm_line(user["nick"], label)]
+
+
+def dm_public(m):
+    """A DM as the web poll sends it: a voice note's audio is replaced by
+    {"mode", "bytes", "secs"}; the bytes are fetched from /rrc/voice."""
+    if "audio" not in m:
+        return m
+    out = dict(m)
+    mode, audio, ms = out.pop("audio")
+    # "ms" is exact; "secs" is the same length as a number, kept for
+    # clients that already read it.
+    out["voice"] = {"mode": mode, "bytes": len(audio), "ms": ms, "secs": ms / 1000}
+    return out
+
+
+def find_dm(client_id, dm_id):
+    for m in _dms.get(client_id, []):
+        if m["id"] == dm_id:
+            return m
+    return None
+
+
+# Which node this is, for clients that reach it over both Wi-Fi and LoRa
+# and need to see it's the same one: {"name": ..., "lxmf": <hex>}. Set by
+# example_node once its LXMF destination exists; reported in /rrc/poll.
+NODE = {}
+
+
+def names_line(room, names):
+    return "#" + room + ": " + (", ".join(names) if names else "—")
+
+
+def rooms_line(room, count, topic_text):
+    return "#" + room + " ·" + str(count) + ("  " + topic_text if topic_text else "")
 _next_id = [1]
 
 # client_id -> list of {"id","ts","nick","body","kind"} addressed to
@@ -265,8 +477,11 @@ def room_exists(room):
     return room in _rooms
 
 
-def topic(room):
-    return _topics.get(room, "")
+def topic(room, lang=None):
+    if room in _topics:
+        return _topics[room]
+    key = _DEFAULT_TOPIC_KEYS.get(room)
+    return i18n.t(key, lang or i18n.DEFAULT_LANG) if key else ""
 
 
 def set_topic(room, text):
@@ -331,7 +546,10 @@ def find_client_by_nick(nick):
     """Resolves a nick to the client it belongs to. Case-insensitive,
     because 'Bob' and 'bob' being different people is the kind of
     confusion that loses a private message to the wrong person."""
-    low = (nick or "").lower()
+    # "~" marks a mesh user in room notices ("✓ ~rod") and can't be part
+    # of a nick (clean_nick doesn't allow it), so "/msg ~rod" copied from
+    # a notice still reaches rod.
+    low = (nick or "").lstrip("~").lower()
     for table in (_users, _reachable):
         for cid, u in table.items():
             if u["nick"].lower() == low:
@@ -367,7 +585,7 @@ def _prune_dms(cid, now=None):
     box[:] = [m for m in box if now - m["ts"] <= DM_TTL_SECONDS]
 
 
-def send_dm(from_nick, to_nick, body):
+def send_dm(from_nick, to_nick, body, audio=None):
     """Queues a private message. Returns (ok, error_or_recipient_nick).
 
     Delivered by polling, same as room messages -- the recipient picks
@@ -389,9 +607,27 @@ def send_dm(from_nick, to_nick, body):
     _prune_dms(cid, now)
     msg = {"id": _next_id[0], "ts": now, "nick": from_nick,
            "body": body, "kind": "dm"}
+    if audio is not None:
+        msg["audio"] = audio
     _next_id[0] += 1
     box = _dms.setdefault(cid, [])
     box.append(msg)
+    if audio is not None:
+        # Audio is the heavy part: the newest few per inbox, and a cap on
+        # all of it together (an Opus note can be ~15 KB).
+        voices = [m for m in box if "audio" in m]
+        for old in voices[:-VOICE_PER_RECIPIENT]:
+            box.remove(old)
+        held = [(m["id"], c) for c, b in _dms.items() for m in b if "audio" in m]
+        total = sum(len(m["audio"][1]) for b in _dms.values() for m in b if "audio" in m)
+        for mid, c in sorted(held):
+            if total <= VOICE_TOTAL_BYTES:
+                break
+            for m in _dms[c]:
+                if m["id"] == mid:
+                    total -= len(m["audio"][1])
+                    _dms[c].remove(m)
+                    break
     if len(box) > MAX_DMS_PER_USER:
         del box[:len(box) - MAX_DMS_PER_USER]
     return True, user["nick"]
@@ -419,8 +655,6 @@ def reset():
     _rooms[DEFAULT_ROOM] = []
     _rooms[MESH_ROOM] = []
     _topics.clear()
-    _topics[DEFAULT_ROOM] = "General. Be decent."
-    _topics[MESH_ROOM] = "Mesh/LoRa traffic lands here by default."
     _users.clear()
     _reachable.clear()
     _stumps.clear()
@@ -448,6 +682,7 @@ def help_lines(lang):
         "/me <action>      " + i18n.t("help_me", lang),
         "/clear            " + i18n.t("help_clear", lang),
         "/help             " + i18n.t("help_help", lang),
+        i18n.t("help_legend", lang),
     ]
 
 
@@ -489,7 +724,7 @@ def handle_input(client_id, room, text):
             return [i18n.t("nick_taken", lang, nick=new)], None
         old = user["nick"]
         touch_user(client_id, nick=new, room=room)
-        system(room, i18n.t("nick_changed", lang, old=old, new=new))
+        system(room, ev_rename(old, new))
         return [], None
 
     if cmd in ("join", "j"):
@@ -499,40 +734,32 @@ def handle_input(client_id, room, text):
         if err:
             return [err], None
         if target == room:
-            return [i18n.t("join_already", lang, room=target)], None
-        system(room, i18n.t("left_notice", lang, nick=user["nick"]))
+            return [tok_already(target, i18n.t("join_already", lang, room=target))], None
+        system(room, ev_leave(user["nick"]))
         touch_user(client_id, room=target)
-        system(target, i18n.t("join_notice", lang, nick=user["nick"]))
+        system(target, ev_join(user["nick"]))
         return [], target
 
     if cmd == "part":
         if room == DEFAULT_ROOM:
-            return [i18n.t("part_in_main", lang)], None
-        system(room, i18n.t("left_notice", lang, nick=user["nick"]))
+            return [tok_already(DEFAULT_ROOM, i18n.t("part_in_main", lang))], None
+        system(room, ev_leave(user["nick"]))
         touch_user(client_id, room=DEFAULT_ROOM)
-        system(DEFAULT_ROOM, i18n.t("join_notice", lang, nick=user["nick"]))
+        system(DEFAULT_ROOM, ev_join(user["nick"]))
         return [], DEFAULT_ROOM
 
     if cmd == "rooms":
-        here_word = i18n.t("rooms_here", lang)
-        lines = []
-        for r in room_names():
-            n = len(users_in_room(r))
-            t = topic(r)
-            lines.append("#%s  (%d %s)%s" % (r, n, here_word, "  -- " + t if t else ""))
-        return lines, None
+        return [rooms_line(r, len(users_in_room(r)), topic(r, lang)) for r in room_names()], None
 
     if cmd == "names":
-        names = users_in_room(room)
-        names_str = ", ".join(names) if names else i18n.t("just_you", lang)
-        return [i18n.t("names_here", lang, room=room, names=names_str)], None
+        return [names_line(room, users_in_room(room))], None
 
     if cmd == "topic":
         if not arg:
-            t = topic(room) or i18n.t("topic_none", lang)
+            t = topic(room, lang) or i18n.t("topic_none", lang)
             return [i18n.t("topic_show", lang, room=room, topic=t)], None
         set_topic(room, arg)
-        system(room, i18n.t("topic_set", lang, nick=user["nick"], topic=topic(room)))
+        system(room, ev_topic(room, topic(room)))
         return [], None
 
     if cmd in ("msg", "m", "w"):
@@ -558,12 +785,12 @@ def handle_input(client_id, room, text):
             if info == "nothing to send":
                 return [i18n.t("msg_nothing_to_send", lang)], None
             if info.startswith("no one here called"):
-                return [i18n.t("msg_no_such_user", lang, nick=target)], None
+                return [no_such(target)], None
             return [info], None
         # Confirmed to the sender only. Nothing is posted to the room --
         # that is the whole point, and it also keeps private traffic off
         # the radio, since rrc_mesh forwards room messages but not these.
-        return [i18n.t("msg_sent", lang, nick=info, body=body)], None
+        return [dm_line(user["nick"], body)], None
 
     if cmd == "me":
         if not arg:
@@ -575,4 +802,4 @@ def handle_input(client_id, room, text):
     if cmd == "clear":
         return ["__CLEAR__"], None
 
-    return [i18n.t("unknown_command", lang, cmd=cmd)], None
+    return [tok_unknown(cmd, i18n.t("unknown_command", lang, cmd=cmd))], None

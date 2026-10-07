@@ -164,6 +164,11 @@ STRINGS = {
         "en": "take something, leave something",
         "es": "llévate o comparte algo",
     },
+    "tile_tools_sub": {
+        "fr": "les applis FireFly, les outils du technicien",
+        "en": "FireFly apps, technician tools",
+        "es": "las apps FireFly, herramientas del técnico",
+    },
     "tile_about_sub": {
         "fr": "d'où ça vient, comment se connecter",
         "en": "what this is, how to connect",
@@ -251,12 +256,6 @@ STRINGS = {
         "en": "this list",
         "es": "esta lista",
     },
-    "rooms_here": {"fr": "ici", "en": "here", "es": "aquí"},
-    "nick_usage": {
-        "fr": "usage\u00a0: /nick <nom>  (lettres, chiffres, - _ [ ] {{ }})",
-        "en": "usage: /nick <name>  (letters, numbers, - _ [ ] {{ }})",
-        "es": "uso: /nick <nombre>  (letras, números, - _ [ ] {{ }})",
-    },
     "nick_already": {
         "fr": "c'est déjà ton nom",
         "en": "that's already your name",
@@ -266,11 +265,6 @@ STRINGS = {
         "fr": "« {nick} » est déjà pris ici",
         "en": "'{nick}' is taken in here",
         "es": "«{nick}» ya está en uso aquí",
-    },
-    "nick_changed": {
-        "fr": "{old} s'appelle maintenant {new}",
-        "en": "{old} is now known as {new}",
-        "es": "{old} ahora se llama {new}",
     },
     "join_usage": {
         "fr": "usage\u00a0: /join <salle>",
@@ -282,16 +276,6 @@ STRINGS = {
         "en": "you're already in #{room}",
         "es": "ya estás en #{room}",
     },
-    "join_notice": {
-        "fr": "{nick} a rejoint",
-        "en": "{nick} joined",
-        "es": "{nick} se unió",
-    },
-    "left_notice": {
-        "fr": "{nick} est parti(e)",
-        "en": "{nick} left",
-        "es": "{nick} salió",
-    },
     "part_in_main": {
         "fr": "tu es dans #main — nulle part où retourner",
         "en": "you're in #main -- nowhere to part to",
@@ -302,28 +286,12 @@ STRINGS = {
         "en": "that room is gone -- try /join main",
         "es": "esa sala ya no existe — prueba /join main",
     },
-    "names_here": {
-        "fr": "dans #{room}\u00a0: {names}",
-        "en": "in #{room}: {names}",
-        "es": "en #{room}: {names}",
-    },
-    "just_you": {"fr": "(juste toi)", "en": "(just you)", "es": "(solo tú)"},
-    "topic_usage": {
-        "fr": "usage\u00a0: /topic <texte>",
-        "en": "usage: /topic <text>",
-        "es": "uso: /topic <texto>",
-    },
     "topic_show": {
         "fr": "sujet de #{room}\u00a0: {topic}",
         "en": "#{room} topic: {topic}",
         "es": "tema de #{room}: {topic}",
     },
     "topic_none": {"fr": "(aucun)", "en": "(none set)", "es": "(ninguno)"},
-    "topic_set": {
-        "fr": "{nick} a changé le sujet\u00a0: {topic}",
-        "en": "{nick} set the topic: {topic}",
-        "es": "{nick} estableció el tema: {topic}",
-    },
     "me_usage": {
         "fr": "usage\u00a0: /me <action>",
         "en": "usage: /me <action>",
@@ -339,20 +307,10 @@ STRINGS = {
         "en": "talking to yourself is free -- try someone else",
         "es": "hablar solo es gratis — prueba con alguien más",
     },
-    "msg_no_such_user": {
-        "fr": "personne ici ne s'appelle « {nick} » — /names montre qui est là",
-        "en": "no one here called '{nick}' -- /names shows who is",
-        "es": "nadie aquí se llama «{nick}» — /names muestra quién está",
-    },
     "msg_nothing_to_send": {
         "fr": "rien à envoyer",
         "en": "nothing to send",
         "es": "nada que enviar",
-    },
-    "msg_sent": {
-        "fr": "-> {nick}\u00a0: {body}",
-        "en": "-> {nick}: {body}",
-        "es": "-> {nick}: {body}",
     },
     "unknown_command": {
         "fr": "commande inconnue\u00a0: /{cmd}  (essaie /help)",
@@ -488,6 +446,375 @@ STRINGS = {
         "es": "Código de espera (opcional)",
     },
     "home_sending": {"fr": "Envoi…", "en": "Sending...", "es": "Enviando…"},
+    # Default topics of the two built-in rooms, shown in each reader's
+    # language until someone sets a real topic.
+    "topic_default_main": {
+        "fr": "Général. Reste correct.",
+        "en": "General. Be decent.",
+        "es": "General. Sé respetuoso.",
+    },
+    "topic_default_lxmf": {
+        "fr": "Le trafic du maillage (LoRa) arrive ici par défaut.",
+        "en": "Mesh/LoRa traffic lands here by default.",
+        "es": "El tráfico de la malla (LoRa) llega aquí por defecto.",
+    },
+    # The key to the symbols used for room activity and DMs (rrc.ev_*).
+    "help_legend": {
+        "fr": "✓ arrivé · ✗ parti · ✎ changé · → vers · ⊖ personne de ce nom · ~ sur le maillage · [DM] message privé · = déjà là · ? commande inconnue · ⊘ refusé · ♪ note vocale · ⧗ ralentis",
+        "en": "✓ joined · ✗ left · ✎ changed · → to · ⊖ no one by that name · ~ on the mesh · [DM] private message · = already there · ? unknown command · ⊘ refused · ♪ voice note · ⧗ slow down",
+        "es": "✓ llegó · ✗ se fue · ✎ cambió · → a · ⊖ nadie con ese nombre · ~ en la malla · [DM] mensaje privado · = ya estás ahí · ? comando desconocido · ⊘ rechazado · ♪ nota de voz · ⧗ más despacio",
+    },
+    "help_room_prefix": {
+        "fr": "publier dans une salle précise",
+        "en": "post to a specific room",
+        "es": "publicar en una sala concreta",
+    },
+    # First DM delivered to a mesh peer who has only announced.
+    "dm_hint": {
+        "fr": "(message privé via le clavardage de ce nœud — pour répondre : /msg <qui> <message>)",
+        "en": "(private message via this node's chat — to reply: /msg <who> <message>)",
+        "es": "(mensaje privado vía el chat de este nodo — para responder: /msg <quién> <mensaje>)",
+    },
+    "clear_mesh": {
+        "fr": "rien à effacer sur le maillage — tu ne reçois que les nouvelles lignes",
+        "en": "nothing to clear over the mesh — you only receive new lines",
+        "es": "nada que borrar en la malla — solo recibes las líneas nuevas",
+    },
+    "rrc_not_sent": {
+        "fr": "non envoyé — problème de connexion",
+        "en": "not sent — connection problem",
+        "es": "no enviado — problema de conexión",
+    },
+    # Spoken labels for the chat's symbols (tooltips, screen readers).
+    "sym_join": {"fr": "arrivé", "en": "joined", "es": "llegó"},
+    "sym_leave": {"fr": "parti", "en": "left", "es": "se fue"},
+    "sym_change": {"fr": "changé", "en": "changed", "es": "cambió"},
+    "sym_to": {"fr": "vers", "en": "to", "es": "a"},
+    "sym_dm": {"fr": "message privé", "en": "private message", "es": "mensaje privado"},
+    "sym_already": {"fr": "déjà là", "en": "already there", "es": "ya estás ahí"},
+    "sym_unknown_cmd": {"fr": "commande inconnue", "en": "unknown command", "es": "comando desconocido"},
+    "sym_refused": {"fr": "refusé", "en": "refused", "es": "rechazado"},
+    "sym_unknown": {"fr": "personne de ce nom", "en": "no one by that name", "es": "nadie con ese nombre"},
+    # /admin radio settings for the Heltec Bridge (radio.py)
+    "admin_radio_header": {"fr": "Radio (pont Heltec)", "en": "Radio (Heltec Bridge)", "es": "Radio (puente Heltec)"},
+    "admin_radio_intro": {
+        "fr": "Envoyés au Heltec à chaque connexion. Tous les nœuds d'un maillage doivent avoir la même fréquence, largeur de bande, facteur d'étalement et taux de codage — sinon ils ne s'entendent plus. La puissance d'émission peut différer.",
+        "en": "Sent to the Heltec every time it connects. Every node on a mesh needs the same frequency, bandwidth, spreading factor and coding rate, or they stop hearing each other. TX power can differ.",
+        "es": "Se envían al Heltec cada vez que se conecta. Todos los nodos de una malla necesitan la misma frecuencia, ancho de banda, factor de dispersión y tasa de codificación, o dejan de oírse. La potencia de emisión puede ser distinta.",
+    },
+    "radio_txp": {"fr": "Puissance d'émission (dBm, 0–22)", "en": "TX power (dBm, 0–22)", "es": "Potencia de emisión (dBm, 0–22)"},
+    "radio_freq": {"fr": "Fréquence (MHz)", "en": "Frequency (MHz)", "es": "Frecuencia (MHz)"},
+    "radio_bw": {"fr": "Largeur de bande", "en": "Bandwidth", "es": "Ancho de banda"},
+    "radio_sf": {"fr": "Facteur d'étalement", "en": "Spreading factor", "es": "Factor de dispersión"},
+    "radio_cr": {"fr": "Taux de codage", "en": "Coding rate", "es": "Tasa de codificación"},
+    "admin_radio_save": {"fr": "Appliquer", "en": "Apply", "es": "Aplicar"},
+    "admin_radio_sent": {
+        "fr": "Réglages radio envoyés au Heltec et enregistrés.",
+        "en": "Radio settings sent to the Heltec and saved.",
+        "es": "Ajustes de radio enviados al Heltec y guardados.",
+    },
+    "admin_radio_pending": {
+        "fr": "Réglages enregistrés — le Heltec n'est pas connecté en ce moment ; ils lui seront envoyés à sa prochaine connexion.",
+        "en": "Settings saved — the Heltec isn't connected right now; they'll be sent when it next connects.",
+        "es": "Ajustes guardados — el Heltec no está conectado ahora; se le enviarán cuando vuelva a conectarse.",
+    },
+    "admin_radio_not_saved": {
+        "fr": "Réglages appliqués, mais pas enregistrés : ils ne survivront pas à un redémarrage.",
+        "en": "Settings applied, but not saved: they won't survive a reboot.",
+        "es": "Ajustes aplicados, pero no guardados: no sobrevivirán a un reinicio.",
+    },
+    "admin_radio_invalid": {
+        "fr": "Valeur refusée : {field}. Rien n'a été changé.",
+        "en": "Value refused: {field}. Nothing was changed.",
+        "es": "Valor rechazado: {field}. No se cambió nada.",
+    },
+    "admin_radio_none": {"fr": "Aucun pont Heltec sur ce nœud.", "en": "No Heltec Bridge on this node.", "es": "No hay puente Heltec en este nodo."},
+    # /admin: LXMF propagation node (propagation.py)
+    "admin_pn_header": {"fr": "Nœud de propagation (messages hors ligne)", "en": "Propagation node (offline messages)", "es": "Nodo de propagación (mensajes sin conexión)"},
+    "admin_pn_intro": {
+        "fr": "Garde les messages LXMF des gens hors ligne et les leur remet à leur retour. Les applis (FireFly, Sideband) le voient comme nœud de propagation. Chaque message reçu est vérifié en arrière-plan (environ 30 s).",
+        "en": "Holds LXMF messages for people who are offline and hands them over when they're back. Apps (FireFly, Sideband) see it as a propagation node. Each received message is checked in the background (about 30 s).",
+        "es": "Guarda los mensajes LXMF de quienes están sin conexión y se los entrega a su regreso. Las apps (FireFly, Sideband) lo ven como nodo de propagación. Cada mensaje recibido se verifica en segundo plano (unos 30 s).",
+    },
+    "admin_pn_on_state": {"fr": "Activé. Adresse :", "en": "On. Address:", "es": "Activado. Dirección:"},
+    "admin_pn_off_state": {"fr": "Désactivé.", "en": "Off.", "es": "Desactivado."},
+    "admin_pn_enable": {"fr": "Activer", "en": "Turn on", "es": "Activar"},
+    "admin_pn_disable": {"fr": "Désactiver", "en": "Turn off", "es": "Desactivar"},
+    "admin_pn_counts": {
+        "fr": "{stored} messages gardés, {checking} en vérification · {valid} acceptés, {invalid} refusés, {served} remis",
+        "en": "{stored} messages held, {checking} being checked · {valid} accepted, {invalid} refused, {served} handed over",
+        "es": "{stored} mensajes guardados, {checking} en verificación · {valid} aceptados, {invalid} rechazados, {served} entregados",
+    },
+    "admin_pn_mailbox": {
+        "fr": "Boîte de test (jamais en ligne) — envoie-lui un message par ce nœud :",
+        "en": "Test mailbox (never online) — send it a message through this node:",
+        "es": "Buzón de prueba (nunca conectado) — envíale un mensaje a través de este nodo:",
+    },
+    "admin_pn_mailbox_none": {"fr": "Rien reçu pour l'instant.", "en": "Nothing received yet.", "es": "Nada recibido todavía."},
+    "admin_pn_leave_to": {"fr": "Laisser un message pour l'adresse LXMF", "en": "Leave a message for LXMF address", "es": "Dejar un mensaje para la dirección LXMF"},
+    "admin_pn_leave_text": {"fr": "Message", "en": "Message", "es": "Mensaje"},
+    "admin_pn_leave_button": {"fr": "Laisser le message", "en": "Leave message", "es": "Dejar el mensaje"},
+    "admin_pn_left": {
+        "fr": "Message laissé. Ferme l'appli, rouvre-la et synchronise avec ce nœud : il doit arriver.",
+        "en": "Message left. Close the app, reopen it and sync with this node: it should arrive.",
+        "es": "Mensaje dejado. Cierra la app, ábrela de nuevo y sincroniza con este nodo: debería llegar.",
+    },
+    "admin_pn_bad_address": {"fr": "Adresse invalide : 32 caractères hexadécimaux.", "en": "Invalid address: 32 hexadecimal characters.", "es": "Dirección no válida: 32 caracteres hexadecimales."},
+    "admin_pn_unknown": {
+        "fr": "Adresse inconnue : ce nœud n'a pas encore entendu son annonce. Annonce depuis l'appli, puis réessaie.",
+        "en": "Unknown address: this node hasn't heard its announce yet. Announce from the app, then try again.",
+        "es": "Dirección desconocida: este nodo aún no ha oído su anuncio. Anuncia desde la app y vuelve a intentarlo.",
+    },
+    "admin_pn_enabled": {"fr": "Nœud de propagation activé et annoncé.", "en": "Propagation node on and announced.", "es": "Nodo de propagación activado y anunciado."},
+    "admin_pn_disabled": {
+        "fr": "Désactivé : plus de nouveaux messages acceptés. Ceux déjà gardés peuvent encore être récupérés.",
+        "en": "Off: no new messages accepted. Ones already held can still be collected.",
+        "es": "Desactivado: no se aceptan mensajes nuevos. Los ya guardados aún se pueden recoger.",
+    },
+    "admin_pn_no_sd": {"fr": "Impossible : il faut une carte SD.", "en": "Can't: it needs an SD card.", "es": "No es posible: necesita una tarjeta SD."},
+    # Voice notes (rrc.send_voice)
+    "voice_bad": {"fr": "note vocale illisible (Opus ou Codec 2 attendu)", "en": "unreadable voice note (Opus or Codec 2 expected)", "es": "nota de voz ilegible (se esperaba Opus o Codec 2)"},
+    "voice_length": {"fr": "note vocale entre 0,6 et 15 secondes", "en": "voice notes must be 0.6 to 15 seconds", "es": "las notas de voz deben durar de 0,6 a 15 segundos"},
+    "voice_rate": {"fr": "trop de notes vocales — attends un peu", "en": "too many voice notes — wait a little", "es": "demasiadas notas de voz — espera un poco"},
+    "voice_needs_target": {
+        "fr": "pour envoyer une note vocale par ce nœud : /msg <qui> avec la note jointe",
+        "en": "to send a voice note through this node: /msg <who> with the note attached",
+        "es": "para enviar una nota de voz por este nodo: /msg <quién> con la nota adjunta",
+    },
+    "voice_record": {"fr": "Note vocale", "en": "Voice note", "es": "Nota de voz"},
+    "voice_unreadable": {
+        "fr": "impossible de lire cet enregistrement — essaie un autre format ou une autre appli",
+        "en": "couldn't read this recording — try another format or recorder app",
+        "es": "no se pudo leer esta grabación — prueba otro formato u otra app",
+    },
+    "admin_tls_on": {"fr": "Activé pour {host} — certificat valide jusqu'au {until} ({days} jours).", "en": "On for {host} — certificate valid until {until} ({days} days).", "es": "Activado para {host} — certificado válido hasta el {until} ({days} días)."},
+    "admin_tls_off": {"fr": "Désactivé : {reason}.", "en": "Off: {reason}.", "es": "Desactivado: {reason}."},
+    "admin_tls_renew": {"fr": "renouvelle-le (docs/HTTPS_SETUP.md)", "en": "renew it (docs/HTTPS_SETUP.md)", "es": "renuévalo (docs/HTTPS_SETUP.md)"},
+    "voice_recording": {"fr": "Enregistrement… touche pour envoyer", "en": "Recording… tap to send", "es": "Grabando… toca para enviar"},
+    "msg_expired": {
+        "fr": "ton message est arrivé avec {minutes} min de retard (laissé à un nœud de propagation) — rien n'a été fait ; renvoie-le directement",
+        "en": "your message arrived {minutes} min late (left at a propagation node) — nothing was done; send it again directly",
+        "es": "tu mensaje llegó con {minutes} min de retraso (dejado en un nodo de propagación) — no se hizo nada; reenvíalo directamente",
+    },
+    "voice_unplayable": {"fr": "format non pris en charge", "en": "format not supported", "es": "formato no compatible"},
+    "sym_voice": {"fr": "note vocale", "en": "voice note", "es": "nota de voz"},
+    "sym_rate": {"fr": "ralentis", "en": "slow down", "es": "más despacio"},
+    "about_tab_about": {
+        "fr": "Projet (v1)",
+        "en": "Project (v1)",
+        "es": "Proyecto (v1)",
+    },
+    "about_tab_connect": {
+        "fr": "Connexion",
+        "en": "How to Connect",
+        "es": "Conexión",
+    },
+    "about_tab_apps": {
+        "fr": "Terminaux & Apps",
+        "en": "Apps & Handhelds",
+        "es": "Apps y Consolas",
+    },
+    "about_visions_h2": {
+        "fr": "Visions: Forêt Techno-Cybernétique",
+        "en": "Visions: Techno-Cybernetic Forest",
+        "es": "Visions: Bosque Tecno-Cibernético",
+    },
+    "about_link_stump_desc": {
+        "fr": "Serveur & nœud racine",
+        "en": "Server & root node",
+        "es": "Servidor y nodo raíz",
+    },
+    "about_link_android_desc": {
+        "fr": "Application mobile Android",
+        "en": "Mobile Android client",
+        "es": "Cliente móvil Android",
+    },
+    "about_link_rk_desc": {
+        "fr": "Firmware dArkOS R36S/MAX",
+        "en": "dArkOS handheld terminal",
+        "es": "Terminal dArkOS para R36S/MAX",
+    },
+    "about_connect_tagline": {
+        "fr": "Accéder à la clairière numérique.",
+        "en": "Access the digital clearing.",
+        "es": "Accede al claro digital.",
+    },
+    "about_connect_h2": {
+        "fr": "Comment se brancher à La Bûche ?",
+        "en": "How to Connect to the Stump",
+        "es": "¿Cómo conectarse al Tronco (Stump)?",
+    },
+    "about_connect_intro": {
+        "fr": "Vous êtes à côté d'un point Stump ou votre téléphone détecte un réseau ouvert ? Suivez simplement ces 3 étapes :",
+        "en": "Standing near a Stump, or does your device detect an open local network nearby? Follow these 3 simple steps:",
+        "es": "¿Estás cerca de un nodo Stump o tu teléfono detecta una red local abierta? Sigue estos 3 pasos sencillos:",
+    },
+    "about_connect_step1_title": {
+        "fr": "1. Ouvrez vos réglages Wi-Fi",
+        "en": "1. Open your Wi-Fi settings",
+        "es": "1. Abre la lista de redes Wi-Fi",
+    },
+    "about_connect_step1_text": {
+        "fr": "Regardez la liste des réseaux disponibles autour de vous. Cherchez le réseau {ssid}.",
+        "en": "Scan for nearby networks on your phone or laptop. Look for the network named {ssid}.",
+        "es": "Mira las conexiones disponibles en tu teléfono o computadora. Busca la red {ssid}.",
+    },
+    "about_connect_step2_title": {
+        "fr": "2. Rejoignez sans mot de passe",
+        "en": "2. Join without a password",
+        "es": "2. Conéctate sin contraseña",
+    },
+    "about_connect_step2_text": {
+        "fr": "Appuyez dessus pour vous connecter. Aucun mot de passe n'est requis. C'est un accès local, ouvert et anonyme.",
+        "en": "Tap the network to connect. No password, login, or personal account is needed. It is private, open, and anonymous.",
+        "es": "Toca la red para entrar. No necesitas contraseña ni registros. Es una red comunitaria, libre y totalmente anónima.",
+    },
+    "about_connect_step3_title": {
+        "fr": "3. Entrez dans la clairière",
+        "en": "3. Enter the clearing",
+        "es": "3. Accede al claro digital",
+    },
+    "about_connect_step3_text": {
+        "fr": "Une fenêtre de bienvenue s'ouvrira toute seule sur votre écran. Si rien n'apparaît, ouvrez simplement votre navigateur web (Safari, Chrome, etc.) et visitez :<br><br>{ip}",
+        "en": "A welcome screen will usually pop up automatically. If nothing opens on your screen, simply open any web browser and go to:<br><br>{ip}",
+        "es": "Suele abrirse una ventana de bienvenida automáticamente. Si no aparece en tu pantalla, abre el navegador (Chrome, Safari, etc.) e ingresa a:<br><br>{ip}",
+    },
+    "about_apps_tagline": {
+        "fr": "Des outils de poche pour communiquer hors réseau.",
+        "en": "Pocket devices and clients to navigate the off-grid mesh.",
+        "es": "Herramientas de bolsillo para navegar la red sin internet.",
+    },
+    "about_app1_h2": {
+        "fr": "1. FireFly pour Android",
+        "en": "1. FireFly for Android",
+        "es": "1. FireFly para Android",
+    },
+    "about_app1_title": {
+        "fr": "Application Téléphone & Tablette",
+        "en": "Phone & Tablet Mobile Client",
+        "es": "Aplicación para Teléfonos y Tablets",
+    },
+    "about_app1_desc": {
+        "fr": "Une application Android autonome qui permet d'échanger des messages et d'interagir directement avec le maillage radio des Lucioles. Elle fonctionne partout sur le terrain, sans réseau cellulaire, sans forfait de données et sans compte externe.",
+        "en": "A lightweight, independent Android application built to chat, send whispers, and exchange packets across Firefly mesh nodes. Works natively out in the field without internet, cellular data plans, or cloud accounts.",
+        "es": "Una aplicación móvil diseñada para intercambiar mensajes y paquetes de datos directamente a través de los nodos de radio Luciérnaga (Fireflies). Funciona de forma completamente independiente, sin datos móviles, sin internet y sin cuentas corporativas.",
+    },
+    "about_app1_github": {
+        "fr": "Dépôt GitHub & Code Source",
+        "en": "GitHub Repository & Code",
+        "es": "Repositorio y Código en GitHub",
+    },
+    "about_app2_h2": {
+        "fr": "2. FireFly pour Consoles RK3326 (R36S / R36MAX)",
+        "en": "2. FireFly for RK3326 Handhelds (R36S / R36MAX)",
+        "es": "2. FireFly para Consolas RK3326 (R36S / R36MAX)",
+    },
+    "about_app2_title": {
+        "fr": "Terminal de Poche sous dArkOS",
+        "en": "Pocket Terminal running dArkOS",
+        "es": "Terminal Portátil con dArkOS",
+    },
+    "about_app2_desc": {
+        "fr": "Transformez votre petite console de jeux rétro à puce Rockchip RK3326 (R36S, R36MAX) en un terminal de transmission autonome et durci. Grâce au système dArkOS / dArkOS4clone et une radio LoRa branchée, naviguez dans le réseau avec de vrais boutons physiques, sans dépendre d'un smartphone.",
+        "en": "Turn an affordable Rockchip RK3326 retro handheld console (such as the R36S or R36MAX running dArkOS / dArkOS4clone) into a dedicated tactical mesh terminal. Plug in a LoRa radio module and navigate local peer channels using tactile physical controls—no phone required.",
+        "es": "Convierte tu consola retro portátil con procesador Rockchip RK3326 (R36S o R36MAX, con sistema dArkOS / dArkOS4clone) en un terminal de radio autónomo. Con un módulo LoRa conectado, navega por los canales de la red usando sus botones físicos sin depender de ningún smartphone.",
+    },
+    "about_app2_github": {
+        "fr": "Dépôt GitHub & Instructions",
+        "en": "GitHub Repository & Setup",
+        "es": "Repositorio e Instrucciones en GitHub",
+    },
+    "about_app_download": {
+        "fr": "Télécharger depuis cette Bûche",
+        "en": "Download from this Stump",
+        "es": "Descargar desde este Stump",
+    },
+    "about_app_missing": {
+        "fr": "Pas encore sur cette Bûche.",
+        "en": "Not on this Stump yet.",
+        "es": "Todavía no está en este Stump.",
+    },
+    "about_app_github_note": {
+        "fr": "(demande internet)",
+        "en": "(needs internet)",
+        "es": "(requiere internet)",
+    },
+    "about_app1_install": {
+        "fr": "Ouvrir le fichier l'installe ; votre téléphone peut d'abord demander d'autoriser les installations depuis le navigateur.",
+        "en": "Opening the file installs it; your phone may first ask you to allow installs from your browser.",
+        "es": "Abrir el archivo lo instala; tu teléfono puede pedirte primero que permitas instalaciones desde el navegador.",
+    },
+    "about_app2_install": {
+        "fr": "Copiez le zip sur la console et lancez bash deploy/install.sh par SSH. L'installation demande internet sur la console (Wi-Fi ou Ethernet USB).",
+        "en": "Copy the zip to the handheld and run bash deploy/install.sh over SSH. The install needs internet on the handheld (Wi-Fi or USB Ethernet).",
+        "es": "Copia el zip a la consola y ejecuta bash deploy/install.sh por SSH. La instalación necesita internet en la consola (Wi-Fi o Ethernet USB).",
+    },
+    "tools_apps_h2": {
+        "fr": "Applications",
+        "en": "Apps",
+        "es": "Aplicaciones",
+    },
+    "tools_tech_h2": {
+        "fr": "Outils du technicien",
+        "en": "Technician tools",
+        "es": "Herramientas del técnico",
+    },
+    "admin_home_header": {"fr": "Section de la page d'accueil", "en": "Home page section", "es": "Sección de la página de inicio"},
+    "admin_home_place": {
+        "fr": "Où la placer",
+        "en": "Where to put it",
+        "es": "Dónde ponerla",
+    },
+    "admin_home_top": {
+        "fr": "Au-dessus des boutons",
+        "en": "Above the buttons",
+        "es": "Encima de los botones",
+    },
+    "admin_home_bottom": {
+        "fr": "Sous les boutons",
+        "en": "Under the buttons",
+        "es": "Debajo de los botones",
+    },
+    "admin_home_left": {
+        "fr": "À côté, à gauche (sur un grand écran)",
+        "en": "Beside them, on the left (on a wide screen)",
+        "es": "Al lado, a la izquierda (en pantalla ancha)",
+    },
+    "admin_home_right": {
+        "fr": "À côté, à droite (sur un grand écran)",
+        "en": "Beside them, on the right (on a wide screen)",
+        "es": "Al lado, a la derecha (en pantalla ancha)",
+    },
+    "admin_home_height": {
+        "fr": "Hauteur du cadre (pixels, 80 à 1200)",
+        "en": "Frame height (pixels, 80 to 1200)",
+        "es": "Altura del marco (píxeles, 80 a 1200)",
+    },
+    "admin_home_height_note": {
+        "fr": "Pour une page complète, affichée dans un cadre. Sur un téléphone, « à côté » passe au-dessus (gauche) ou en dessous (droite).",
+        "en": "For a complete page, shown in a frame. On a phone, “beside” goes above (left) or under (right).",
+        "es": "Para una página completa, mostrada en un marco. En un teléfono, «al lado» pasa arriba (izquierda) o debajo (derecha).",
+    },
+    "admin_home_show": {
+        "fr": "L'afficher sur la page d'accueil",
+        "en": "Show it on the home page",
+        "es": "Mostrarla en la página de inicio",
+    },
+    "admin_home_save": {
+        "fr": "Enregistrer",
+        "en": "Save",
+        "es": "Guardar",
+    },
+    "admin_home_saved": {
+        "fr": "Enregistré. Recharge la page d'accueil pour voir.",
+        "en": "Saved. Reload the home page to see it.",
+        "es": "Guardado. Recarga la página de inicio para verlo.",
+    },
+    "admin_home_failed": {
+        "fr": "Pas enregistré : {why}",
+        "en": "Not saved: {why}",
+        "es": "No guardado: {why}",
+    },
     "feature_off": {
         "fr": "Cette fonction n'est pas offerte sur ce nœud.",
         "en": "This feature isn't offered on this node.",
@@ -787,11 +1114,6 @@ STRINGS = {
         "en": "While the <strong>Stump</strong> acts as the campfire hub where people gather and browse, the <strong>Fireflies</strong> carry signals across distances and obstacles, stitching isolated clearings into a resilient mesh.",
         "es": "Mientras que el <strong>Stump</strong> funciona como la fogata digital donde la gente se re\u00fane, las <strong>Fireflies</strong> extienden el alcance a trav\u00e9s del terreno, comunicando puntos distantes en una red viva e independiente.",
     },
-    "about_visions_h2": {
-        "fr": "Visions: For\u00eat Techno-Cyb\u00e9rn\u00e9tique",
-        "en": "Visions: Techno-Cybernetic Forest",
-        "es": "Visions: Bosque Tecno-Cibern\u00e9tico",
-    },
     "about_visions_p": {
         "fr": "Une proposition artistique et technologique\u00a0: d\u00e9ployer des clairi\u00e8res num\u00e9riques et un maillage invisible au c\u0153ur de nos environnements vivants. Allier l'artisanat du hardware, la po\u00e9sie du signal radio et la souverainet\u00e9 collective pour faire dialoguer nature et syst\u00e8mes d\u00e9centralis\u00e9s.",
         "en": "An artistic and technological exploration: weaving invisible radio threads and autonomous digital clearings through our living spaces. Blending raw hardware craftsmanship, radio signal poetry, and community autonomy so nature and decentralization can coexist.",
@@ -807,17 +1129,9 @@ STRINGS = {
         "en": "Designed and built by <strong>Rodrigo Gonzalez</strong> \u2014 builder exploring resilient off-grid meshes, portable hardware, and decentralized community tools.",
         "es": "Dise\u00f1ado y construido por <strong>Rodrigo Gonzalez</strong> \u2014 apasionado del hardware port\u00e1til, redes malladas resilientes y herramientas tecnol\u00f3gicas aut\u00f3nomas.",
     },
-    "about_link_github_desc": {
-        "fr": "Code source &amp; docs",
-        "en": "Source code &amp; repo",
-        "es": "C\u00f3digo fuente y repo",
-    },
     "about_link_email_title": {"fr": "Courriel", "en": "Email", "es": "Correo"},
 
     # ---- About page: view tabs (About / Connect / Hardware) ----
-    "about_tab_about": {"fr": "À propos", "en": "About", "es": "Acerca de"},
-    "about_tab_connect": {"fr": "Se connecter", "en": "Connect", "es": "Conectarse"},
-    "about_tab_hardware": {"fr": "Matériel", "en": "Hardware", "es": "Hardware"},
 
     # ---- About page: "How to Connect" pane. Ported from the
     # marketing team's copy, with one deliberate correction: their
@@ -829,93 +1143,7 @@ STRINGS = {
     # drafted, not this project's real, consistent AP address. Both
     # fixed to describe what a visitor will actually see rather than
     # what an earlier draft assumed. ----
-    "about_connect_tagline": {
-        "fr": "Accède à la clairière numérique.",
-        "en": "Access the digital clearing.",
-        "es": "Accede al claro digital.",
-    },
-    "about_connect_h2": {
-        "fr": "Comment se connecter à la Bûche (Stump)\u00a0?",
-        "en": "How to Connect to the Stump",
-        "es": "\u00bfC\u00f3mo conectarse al Tronco (Stump)?",
-    },
-    "about_connect_intro": {
-        "fr": "Tu es près d'une Bûche, ou ton appareil détecte un réseau local ouvert\u00a0? Suis ces 3 étapes simples\u00a0:",
-        "en": "Standing near a Stump, or does your device detect an open local network nearby? Follow these 3 simple steps:",
-        "es": "\u00bfEst\u00e1s cerca de un nodo Stump o tu tel\u00e9fono detecta una red local abierta? Sigue estos 3 pasos sencillos:",
-    },
-    "about_connect_step1_title": {
-        "fr": "1. Ouvre les paramètres Wi-Fi",
-        "en": "1. Open your WiFi settings",
-        "es": "1. Abre la lista de redes Wi-Fi",
-    },
-    "about_connect_step1_text": {
-        "fr": "Cherche les réseaux à proximité sur ton téléphone ou ordinateur. Le nom du réseau est affiché tel quel dans la liste — pas besoin de deviner.",
-        "en": "Scan for nearby networks on your phone or laptop. The network name shows up exactly as broadcast in the list -- nothing to guess.",
-        "es": "Mira las conexiones disponibles en tu tel\u00e9fono o computadora. El nombre de la red aparece tal cual en la lista, no hay que adivinar.",
-    },
-    "about_connect_step2_title": {
-        "fr": "2. Rejoins-le sans mot de passe",
-        "en": "2. Join without a password",
-        "es": "2. Con\u00e9ctate sin contrase\u00f1a",
-    },
-    "about_connect_step2_text": {
-        "fr": "Touche le réseau pour te connecter. Aucun mot de passe, connexion ou compte personnel requis. C'est privé, ouvert et anonyme.",
-        "en": "Tap the network to connect. No password, login, or personal account needed. It's private, open, and anonymous.",
-        "es": "Toca la red para entrar. No necesitas contrase\u00f1a ni registros. Es una red comunitaria, libre y totalmente an\u00f3nima.",
-    },
-    "about_connect_step3_title": {
-        "fr": "3. Entre dans la clairière",
-        "en": "3. Enter the clearing",
-        "es": "3. Accede al claro digital",
-    },
-    "about_connect_step3_text": {
-        "fr": "Un écran d'accueil s'ouvre habituellement tout seul. Si rien ne s'affiche, ouvre simplement un navigateur et va à\u00a0:<br><br>{ip}",
-        "en": "A welcome screen usually pops up automatically. If nothing opens, just open any web browser and go to:<br><br>{ip}",
-        "es": "Suele abrirse una ventana de bienvenida autom\u00e1ticamente. Si no aparece, abre el navegador e ingresa a:<br><br>{ip}",
-    },
 
     # ---- About page: hardware gallery. Images live on the SD card,
     # not baked into the firmware image -- see /about/img route. ----
-    "about_hardware_tagline": {
-        "fr": "Composants physiques, tests en atelier et nœuds radio.",
-        "en": "Physical components, bench testing, and radio nodes.",
-        "es": "Componentes f\u00edsicos, pruebas de campo y nodos de radio.",
-    },
-    "about_hardware_h2": {
-        "fr": "Vitrine matérielle",
-        "en": "Hardware Showcase",
-        "es": "Muestra de Hardware",
-    },
-    "about_hardware_intro": {
-        "fr": "De vrais nœuds construits pour un déploiement en réseau maillé local\u00a0:",
-        "en": "Real hardware nodes engineered for local mesh deployment:",
-        "es": "Nodos reales montados para la red de malla local:",
-    },
-    "about_hardware_img1_alt": {
-        "fr": "Nœud de terrain autonome — vue 1",
-        "en": "Autonomous field node -- view 1",
-        "es": "Nodo de campo aut\u00f3nomo \u2014 vista 1",
-    },
-    "about_hardware_img1_title": {
-        "fr": "Nœud Firefly (vue 1)",
-        "en": "Firefly Node (View 1)",
-        "es": "Nodo Firefly (Vista 1)",
-    },
-    "about_hardware_img1_sub": {"fr": "LoRa / ESP32", "en": "LoRa / ESP32", "es": "LoRa / ESP32"},
-    "about_hardware_img2_alt": {
-        "fr": "Nœud de terrain autonome — vue 2",
-        "en": "Autonomous field node -- view 2",
-        "es": "Nodo de campo aut\u00f3nomo \u2014 vista 2",
-    },
-    "about_hardware_img2_title": {
-        "fr": "Nœud Firefly (vue 2)",
-        "en": "Firefly Node (View 2)",
-        "es": "Nodo Firefly (Vista 2)",
-    },
-    "about_hardware_img2_sub": {
-        "fr": "Boîtier &amp; antenne",
-        "en": "Enclosure &amp; Antenna",
-        "es": "Carcasa y Antena",
-    },
 }

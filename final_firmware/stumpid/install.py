@@ -104,7 +104,7 @@ def _dispatch(client_id, room, text):
             if not ok:
                 lang = i18n.get_lang(client_id)
                 key = "room_needs_verified" if reason_code == "needs_verified" else "room_invite_only"
-                return [i18n.t(key, lang)], None
+                return [rrc.tok_refused(target_room, core.room_tier(target_room), i18n.t(key, lang))], None
 
     # Everything else is subject to the node's AUTH_MODE. Checked here,
     # before falling through to whatever this plugin wrapped -- that is

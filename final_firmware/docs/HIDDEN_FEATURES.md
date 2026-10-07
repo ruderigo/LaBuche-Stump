@@ -99,9 +99,9 @@ later cut down to downloads only), and stop `provisioner.py`'s
 > Noted here only so nobody assumes "file management got worked on"
 > means this specific field did too.
 
-**Hidden from**: the home page's file-upload box (previously a visible
-text input labelled "Awaiting-slot hash (optional)" next to the
-Upload button).
+**Hidden from**: the file-upload box (previously a visible text input
+labelled "Awaiting-slot hash (optional)" next to the Upload button). The
+upload box itself has since moved from the home page to the Files page.
 
 **Still fully functional underneath**: the input element is still in
 the page (`id='uphash'`, `style='display:none'`), so the existing
@@ -160,8 +160,9 @@ Je suis Concierge."), a log panel, an input and a Send button.
 **Hidden from**: the home page, by request, once the tiles covered
 everything it pointed to and it read as clutter. The greeting line
 moved with it, since it introduces a bot that's no longer on the page.
-The home page is now the logo, title, language switcher and a tile per
-enabled feature.
+The home page is now the logo and title (replaceable by the node's own
+branding, see HOME_BRANDING.md), the language switcher, and a card per
+destination, one per row.
 
 **Still fully functional at**: `GET /concierge` (the same box, on its
 own unlinked page) and `POST /chat` (the endpoint it talks to), for

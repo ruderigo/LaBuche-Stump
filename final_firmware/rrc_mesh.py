@@ -7,6 +7,7 @@
 
 import time
 import rrc
+import i18n
 
 # Operator-set greeting, sent once to each mesh peer on first contact.
 try:
@@ -61,7 +62,7 @@ def _prune_peers(now):
     stale = [h for h, p in _peers.items() if now - p["last_seen"] > PEER_TIMEOUT]
     for h in stale:
         p = _peers.pop(h)
-        rrc.system(p["room"], p["nick"] + " left the mesh")
+        rrc.system(p["room"], rrc.ev_leave("~" + p["nick"]))
         rrc.drop_user(h)
         if h in _reach:
             # Still announcing: stays reachable by DM, and continues
@@ -70,7 +71,7 @@ def _prune_peers(now):
     if len(_peers) > MAX_MESH_PEERS:
         ordered = sorted(_peers.items(), key=lambda kv: kv[1]["last_seen"])
         for h, p in ordered[: len(_peers) - MAX_MESH_PEERS]:
-            rrc.system(p["room"], p["nick"] + " left the mesh (evicted)")
+            rrc.system(p["room"], rrc.ev_leave("~" + p["nick"]))
             del _peers[h]
             rrc.drop_user(h)
 
@@ -134,7 +135,7 @@ def _get_peer(dest_hash_hex, display_name):
             # /join, delivered twice over LoRa.
             "last_dm_id": _reach.get(dest_hash_hex, {}).get("last_dm_id", 0),
         }
-        rrc.system(room, nick + " joined from the mesh")
+        rrc.system(room, rrc.ev_join("~" + nick))
         if redirected:
             # Told directly, not left to wonder why they didn't land
             # where an operator may have said to expect. Reuses the
@@ -147,7 +148,7 @@ def _get_peer(dest_hash_hex, display_name):
             import i18n
             lang = i18n.get_lang(dest_hash_hex)
             key = "room_needs_verified" if redirect_reason == "needs_verified" else "room_invite_only"
-            rrc.system(room, nick + ": " + i18n.t(key, lang))
+            rrc.system(room, "~" + nick + ": " + i18n.t(key, lang))
     else:
         _peers[dest_hash_hex]["last_seen"] = now
     _prune_peers(now)
@@ -266,21 +267,53 @@ def _deliver_reach_dms(router, h, r):
     if not r["hinted"]:
         # They've never talked to this node: say what this is and how
         # to answer, once.
-        lines.append("(private message via this node's chat -- reply with: /msg NICK your text)")
+        lines.append(i18n.t("dm_hint", i18n.get_lang(h)))
         r["hinted"] = True
     for m in dms:
-        lines.append("[private] <" + m["nick"] + "> " + m["body"])
+        if "audio" not in m:
+            lines.append(rrc.dm_line(m["nick"], m["body"]))
         if m["id"] > r["last_dm_id"]:
             r["last_dm_id"] = m["id"]
-    _send_queue.append((router, bytes.fromhex(h), "\n".join(lines)))
+    if lines:
+        _send_queue.append((router, bytes.fromhex(h), "\n".join(lines)))
+    _send_queue.extend(_voice_items(router, bytes.fromhex(h), dms))
 
 
 # ── Inbound: LXMF → RRC ───────────────────────────────────────────────
+
+STALE_VIA_PROPAGATION = 1800   # seconds
+
+
+def _stale_age(message):
+    """Seconds since a message was sent, if it reached this node through
+    its propagation node and is older than STALE_VIA_PROPAGATION; else
+    None. Unknown (node clock unset, no timestamp) counts as not stale."""
+    if not getattr(message, "via_propagation", False):
+        return None
+    try:
+        import propagation
+        now = propagation.unix_now()
+        ts = getattr(message, "timestamp", None)
+        if ts is None or now < 1735689600:
+            return None
+        age = int(now - ts)
+        return age if age > STALE_VIA_PROPAGATION else None
+    except Exception:
+        return None
+
 
 def on_message(router, message):
     """Call this from the LXMF delivery callback in example_node.py."""
     try:
         dest_hash_hex = message.source_hash.hex()
+        # A /msg, /nick or voice note left at a propagation node can reach
+        # the chat hours after it was sent; acting on it then would surprise
+        # everyone. Tell the sender instead.
+        age = _stale_age(message)
+        if age is not None:
+            _send_queue.append((router, message.source_hash,
+                                i18n.t("msg_expired", i18n.get_lang(dest_hash_hex), minutes=age // 60)))
+            return
         # Display names live on the ROUTER, learned from announces --
         # LXMessage carries no source_display_name, so the original
         # lookup raised AttributeError into a bare except and every
@@ -313,11 +346,26 @@ def on_message(router, message):
         # Greet once, on first contact only. _get_peer() can't do this
         # itself -- it has no router to send with, and it is also called
         # from prune paths where sending would be wrong.
+        if first_contact:
+            # Landing -- first time, or again after going quiet past
+            # PEER_TIMEOUT, or redirected by a tiered #lxmf -- puts this
+            # user in a room the client didn't choose; say which.
+            _send_queue.append((router, message.source_hash, rrc.moved(peer["room"])))
         if first_contact and MESH_GREETING:
             _send_queue.append((router, message.source_hash,
                                 MESH_GREETING[:MESH_GREETING_MAX]))
 
         text = (message.content_as_string() or "").strip()
+
+        audio = _audio_field(message)
+        if audio is not None:
+            # A voice note (LXMF FIELD_AUDIO). Relayed as a DM when sent as
+            # "/msg <nick>" -- the RRC chat itself is text; a note on its
+            # own has no recipient here.
+            replies = _voice_from_mesh(dest_hash_hex, text, audio)
+            if replies:
+                _send_queue.append((router, message.source_hash, "\n".join(replies)))
+            return
 
         if not text:
             return
@@ -343,13 +391,98 @@ def on_message(router, message):
         print("[rrc_mesh] on_message error:", e)
 
 
+FIELD_AUDIO = 7           # LXMF.FIELD_AUDIO
+AUDIO_MAX_BYTES = 65536   # FireFly's cap on the field
+
+
+def _audio_field(message):
+    """[mode, bytes] from an LXMF message's audio field, or None. Malformed
+    or oversized fields are ignored, as FireFly's spec asks."""
+    try:
+        f = (getattr(message, "fields", None) or {}).get(FIELD_AUDIO)
+    except AttributeError:
+        return None
+    if not isinstance(f, (list, tuple)) or len(f) < 2:
+        return None
+    mode, data = f[0], f[1]
+    if not isinstance(mode, int) or not isinstance(data, (bytes, bytearray)):
+        return None
+    if not data or len(data) > AUDIO_MAX_BYTES:
+        return None
+    return [mode, bytes(data)]
+
+
+def _voice_from_mesh(dest_hash_hex, text, audio):
+    lang = i18n.get_lang(dest_hash_hex)
+    parts = text.split(None, 2)
+    if len(parts) < 2 or parts[0].lower() not in ("/msg", "/m", "/w"):
+        return [i18n.t("voice_needs_target", lang)]
+    return rrc.send_voice(dest_hash_hex, parts[1], audio[0], audio[1])
+
+
+def _voice_items(router, dest_hash_bytes, dms):
+    """Each voice note to a mesh user goes as its own LXMF message: the
+    audio in FIELD_AUDIO and "[DM] <sender>: ♪ 5.0 s" as its text, which
+    is how FireFly shows a note with text under it."""
+    return [(router, dest_hash_bytes, rrc.dm_line(m["nick"], m["body"]), "",
+             {FIELD_AUDIO: [m["audio"][0], m["audio"][1]]}) for m in dms if "audio" in m]
+
+
+def _tier_refusal(dest_hash_hex, room, lang):
+    """None if this mesh user may enter `room`, else the refusal line
+    ("⊘ #room minted — ..."). The web's /join goes through stumpid's own
+    gate; this bridge answers /join and the "#room text" shortcut itself,
+    so it has to apply the same can_join_room() -- before this, a mesh
+    user could join, or post into, a minted or hybrid room unchecked.
+    Without stumpid active there are no tiers. With it, an error in the
+    check refuses rather than lets through."""
+    try:
+        import stumpid.install as sid_install
+        if sid_install._original is None:
+            return None
+        from stumpid import core as sid
+    except ImportError:
+        return None
+    try:
+        ok, reason = sid.can_join_room(dest_hash_hex, room)
+        tier = sid.room_tier(room)
+    except Exception as e:
+        print("[rrc_mesh] tier check failed, refusing:", e)
+        ok, reason, tier = False, "needs_verified", "?"
+    if ok:
+        return None
+    key = "room_needs_verified" if reason == "needs_verified" else "room_invite_only"
+    return rrc.tok_refused(room, tier, i18n.t(key, lang))
+
+
+def _tier_suffix(room):
+    """"  [minted]" / "  [hybrid]" after a gated room, exactly as the web
+    /rooms shows it (stumpid annotates that one). This bridge answers
+    /rooms itself, so without this a mesh user never saw a room's tier.
+    Only while stumpid is actually active, same as on the web."""
+    try:
+        import stumpid.install as sid_install
+        if sid_install._original is None:
+            return ""
+        from stumpid import core as sid
+        t = sid.room_tier(room)
+        return "" if t == "open" else "  [%s]" % t
+    except Exception:
+        return ""
+
+
 def _handle(dest_hash_hex, peer, text):
     """Parse text and act on it. Returns (reply_lines, new_room_or_None)."""
     room = peer["room"]
+    lang = i18n.get_lang(dest_hash_hex)
     if text.startswith(ROOM_PREFIX) and not text.startswith("/#"):
         parts = text.split(None, 1)
         candidate = parts[0][1:]   # strip leading #
         if len(parts) > 1 and rrc.room_exists(candidate):
+            if candidate != room:
+                refused = _tier_refusal(dest_hash_hex, candidate, lang)
+                if refused:
+                    return [refused], None
             room = candidate
             text  = parts[1]
 
@@ -361,55 +494,48 @@ def _handle(dest_hash_hex, peer, text):
         if err:
             return [err], None
         if target == room:
-            return ["you're already in #" + target], None
-        rrc.system(room,   nick + " left")
-        rrc.system(target, nick + " joined from the mesh")
-        return ["now in #" + target], target
+            return [rrc.tok_already(target, i18n.t("join_already", lang, room=target))], None
+        refused = _tier_refusal(dest_hash_hex, target, lang)
+        if refused:
+            return [refused], None
+        rrc.system(room, rrc.ev_leave("~" + nick))
+        rrc.system(target, rrc.ev_join("~" + nick))
+        return [rrc.moved(target)], target
 
     if text.lower().startswith("/nick "):
         new = rrc.clean_nick(text[6:].strip())
         if not new:
-            return ["usage: /nick <name>"], None
+            return [i18n.t("nick_usage", lang)], None
         if new.lower() == nick.lower():
-            return ["that's already your name"], None
+            return [i18n.t("nick_already", lang)], None
         if rrc.nick_taken(new, dest_hash_hex):
-            return ["'" + new + "' is taken"], None
+            return [i18n.t("nick_taken", lang, nick=new)], None
         old = nick
         peer["nick"] = new
-        rrc.system(room, old + " is now known as " + new)
+        rrc.system(room, rrc.ev_rename("~" + old, "~" + new))
         return [], None
 
     if text.lower() == "/rooms":
-        lines = []
-        for r in rrc.room_names():
-            n = len(rrc.users_in_room(r))
-            t = rrc.topic(r)
-            lines.append("#" + r + " (" + str(n) + " here)" + ("  -- " + t if t else ""))
-        return lines, None
+        return [rrc.rooms_line(r, len(rrc.users_in_room(r)), rrc.topic(r, lang)) + _tier_suffix(r)
+                for r in rrc.room_names()], None
 
     if text.lower() in ("/names", "/who"):
         names = rrc.users_in_room(room)
-        return ["in #" + room + ": " + (", ".join(names) if names else "(just you)")], None
+        return [rrc.names_line(room, names)], None
 
     if text.lower() == "/part":
         home = peer["home_room"]
         if room == home:
-            return ["you're in #" + home + " -- nowhere to part to"], None
-        rrc.system(room, nick + " left")
-        rrc.system(home, nick + " returned")
-        return [], home
+            return [rrc.tok_already(home, i18n.t("join_already", lang, room=home))], None
+        rrc.system(room, rrc.ev_leave("~" + nick))
+        rrc.system(home, rrc.ev_join("~" + nick))
+        return [rrc.moved(home)], home
 
     if text.lower() in ("/help", "/?"):
-        return [
-            "Mesh commands:",
-            "  <text>             post to your current room",
-            "  #<room> <text>     post to a specific room",
-            "  /join <room>       join or create a room",
-            "  /part              return to #main",
-            "  /nick <name>       change your display name",
-            "  /rooms             list rooms",
-            "  /names             who is in your room",
-        ], None
+        # The chat's own help (same wording as the web, in this user's
+        # language, ending with the symbol key) plus the one mesh-only form.
+        return (["#<room> <text>    " + i18n.t("help_room_prefix", lang)]
+                + rrc.help_lines(lang)), None
 
     rrc.touch_user(dest_hash_hex, nick=nick, room=room)
     replies, new_room = rrc.handle_input(dest_hash_hex, room, text)
@@ -419,7 +545,7 @@ def _handle(dest_hash_hex, peer, text):
     # who will just see it as gibberish.
     replies = [r for r in replies if r != "__CLEAR__"]
     if not replies and text.lower().startswith("/clear"):
-        replies = ["nothing to clear over the mesh -- you only receive new lines"]
+        replies = [i18n.t("clear_mesh", lang)]
     return replies, new_room
 
 
@@ -438,6 +564,10 @@ def _flush_to_peer(router, dest_hash_hex, peer):
 
     if not msgs and not dms:
         return
+    try:
+        dest_hash_bytes = bytes.fromhex(dest_hash_hex)
+    except Exception:
+        return
 
     if len(msgs) > POLL_LIMIT:
         msgs = msgs[-POLL_LIMIT:]
@@ -454,7 +584,7 @@ def _flush_to_peer(router, dest_hash_hex, peer):
         if m["nick"] == nick:
             continue
         if m["kind"] == "system":
-            lines.append("* " + m["body"])
+            lines.append(m["body"])
         elif m["kind"] == "action":
             lines.append("* " + m["nick"] + " " + m["body"])
         else:
@@ -466,19 +596,38 @@ def _flush_to_peer(router, dest_hash_hex, peer):
     # UI and vice versa, and nobody else on the mesh or in the room
     # sees it.
     for m in dms:
-        lines.append("[private] <" + m["nick"] + "> " + m["body"])
+        if "audio" not in m:
+            lines.append(rrc.dm_line(m["nick"], m["body"]))
         if m["id"] > peer.get("last_dm_id", 0):
             peer["last_dm_id"] = m["id"]
+    _send_queue.extend(_voice_items(router, dest_hash_bytes, dms))
 
     if lines:
-        try:
-            dest_hash_bytes = bytes.fromhex(dest_hash_hex)
-        except Exception:
-            return
-        _send_queue.append((router, dest_hash_bytes, "\n".join(lines)))
+        # Room lines in this batch belong to `room`; say so in the title.
+        # A DM-only batch has no room (its lines name their author).
+        _send_queue.append((router, dest_hash_bytes, "\n".join(lines), "#" + room if msgs else ""))
 
 
 # ── Poll loop (scheduled as asyncio task) ─────────────────────────────
+
+def _send_item(item):
+    """Sends one queued message: (router, dest, text) or, for a pushed
+    room batch, (router, dest, text, title) -- the title names the room
+    the batch belongs to, so a client never has to guess (lines queued
+    just before a /join could otherwise land under the new room)."""
+    rtr, dest_hash_bytes, text = item[0], item[1], item[2]
+    title = item[3] if len(item) > 3 else ""
+    fields = item[4] if len(item) > 4 else None
+    try:
+        if fields:
+            rtr.send_message(dest_hash_bytes, text, title=title, fields=fields)
+        elif title:
+            rtr.send_message(dest_hash_bytes, text, title=title)
+        else:
+            rtr.send_message(dest_hash_bytes, text)
+    except Exception as e:
+        print("[rrc_mesh] send error:", e)
+
 
 async def poll_loop(router):
     """Drain _send_queue and push pending room messages to subscribed peers."""
@@ -510,12 +659,7 @@ async def poll_loop(router):
                 pass  # never let a diagnostic aid block real forwarding
 
             while _send_queue:
-                item = _send_queue.pop(0)
-                rtr, dest_hash_bytes, text = item
-                try:
-                    rtr.send_message(dest_hash_bytes, text)
-                except Exception as e:
-                    print("[rrc_mesh] send error:", e)
+                _send_item(_send_queue.pop(0))
                 await asyncio.sleep(0)
 
             # Presence is decided HERE, on one clock, for both tables.
@@ -546,22 +690,13 @@ async def poll_loop(router):
                     # Sent now, same as the room-peer loop below -- left
                     # queued, it waited a whole extra 5-second cycle.
                     while _send_queue:
-                        rtr, dest_hash_bytes, text = _send_queue.pop(0)
-                        try:
-                            rtr.send_message(dest_hash_bytes, text)
-                        except Exception as e:
-                            print("[rrc_mesh] send error:", e)
+                        _send_item(_send_queue.pop(0))
                         await asyncio.sleep(0)
 
             for dest_hash_hex, peer in list(_peers.items()):
                 _flush_to_peer(router, dest_hash_hex, peer)
                 while _send_queue:
-                    item = _send_queue.pop(0)
-                    rtr, dest_hash_bytes, text = item
-                    try:
-                        rtr.send_message(dest_hash_bytes, text)
-                    except Exception as e:
-                        print("[rrc_mesh] send error:", e)
+                    _send_item(_send_queue.pop(0))
                     await asyncio.sleep(0)
 
             gc.collect()

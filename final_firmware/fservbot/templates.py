@@ -25,58 +25,110 @@ import fserv
 # letting rrc._clean() chop it mid-filename.
 LIST_LIMIT = 12
 
+# The bot's words, per language. Its replies are posted into the room
+# for everyone, so they're in the node's default language (ctx["lang"]),
+# not each reader's. Rewrite the voice here, in all three.
+TEXT = {
+    "fr": {
+        "about": "{bot} — bot de fichiers de ce Stump. {p}help pour les commandes, {p}list pour ce qu'il y a sur l'étagère.",
+        "no_triggers": "aucun déclencheur configuré pour l'instant.",
+        "triggers": "Je réponds à : {names}",
+        "files_off": "le partage de fichiers n'est pas offert sur ce nœud.",
+        "no_card": "l'étagère est vide — pas de carte dans la fente.",
+        "empty": "rien sur l'étagère pour l'instant. Apporte quelque chose, si tu en as.",
+        "shelf": "sur l'étagère : {items}",
+        "more": "  …et {n} autres sur la page Fichiers",
+        "info": "{bot} — {mode}, {card}. Fichiers : ouvre la page Fichiers, ou /download?f=<nom>.",
+        "credits_on": "crédits activés", "free": "mode gratuit",
+        "card_ok": "carte SD montée", "card_none": "pas de carte SD",
+        "rules": "Prends ce dont tu as besoin, laisse ce que tu peux. Rien ici n'est sauvegardé et le clavardage s'efface au redémarrage.",
+        "video": "vidéo", "music": "musique", "document": "document", "other": "autre",
+    },
+    "en": {
+        "about": "{bot} -- fserv bot on this Stump. {p}help for commands, {p}list for what's on the shelf.",
+        "no_triggers": "no triggers configured right now.",
+        "triggers": "I answer to: {names}",
+        "files_off": "file sharing isn't offered on this node.",
+        "no_card": "shelf's empty -- no card in the slot.",
+        "empty": "nothing on the shelf yet. Bring something, if you've got it.",
+        "shelf": "on the shelf: {items}",
+        "more": "  ...and {n} more on the Files page",
+        "info": "{bot} -- {mode}, {card}. Files: open the Files page, or /download?f=<name>.",
+        "credits_on": "credits on", "free": "free mode",
+        "card_ok": "SD mounted", "card_none": "no SD card",
+        "rules": "Take what you need, leave what you can. Nothing here is backed up and the chat forgets itself on reboot.",
+        "video": "video", "music": "music", "document": "document", "other": "other",
+    },
+    "es": {
+        "about": "{bot} — bot de archivos de este Stump. {p}help para los comandos, {p}list para ver qué hay en el estante.",
+        "no_triggers": "no hay disparadores configurados ahora.",
+        "triggers": "Respondo a: {names}",
+        "files_off": "el intercambio de archivos no está disponible en este nodo.",
+        "no_card": "el estante está vacío — no hay tarjeta en la ranura.",
+        "empty": "nada en el estante todavía. Trae algo, si tienes.",
+        "shelf": "en el estante: {items}",
+        "more": "  …y {n} más en la página Archivos",
+        "info": "{bot} — {mode}, {card}. Archivos: abre la página Archivos, o /download?f=<nombre>.",
+        "credits_on": "créditos activados", "free": "modo gratuito",
+        "card_ok": "tarjeta SD montada", "card_none": "sin tarjeta SD",
+        "rules": "Toma lo que necesites, deja lo que puedas. Nada aquí tiene copia de seguridad y el chat se borra al reiniciar.",
+        "video": "vídeo", "music": "música", "document": "documento", "other": "otro",
+    },
+}
+
+
+def _t(ctx, key, **kw):
+    words = TEXT.get(ctx.get("lang"), TEXT["en"])
+    return words.get(key, TEXT["en"][key]).format(**kw)
+
 
 def about(ctx):
     """What this thing is. The reply to !fserv, and the line the
     periodic broadcast puts in the channel."""
-    p = ctx["prefix"]
-    return ("%s -- fserv bot on this Stump. %shelp for commands, "
-            "%slist for what's on the shelf." % (ctx["bot_name"], p, p))
+    return _t(ctx, "about", bot=ctx["bot_name"], p=ctx["prefix"])
 
 
 def help_(ctx):
     names = sorted(ctx["triggers"])
     if not names:
-        return "no triggers configured right now."
-    return "I answer to: " + ", ".join(names)
+        return _t(ctx, "no_triggers")
+    return _t(ctx, "triggers", names=", ".join(names))
 
 
 def list_(ctx):
     try:
         import features
         if not features.enabled("files"):
-            return "file sharing isn't offered on this node."
+            return _t(ctx, "files_off")
     except ImportError:
         pass
     if not fserv.sd_ok:
-        return "shelf's empty -- no card in the slot."
+        return _t(ctx, "no_card")
     names = fserv._list_files()
     if not names:
-        return "nothing on the shelf yet. Bring something, if you've got it."
+        return _t(ctx, "empty")
     shown = names[:LIST_LIMIT]
     parts = []
     for n in shown:
-        cls = fserv.guess_class(n)
+        cls = _t(ctx, fserv.guess_class(n))
         if fserv.CREDITS_ENABLED:
             parts.append("%s (%s, %d)" % (n, cls, fserv.credit_cost(n)))
         else:
             parts.append("%s (%s)" % (n, cls))
-    line = "on the shelf: " + ", ".join(parts)
+    line = _t(ctx, "shelf", items=", ".join(parts))
     if len(names) > LIST_LIMIT:
-        line += "  ...and %d more on the main page" % (len(names) - LIST_LIMIT)
+        line += _t(ctx, "more", n=len(names) - LIST_LIMIT)
     return line
 
 
 def info(ctx):
-    mode = "credits on" if fserv.CREDITS_ENABLED else "free mode"
-    card = "SD mounted" if fserv.sd_ok else "no SD card"
-    return "%s -- %s, %s. Files: open the main page, or /download?f=<name>." % (
-        ctx["bot_name"], mode, card)
+    mode = _t(ctx, "credits_on" if fserv.CREDITS_ENABLED else "free")
+    card = _t(ctx, "card_ok" if fserv.sd_ok else "card_none")
+    return _t(ctx, "info", bot=ctx["bot_name"], mode=mode, card=card)
 
 
 def rules(ctx):
-    return ("Take what you need, leave what you can. Nothing here is "
-            "backed up and the chat forgets itself on reboot.")
+    return _t(ctx, "rules")
 
 
 # Trigger suffix (the prefix is prepended at runtime, so changing
