@@ -1,6 +1,8 @@
 # Project Stump — Beta A (Release)
 
-![demo](demo.gif)
+<p align="center">
+  <img src="demo.gif" alt="App Demo" width="600" />
+</p>
 
 An off-grid community node. A long-range encrypted mesh radio and a
 local high-bandwidth server, deliberately kept on separate hardware.
