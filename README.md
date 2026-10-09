@@ -75,6 +75,10 @@ assuming you know what "turn on hybrid" does.
 
 ## Quick start
 
+Clone this repository, or download the firmware zip from the
+[latest release](https://github.com/ruderigo/LaBuche-Stump/releases)
+and run the provisioner from the folder that holds `final_firmware/`:
+
 ```bash
 python3 provisioner.py
 ```
