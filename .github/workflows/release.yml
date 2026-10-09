@@ -1,11 +1,14 @@
 name: Release
 
-# Push a tag to zip final_firmware/ and publish it as a GitHub Release:
+# Push a tag to zip the provisioner and its firmware and publish them as a GitHub Release:
 #   beta-a  ->  Stump_Beta_A.zip  (pre-release: tags with alpha/beta/rc)
 #   v1.0.0  ->  Stump_v1.0.0.zip
-# The zip is built from the tagged source, never from a file kept in the repo,
-# so it can't carry a local config.py or drift from the code. Same layout as the
-# provisioner's own copy (final_firmware/ at the archive root), plus third_party/.
+# The zip unpacks to one folder holding provisioner.py, final_firmware/ (with
+# third_party/), README.md, CLIENT_QUICKSTART.md and LICENSE: the provisioner
+# looks for final_firmware/ next to itself, and its file hashes only match the
+# firmware of the same commit, so the two always travel together. Built from the
+# tagged source, never from a file kept in the repo, so it can't carry a local
+# config.py or drift from the code.
 # "Run workflow" by hand builds the same zip as a downloadable artifact, no release.
 
 on:
@@ -38,20 +41,47 @@ jobs:
           echo "title=$TITLE" >> "$GITHUB_OUTPUT"
           echo "pre=$PRE" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # The provisioner refuses a folder whose files don't match its hashes;
+      # never publish a set it would refuse.
+      - name: Check the provisioner's file hashes match final_firmware/
+        run: |
+          pip install -q pytest
+          python -m pytest -q tests/test_firmware.py -k manifest
+
       - name: Build ${{ steps.n.outputs.zip }}
         run: |
           python3 - "${{ steps.n.outputs.zip }}" <<'EOF'
           import sys, zipfile
           from pathlib import Path
-          src = Path("final_firmware")
-          with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as zf:
-              for f in sorted(src.rglob("*")):
-                  rel = f.relative_to(src)
-                  if "__pycache__" in rel.parts or not f.is_file():
-                      continue
-                  zf.write(f, arcname=str(Path("final_firmware") / rel))
+          out = Path(sys.argv[1])
+          top = Path(out.stem)                       # Stump_Beta_A/
+          files = [Path(p) for p in ("provisioner.py", "README.md", "CLIENT_QUICKSTART.md", "LICENSE")]
+          files += [f for f in sorted(Path("final_firmware").rglob("*"))
+                    if f.is_file() and "__pycache__" not in f.parts]
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+              for f in files:
+                  zf.write(f, arcname=str(top / f))
           EOF
           unzip -l "${{ steps.n.outputs.zip }}" | tail -n 1
+
+      - name: Release notes
+        run: |
+          TOP="${{ steps.n.outputs.zip }}"; TOP="${TOP%.zip}"
+          cat > notes.md <<EOF
+          **To provision a node:** download \`${TOP}.zip\` below, unzip it, and from the \`${TOP}\` folder run
+
+          \`\`\`
+          python3 provisioner.py
+          \`\`\`
+
+          The provisioner and \`final_firmware/\` in this zip belong together: use them as a pair, not with files from another release or from \`main\`. See README.md for the full guide.
+          EOF
+          sed -i 's/^          //' notes.md
+          cat notes.md
 
       - name: Keep the zip as a build artifact
         uses: actions/upload-artifact@v4
@@ -65,5 +95,6 @@ jobs:
         with:
           name: ${{ steps.n.outputs.title }}
           prerelease: ${{ steps.n.outputs.pre }}
+          body_path: notes.md
           generate_release_notes: true
           files: ${{ steps.n.outputs.zip }}

@@ -75,9 +75,13 @@ assuming you know what "turn on hybrid" does.
 
 ## Quick start
 
-Clone this repository, or download the firmware zip from the
-[latest release](https://github.com/ruderigo/LaBuche-Stump/releases)
-and run the provisioner from the folder that holds `final_firmware/`:
+Download `Stump_<version>.zip` from the
+[latest release](https://github.com/ruderigo/LaBuche-Stump/releases),
+unzip it, and run the provisioner from the folder it creates. That folder
+holds `provisioner.py` with the `final_firmware/` it was built for: keep
+them together, since the provisioner checks every firmware file against
+its own list and flags any from another release or from `main`. (Or clone
+this repository and run it from the top folder.)
 
 ```bash
 python3 provisioner.py
