@@ -221,7 +221,7 @@ EXPECTED_FILE_HASHES = {
     "fservbot/install.py": "337dd2b146bb4d48",
     "fservbot/plugin.json": "bc8aca2fefb8b9e7",
     "fservbot/templates.py": "0a49f19852575370",
-    "i18n.py": "121b5f60c03c32fa",
+    "i18n.py": "2c95ce867f74517e",
     "lib/bz2_fast_xtensawin.mpy": "ac55d9eda2126432",
     "lib/ed25519_fast_xtensawin.mpy": "96e74dac45f91687",
     "lib/ed25519_iram.mpy": "96e74dac45f91687",

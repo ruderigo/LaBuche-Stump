@@ -256,6 +256,11 @@ STRINGS = {
         "en": "this list",
         "es": "esta lista",
     },
+    "nick_usage": {
+        "fr": "usage\u00a0: /nick <nom>",
+        "en": "usage: /nick <name>",
+        "es": "uso: /nick <nombre>",
+    },
     "nick_already": {
         "fr": "c'est déjà ton nom",
         "en": "that's already your name",

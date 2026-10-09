@@ -247,7 +247,23 @@ final_firmware/              75 files hashed, 64 uploaded to a CAM (~1.3 MB)
 
 provisioner.py               technician deployment tool (runs on a laptop) -- provisions
                               three board roles; see "Standalone Heltec V3 transport role" below
+tests/                       board-free checks, run on every push (see below)
 ```
+
+**Tests** (no board needed):
+
+```bash
+pip install pytest cryptography "mpy-cross==1.28.*" rns lxmf
+python3 -m pytest tests
+```
+
+They compile every firmware file with MicroPython's own compiler, check
+`provisioner.py`'s file hashes and the FR/EN/ES strings, and run
+µReticulum under CPython against the reference `rns`/`lxmf` to prove the
+two agree on keys, addresses, signatures, encryption and LXMF messages.
+`tests/shims/` stands in for the MicroPython-only modules. If you change
+a firmware file, regenerate `EXPECTED_FILE_HASHES` (the command is in the
+comment above it) or the manifest test fails, as the provisioner would.
 
 **Not part of `final_firmware/` at all**: the standalone Heltec V3 transport role runs
 `microReticulum_Firmware`, a real, pre-built, third-party C++ firmware -- flashed and

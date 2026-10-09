@@ -1,0 +1,46 @@
+name: Tests
+
+# Board-free checks on every push and pull request (tests/):
+#  - every firmware file compiles with mpy-cross v1.28 (the MicroPython the provisioner flashes)
+#  - provisioner.py's file manifest matches final_firmware/
+#  - FR/EN/ES strings are complete and every key the code uses exists
+#  - µReticulum (urns) interoperates with the reference rns/lxmf: keys, addresses,
+#    signatures, encryption and LXMF messages, both directions
+# The reference side runs twice: the version FireFly for Android pins, and the newest
+# release (what FireFly handhelds install), so an upstream protocol change shows up here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (reference rns ${{ matrix.rns }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rns: "1.5.5"
+            pip: "rns==1.5.5 lxmf==1.2.0"
+          - rns: "latest"
+            pip: "rns lxmf"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install test tools and the reference Reticulum
+        run: pip install pytest cryptography "mpy-cross==1.28.*" ${{ matrix.pip }}
+
+      - name: Run the tests
+        run: python -m pytest -v tests
