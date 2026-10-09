@@ -1,0 +1,69 @@
+name: Release
+
+# Push a tag to zip final_firmware/ and publish it as a GitHub Release:
+#   beta-a  ->  Stump_Beta_A.zip  (pre-release: tags with alpha/beta/rc)
+#   v1.0.0  ->  Stump_v1.0.0.zip
+# The zip is built from the tagged source, never from a file kept in the repo,
+# so it can't carry a local config.py or drift from the code. Same layout as the
+# provisioner's own copy (final_firmware/ at the archive root), plus third_party/.
+# "Run workflow" by hand builds the same zip as a downloadable artifact, no release.
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'beta-*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Name the zip after the tag
+        id: n
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" =~ ^beta-([a-z0-9]+)$ ]]; then
+            NAME="Stump_Beta_${BASH_REMATCH[1]^^}"; TITLE="Project Stump Beta ${BASH_REMATCH[1]^^}"
+          else
+            NAME="Stump_${TAG//\//-}"; TITLE="Project Stump ${TAG}"
+          fi
+          PRE=false; [[ "$TAG" =~ (alpha|beta|rc) ]] && PRE=true
+          echo "zip=$NAME.zip" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "pre=$PRE" >> "$GITHUB_OUTPUT"
+
+      - name: Build ${{ steps.n.outputs.zip }}
+        run: |
+          python3 - "${{ steps.n.outputs.zip }}" <<'EOF'
+          import sys, zipfile
+          from pathlib import Path
+          src = Path("final_firmware")
+          with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as zf:
+              for f in sorted(src.rglob("*")):
+                  rel = f.relative_to(src)
+                  if "__pycache__" in rel.parts or not f.is_file():
+                      continue
+                  zf.write(f, arcname=str(Path("final_firmware") / rel))
+          EOF
+          unzip -l "${{ steps.n.outputs.zip }}" | tail -n 1
+
+      - name: Keep the zip as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.n.outputs.zip }}
+          path: ${{ steps.n.outputs.zip }}
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: ${{ steps.n.outputs.title }}
+          prerelease: ${{ steps.n.outputs.pre }}
+          generate_release_notes: true
+          files: ${{ steps.n.outputs.zip }}
