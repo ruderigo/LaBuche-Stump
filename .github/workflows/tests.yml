@@ -61,6 +61,33 @@ jobs:
           diff dist-a/SHA256SUMS dist-b/SHA256SUMS
           cat dist-a/SHA256SUMS
 
+  # µReticulum (final_firmware/urns) against the reference rns/lxmf: keys,
+  # addresses, signatures, encryption and LXMF messages, both directions
+  # (tests/reference). Twice: the version FireFly for Android pins, and the
+  # newest release (what FireFly handhelds install), so an upstream protocol
+  # change shows up here. (Their names are required checks on main.)
+  reference:
+    name: Tests (reference rns ${{ matrix.rns }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rns: "1.5.5"
+            pip: "rns==1.5.5 lxmf==1.2.0"
+          - rns: "latest"
+            pip: "rns lxmf"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: The reference Reticulum and LXMF
+        run: pip install pytest cryptography ${{ matrix.pip }}
+      - name: urns against them
+        run: python -m pytest -v tests/reference
+
   # Stump on a computer (docs/PC.md) on the systems people will run it on:
   # a Stump folder made by the Provisioner, started, every page checked.
   # (The chain half, with a MicroPython CAM, runs in the Linux job above.)
