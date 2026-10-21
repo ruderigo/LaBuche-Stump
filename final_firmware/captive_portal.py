@@ -146,7 +146,7 @@ async def run_dns_server(ap_ip):
 DEFAULT_SSID = "LaBuche-Stump.web.app"
 
 
-def setup_ap(essid=None, include_ip=False):
+def setup_ap(essid=None, include_ip=False, ap_ip=None, channel=None):
     """Brings up the AP interface, open (no password). Returns the AP's
     own IP.
 
@@ -197,6 +197,24 @@ def setup_ap(essid=None, include_ip=False):
     import time as _time
     ap = network.WLAN(network.AP_IF)
     ap.active(True)
+    # In a chain (chain.py) every Stump's Wi-Fi has its own subnet, and the
+    # root picks the channel the whole chain shares.
+    if ap_ip:
+        try:
+            ap.ifconfig((ap_ip, "255.255.255.0", ap_ip, ap_ip))
+        except Exception as e:
+            print("[ap] could not set address %s: %s" % (ap_ip, e))
+    if ap_ip:
+        # A chained Stump's Wi-Fi also carries the next Stumps and PCs.
+        try:
+            ap.config(max_clients=10)
+        except Exception:
+            pass
+    if channel:
+        try:
+            ap.config(channel=channel)
+        except Exception as e:
+            print("[ap] could not set channel %s: %s" % (channel, e))
 
     # Wait for the interface to actually come up before reading its
     # address. active(True) returns before the driver has finished, so

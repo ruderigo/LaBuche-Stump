@@ -1,0 +1,42 @@
+{
+  "name": "tavern",
+  "version": "1.0",
+  "author": "Project Stump",
+  "license": "MIT",
+  "stump_api": 1,
+  "description": "The reference pack: dice, the magic 8-ball, the trout, !seen, a hall of fame of quotes, quick polls with a results page, and a flood guard. Everything is text, so mesh users get it all too.",
+  "ram_kb": 30,
+  "plugins": [
+    "tavern"
+  ],
+  "theme": {
+    "name": "tavern",
+    "label": {
+      "fr": "Taverne",
+      "en": "Tavern",
+      "es": "Taberna"
+    },
+    "colors": {
+      "--bg": "#1a120b",
+      "--panel": "#2b1d12",
+      "--panel-2": "#22170e",
+      "--line": "#3a2817",
+      "--ember": "#e0a040",
+      "--ember-bright": "#f5c063",
+      "--text": "#f0e2c8",
+      "--muted": "#a8906c",
+      "--border": "#4d3520",
+      "--dim": "#8a7556",
+      "--action": "#d6b88a",
+      "--err": "#e8735a"
+    }
+  },
+  "persona": {
+    "bot_name": "Tavernier",
+    "mesh_greeting": "Bienvenue à la taverne ! /help pour les commandes, !roll pour les dés."
+  },
+  "hashes": {},
+  "plugin_hashes": {
+    "tavern": "f93fda3ad14cc298"
+  }
+}

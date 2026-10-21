@@ -30,6 +30,8 @@
 
 import time
 import i18n
+import plugins
+import guard
 
 MAX_ROOMS = 16
 MAX_MESSAGES_PER_ROOM = 60
@@ -47,7 +49,55 @@ DEFAULT_ROOM = "main"
 # decide whether it exists or what it's called. That split is the
 # actual point: the room itself is core RRC/mesh-bridge behaviour, not
 # a feature of the identity plugin.
-MESH_ROOM = "lxmf"
+MESH_ROOM = "lora-mesh"
+# The other Stumps of a chain (chain.py) and the people on them talk in
+# CHAIN_ROOM, so #lora-mesh is left to the mesh -- LoRa phones and handhelds.
+# It exists only on a Stump that's in a chain (open_chain_room()).
+CHAIN_ROOM = "wifi-mesh"
+# Old names still reach the room: #lxmf (before 1.0.0-beta.4) and #lora
+# are #lora-mesh; #chained and #mesh are #wifi-mesh (names it had on main
+# for an afternoon).
+ROOM_ALIASES = {"lxmf": MESH_ROOM, "lora": MESH_ROOM, "chained": CHAIN_ROOM, "mesh": CHAIN_ROOM}
+
+
+# #lora-mesh on a Stump with its own radio (a computer with a Heltec on
+# USB): the room of the radio. People on LoRa are always in; on the web,
+# the computer's owner (on the computer itself) and whoever they invite
+# (/lora invite <nick>). Lines there never go to the other Stumps of the
+# chain (rrc_mesh sends them only #wifi-mesh). Set at boot (example_node).
+LORA_LOCKED = [False]
+_lora_invited = set()
+_LOCAL = ("127.0.0.1", "::1", "localhost")
+
+
+def is_local(client_id):
+    """The person on the computer this Stump runs on? Known by address
+    (127.0.0.1): a browser's visitor ID or a logged-in profile maps back to
+    the address it came from (guard.net, set by barkeep on each request)."""
+    try:
+        import guard
+        return guard._k(str(client_id or "")) in _LOCAL
+    except ImportError:
+        return str(client_id or "") in _LOCAL
+
+
+def lora_allows(client_id):
+    """May this client be in #lora-mesh? Always, unless it's locked."""
+    if not LORA_LOCKED[0]:
+        return True
+    cid = str(client_id or "")
+    if len(cid) == 32 and all(c in "0123456789abcdef" for c in cid):
+        return True                    # an LXMF address: someone on the mesh
+    return is_local(cid) or cid in _lora_invited
+
+
+def room_allows(client_id, room):
+    return canon(room) != MESH_ROOM or lora_allows(client_id)
+
+
+def canon(room):
+    """The room's current name for an old one (lxmf -> lora-mesh)."""
+    return ROOM_ALIASES.get(room, room)
 
 # room -> list of {"id", "ts", "nick", "body", "kind"}
 # kind: "msg" (normal), "action" (/me), "system" (joins, parts, topic)
@@ -56,7 +106,13 @@ _rooms = {DEFAULT_ROOM: [], MESH_ROOM: []}
 # stored: topic() shows them in the reader's language until someone sets
 # a real one (which then shows as written, for everyone).
 _topics = {}
-_DEFAULT_TOPIC_KEYS = {DEFAULT_ROOM: "topic_default_main", MESH_ROOM: "topic_default_lxmf"}
+_DEFAULT_TOPIC_KEYS = {DEFAULT_ROOM: "topic_default_main", MESH_ROOM: "topic_default_lora",
+                       CHAIN_ROOM: "topic_default_mesh"}
+
+
+def open_chain_room():
+    """Called at boot on a Stump in a chain."""
+    _rooms.setdefault(CHAIN_ROOM, [])
 
 
 # Room activity and DM lines are symbols, not sentences: every reader
@@ -258,6 +314,26 @@ def find_dm(client_id, dm_id):
 # and need to see it's the same one: {"name": ..., "lxmf": <hex>}. Set by
 # example_node once its LXMF destination exists; reported in /rrc/poll.
 NODE = {}
+NODE_INFO = {}       # version and release, for /node.json (set at boot)
+NODE_IDENTITY = [None]   # this Stump's own identity (example_node), for /hello
+
+
+# The route a person chose in their app (/hello's "prefer"), like the
+# Stump's own USB / Bluetooth switch: "wifi" or "lora". LXMF address ->
+# choice. With "lora", DMs go over LoRa even while the phone is on this
+# Stump's Wi-Fi too (it's still listed once).
+_prefer = {}
+
+
+def set_prefer(lxmf_hex, how):
+    if lxmf_hex and how in ("wifi", "lora"):
+        _prefer[lxmf_hex] = how
+        while len(_prefer) > MAX_SAME:
+            _prefer.pop(next(iter(_prefer)))
+
+
+def prefer_of(lxmf_hex):
+    return _prefer.get(lxmf_hex, "wifi")
 
 
 def names_line(room, names):
@@ -306,7 +382,125 @@ def drop_reachable(client_id):
 
 
 def reachable_nicks():
-    return sorted(r["nick"] for r in _reachable.values())
+    return sorted(r["nick"] for cid, r in _reachable.items() if same_web(cid) is None)
+
+
+# The same person reached two ways: a FireFly that proved its identity
+# over Wi-Fi (stumpid's /auth) and is also known by its LXMF address on
+# LoRa. LXMF address (hex) -> the Wi-Fi client id. While that Wi-Fi client
+# is here, the two are one person: listed once, under the Wi-Fi nick, and
+# DMs to that nick reach them over Wi-Fi; once it's gone, over LoRa again.
+# Only an /auth links them -- a claim without the identity's signature
+# could take someone else's messages.
+_same = {}
+MAX_SAME = 64
+
+
+def link_same(web_cid, lxmf_hex):
+    _same[lxmf_hex] = web_cid
+    while len(_same) > MAX_SAME:
+        _same.pop(next(iter(_same)))
+
+
+def same_web(lxmf_hex):
+    """The Wi-Fi client this LXMF address is the same person as, while
+    it's here; else None."""
+    web = _same.get(lxmf_hex)
+    return web if web is not None and web in _users else None
+
+
+def _same_person(a, b):
+    return _same.get(a) == b or _same.get(b) == a
+
+
+def lxmf_of(web_cid):
+    """The LXMF address a Wi-Fi client proved (/auth), or None."""
+    for lx, w in _same.items():
+        if w == web_cid:
+            return lx
+    return None
+
+
+def is_default_nick(nick):
+    """A name nobody chose: a web guest's or an unnamed mesh contact's."""
+    n = str(nick or "")
+    return n.startswith("guest-") or n.startswith("mesh-")
+
+
+def nick_chosen(client_id):
+    u = _users.get(client_id)
+    return u is not None and not is_default_nick(u["nick"])
+
+
+# Apps (clients without the Stump's cookie) that haven't greeted yet --
+# /auth, then /nick (barkeep's gate): not listed anywhere, so a half-
+# connected app is never a stray "guest-xxxx" in the rooms.
+_hidden = set()
+
+
+def hide(client_id):
+    _hidden.add(client_id)
+
+
+def unhide(client_id):
+    _hidden.discard(client_id)
+
+
+def _is_lxmf(cid):
+    s = str(cid)
+    return len(s) == 32 and all(c in "0123456789abcdef" for c in s)
+
+
+def local_identity(id8):
+    """Is the person with this identity (the first 8 hex of their LXMF
+    address) here, on this Stump -- on LoRa, or on Wi-Fi after /auth?"""
+    if not id8:
+        return False
+    for cid in list(_users) + list(_reachable):
+        if cid not in _hidden and _is_lxmf(cid) and cid.startswith(id8):
+            return True
+    for lx, web in _same.items():
+        if lx.startswith(id8) and web in _users and web not in _hidden:
+            return True
+    return False
+
+
+def identity_of(client_id):
+    """The identity (8 hex) a client here is known by, or None."""
+    if _is_lxmf(client_id):
+        return client_id[:8]
+    lx = lxmf_of(client_id)
+    return lx[:8] if lx else None
+
+
+# Renames others should follow (a LoRa contact's new announced name, or
+# the LoRa name giving way to the Wi-Fi one): the web chat folds a thread
+# under the old name into the new one. [(time, old, new)], kept RENAME_S.
+_renames = []
+RENAME_S = 1800
+
+
+def note_rename(old, new):
+    if not old or not new or old == new:
+        return
+    now = time.time()
+    _renames[:] = [r for r in _renames if now - r[0] < RENAME_S and r[1] != old][-31:]
+    _renames.append((now, old, new))
+
+
+def renames():
+    """{old nick: new nick} for recent renames (chains followed: a -> b -> c
+    gives a: c)."""
+    now = time.time()
+    out = {}
+    for t, old, new in _renames:
+        if now - t < RENAME_S:
+            for k in out:
+                if out[k] == old:
+                    out[k] = new
+            out[old] = new
+    out = dict((k, v) for k, v in out.items() if k != v)
+    return out
 
 
 # Client ids (LXMF delivery hashes, hex) known to be other Stump nodes,
@@ -316,6 +510,10 @@ def reachable_nicks():
 # is tiny, but nothing here grows without limit.
 _stumps = set()
 MAX_STUMPS = 64
+
+
+def is_stump(client_id):
+    return client_id in _stumps
 
 
 def mark_stump(client_id):
@@ -380,7 +578,7 @@ def clean_room(name):
     slug = "".join(out)
     while "--" in slug:
         slug = slug.replace("--", "-")
-    return slug.strip("-")
+    return canon(slug.strip("-"))
 
 
 def default_nick(client_id):
@@ -450,16 +648,95 @@ def nick_taken(nick, by_client):
     insensitive, because 'Bob' and 'bob' reading as different people in
     a chat window is a genuine source of confusion."""
     low = nick.lower()
+    # A registered profile's nick (profiles.py) is its owner's alone: they
+    # are "p:<nick>" while logged in.
+    if by_client != "p:" + low:
+        try:
+            import profiles
+            if profiles.is_registered(low):
+                return True
+        except ImportError:
+            pass
     for table in (_users, _reachable):
         for cid, u in table.items():
-            if cid != by_client and u["nick"].lower() == low:
+            if cid != by_client and u["nick"].lower() == low and not _same_person(cid, by_client):
                 return True
     return False
 
 
+def release_registered_nicks():
+    """A registered profile's nick (profiles.py: made here, or arrived from
+    another Stump of the chain) held by someone else: they go back to
+    their default name, the room told. Returns how many."""
+    try:
+        import profiles
+    except ImportError:
+        return 0
+    n = 0
+    for cid, u in list(_users.items()):
+        low = u["nick"].lower()
+        if cid != "p:" + low and not str(cid).startswith("p:") and profiles.is_registered(low):
+            old, new = u["nick"], default_nick(cid)
+            u["nick"] = new
+            system(u["room"], ev_rename(old, new))
+            n += 1
+    return n
+
+
 def users_in_room(room):
     _prune_users()
-    return sorted(u["nick"] for u in _users.values() if u["room"] == room)
+    room = canon(room)
+    return sorted(set(u["nick"] for cid, u in _users.items()
+                      if u["room"] == room and same_web(cid) is None and cid not in _hidden))
+
+
+# Who is in a shared room on the OTHER Stumps (#lora-mesh), as each told
+# this one (rrc_mesh: a "[NAMES] ..." line): stump id -> {"who", "rooms":
+# {room: [nicks]}, "at"}. Kept REMOTE_NAMES_S after the last word.
+_remote_names = {}
+_remote_seq = [0]          # (which list came last, even within a second)
+REMOTE_NAMES_S = 900
+MAX_REMOTE_STUMPS = 16
+
+
+def set_remote_names(stump_id, who, room, nicks):
+    room = canon(room)
+    e = _remote_names.get(stump_id)
+    if e is None:
+        if len(_remote_names) >= MAX_REMOTE_STUMPS:
+            _remote_names.pop(min(_remote_names, key=lambda k: _remote_names[k]["at"]))
+        e = _remote_names[stump_id] = {"who": who, "rooms": {}, "at": 0}
+    _remote_seq[0] += 1
+    e["who"], e["at"], e["seq"] = who, time.time(), _remote_seq[0]
+    # Each one a nick, or (nick, identity): the identity (8 hex) lets this
+    # Stump see it's someone who is here too, and not list them twice.
+    e["rooms"][room] = [n if isinstance(n, tuple) else (n, None) for n in nicks if n][:60]
+
+
+def remote_names(room):
+    """"nick@stump" for everyone the other Stumps say is in this room."""
+    room = canon(room)
+    now = time.time()
+    out, seen = [], set()
+    # Newest first: someone on two other Stumps is listed once, where they
+    # were heard last; someone who is here too, not at all (they're here).
+    for k in sorted(_remote_names, key=lambda k: -_remote_names[k].get("seq", 0)):
+        e = _remote_names[k]
+        if now - e["at"] > REMOTE_NAMES_S:
+            _remote_names.pop(k)
+            continue
+        for n, ident in e["rooms"].get(room, []):
+            if ident and (ident in seen or local_identity(ident)):
+                continue
+            if ident:
+                seen.add(ident)
+            out.append(n + "@" + e["who"])
+    return out
+
+
+def names_in_room(room):
+    """Who's in a room: here, then on the other Stumps (nick@stump)."""
+    return users_in_room(room) + sorted(remote_names(room))
 
 
 # ---------------------------------------------------------------------
@@ -474,10 +751,11 @@ def room_names():
 
 
 def room_exists(room):
-    return room in _rooms
+    return canon(room) in _rooms
 
 
 def topic(room, lang=None):
+    room = canon(room)
     if room in _topics:
         return _topics[room]
     key = _DEFAULT_TOPIC_KEYS.get(room)
@@ -485,6 +763,7 @@ def topic(room, lang=None):
 
 
 def set_topic(room, text):
+    room = canon(room)
     if room not in _rooms:
         return False
     _topics[room] = _clean(text, 120)
@@ -507,13 +786,14 @@ def create_room(name):
     return slug, None
 
 
-def post(room, nick, body, kind="msg"):
+def post(room, nick, body, kind="msg", via=None):
     """Adds a line to a room. Returns the message, or None if rejected.
 
     Oldest messages are dropped past MAX_MESSAGES_PER_ROOM rather than
     refusing new ones -- a room that stops accepting messages when it
     fills up would be broken; one that forgets its oldest lines is just
     a scrollback limit, which is what every chat client has anyway."""
+    room = canon(room)
     if room not in _rooms:
         return None
     body = _clean(body, MAX_MESSAGE_LEN)
@@ -521,6 +801,10 @@ def post(room, nick, body, kind="msg"):
         return None
     msg = {"id": _next_id[0], "ts": time.time(), "nick": nick,
            "body": body, "kind": kind}
+    if via:
+        # Relayed from another Stump of the chain (rrc_mesh): never sent
+        # on to other Stumps, which hear the original themselves.
+        msg["via"] = via
     _next_id[0] += 1
     msgs = _rooms[room]
     msgs.append(msg)
@@ -537,6 +821,7 @@ def since(room, last_id):
     """Messages newer than last_id. The client polls with the highest id
     it has seen, so it only ever receives what it is actually missing --
     the whole room isn't re-sent on every poll."""
+    room = canon(room)
     if room not in _rooms:
         return []
     return [m for m in _rooms[room] if m["id"] > last_id]
@@ -552,8 +837,11 @@ def find_client_by_nick(nick):
     low = (nick or "").lstrip("~").lower()
     for table in (_users, _reachable):
         for cid, u in table.items():
-            if u["nick"].lower() == low:
-                return cid
+            if u["nick"].lower() == low and cid not in _hidden:
+                lx = cid if _is_lxmf(cid) else lxmf_of(cid)
+                if lx and _prefer.get(lx) == "lora" and (lx in _reachable or lx in _users):
+                    return lx                    # they chose LoRa: reached there
+                return same_web(cid) or cid      # (on Wi-Fi now: reached there)
     return None
 
 
@@ -657,8 +945,14 @@ def reset():
     _topics.clear()
     _users.clear()
     _reachable.clear()
+    _same.clear()
+    _hidden.clear()
+    _prefer.clear()
+    del _renames[:]
     _stumps.clear()
     _dms.clear()
+    _lora_invited.clear()
+    LORA_LOCKED[0] = False
     _next_id[0] = 1
 
 
@@ -666,24 +960,50 @@ def reset():
 # Command handling
 # ---------------------------------------------------------------------
 
-def help_lines(lang):
+def help_lines(lang, mesh=False):
     """The /help listing, in the requesting client's language. Command
     WORDS and their column alignment stay fixed across all languages
     (a consistent vocabulary, same reasoning as barkeep.py's bot
-    console) -- only the description after each one is translated."""
+    console) -- only the description after each one is translated, and
+    the argument names (<name> is <nom> in French): the column stays
+    aligned whatever their length."""
+    def a(key):
+        return i18n.t("help_arg_" + key, lang)
+
+    def line(cmd, desc):
+        return cmd + " " * max(1, 18 - len(cmd)) + i18n.t(desc, lang)
     return [
-        "/nick <name>      " + i18n.t("help_nick", lang),
-        "/join <room>      " + i18n.t("help_join", lang),
-        "/part             " + i18n.t("help_part", lang),
-        "/rooms            " + i18n.t("help_rooms", lang),
-        "/names            " + i18n.t("help_names", lang),
-        "/topic <text>     " + i18n.t("help_topic", lang),
-        "/msg <who> <text> " + i18n.t("help_msg", lang),
-        "/me <action>      " + i18n.t("help_me", lang),
-        "/clear            " + i18n.t("help_clear", lang),
-        "/help             " + i18n.t("help_help", lang),
+        line("/nick " + a("name"), "help_nick"),
+        line("/join " + a("room"), "help_join"),
+        line("/part", "help_part"),
+        line("/rooms", "help_rooms"),
+        line("/names", "help_names"),
+        line("/topic " + a("text"), "help_topic"),
+        line("/msg " + a("who") + " " + a("text"), "help_msg"),
+        line("/me " + a("action"), "help_me"),
+        line("/clear", "help_clear"),
+        line("/help", "help_help"),
+    ] + plugins.help_lines(lang, mesh) + [
         i18n.t("help_legend", lang),
     ]
+
+
+try:
+    from config import CHAT_EVERY        # seconds per line, once the burst is spent
+except ImportError:
+    CHAT_EVERY = 2
+try:
+    from config import CHAT_BURST        # lines at once
+except ImportError:
+    CHAT_BURST = 3
+_SPEAKING_COMMANDS = ("msg", "m", "w", "me", "topic")
+
+
+def _speaks(text):
+    """True for a line other people will see: a message, or /msg, /me, /topic."""
+    if not text.startswith("/"):
+        return True
+    return text[1:].split(" ", 1)[0].lower() in _SPEAKING_COMMANDS
 
 
 def handle_input(client_id, room, text):
@@ -699,13 +1019,39 @@ def handle_input(client_id, room, text):
     text = _clean(text, MAX_MESSAGE_LEN)
     if not text:
         return [], None
+    # Who's asking, for password checks inside commands (guard.py), and
+    # a speed limit on lines that reach other people: a few at once, then
+    # one every CHAT_EVERY seconds -- on the web and over the mesh alike,
+    # where every line costs LoRa airtime. Commands that only answer the
+    # sender (/help, /names...) aren't counted.
+    guard.caller(client_id)
+    if _speaks(text) and not guard.allow("chat", client_id, CHAT_EVERY, CHAT_BURST):
+        # Said in the log, so a "too fast" nobody expected can be traced
+        # (who, which line).
+        print("[rrc] too fast: %s %r" % (str(client_id)[:12], text[:40]))
+        return [tok_rate(i18n.t("chat_rate", lang))], None
 
+    # Plugins (plugins.py): gates and /commands see the line before rrc
+    # does; on_result hooks see what came of it.
+    nick = user["nick"]
+    handled = plugins.before(client_id, room, nick, text, lang)
+    if handled is not None:
+        kind, result = handled
+        if kind == "gate":
+            return result
+    else:
+        result = _handle_core(client_id, room, text, user, lang)
+    return plugins.finish(client_id, room, nick, text, lang, result)
+
+
+def _handle_core(client_id, room, text, user, lang):
     if not text.startswith("/"):
         touch_user(client_id, room=room)
         posted = post(room, user["nick"], text)
         if posted is None:
             return [i18n.t("room_gone", lang)], None
-        return [], None
+        # Posted: now !triggers and plugin listeners.
+        return plugins.after(client_id, room, user["nick"], text, lang), None
 
     parts = text[1:].split(" ", 1)
     cmd = parts[0].lower()
@@ -718,13 +1064,26 @@ def handle_input(client_id, room, text):
         new = clean_nick(arg)
         if not new:
             return [i18n.t("nick_usage", lang)], None
-        if new.lower() == user["nick"].lower():
+        if new.lower() == user["nick"].lower() and new == user["nick"]:
             return [i18n.t("nick_already", lang)], None
+        if str(client_id).startswith("p:") and new.lower() != client_id[2:]:
+            # Logged into a registered profile: its nick is the profile's.
+            return [i18n.t("nick_profile", lang, nick=user["nick"])], None
         if nick_taken(new, client_id):
             return [i18n.t("nick_taken", lang, nick=new)], None
         old = user["nick"]
         touch_user(client_id, nick=new, room=room)
-        system(room, ev_rename(old, new))
+        if client_id not in _hidden:          # (an app's greeting isn't news)
+            system(room, ev_rename(old, new))
+            note_rename(old, new)
+        lx = lxmf_of(client_id)
+        if lx:
+            # Its LoRa side too, now (not at the mesh loop's next turn).
+            try:
+                import rrc_mesh
+                rrc_mesh._one_name(lx, client_id)
+            except Exception:
+                pass
         return [], None
 
     if cmd in ("join", "j"):
@@ -735,6 +1094,8 @@ def handle_input(client_id, room, text):
             return [err], None
         if target == room:
             return [tok_already(target, i18n.t("join_already", lang, room=target))], None
+        if not room_allows(client_id, target):
+            return [tok_refused(target, "LoRa", i18n.t("lora_room_locked", lang))], None
         system(room, ev_leave(user["nick"]))
         touch_user(client_id, room=target)
         system(target, ev_join(user["nick"]))
@@ -749,10 +1110,35 @@ def handle_input(client_id, room, text):
         return [], DEFAULT_ROOM
 
     if cmd == "rooms":
-        return [rooms_line(r, len(users_in_room(r)), topic(r, lang)) for r in room_names()], None
+        return [rooms_line(r, len(names_in_room(r)), topic(r, lang))
+                + ("  [LoRa]" if r == MESH_ROOM and LORA_LOCKED[0] else "") for r in room_names()], None
+
+    if cmd == "lora":
+        # /lora, /lora invite <nick>, /lora uninvite <nick>: who may use the
+        # radio's room from the web. Only the computer's owner decides.
+        sub, _, who = arg.partition(" ")
+        if not LORA_LOCKED[0]:
+            return [i18n.t("lora_room_open", lang)], None
+        if sub not in ("invite", "uninvite") or not who.strip():
+            names = sorted(u["nick"] for c, u in _users.items() if c in _lora_invited)
+            return [i18n.t("lora_room_status", lang, names=", ".join(names) or "-")], None
+        if not is_local(client_id):
+            return [i18n.t("lora_room_owner_only", lang)], None
+        target = find_client_by_nick(who.strip())
+        if target is None:
+            return [no_such(who.strip())], None
+        if sub == "invite":
+            _lora_invited.add(target)
+        else:
+            _lora_invited.discard(target)
+            u = _users.get(target)
+            if u and u.get("room") == MESH_ROOM:
+                system(MESH_ROOM, ev_leave(u["nick"]))
+                touch_user(target, room=DEFAULT_ROOM)
+        return [i18n.t("lora_room_" + sub + "d", lang, nick=who.strip())], None
 
     if cmd == "names":
-        return [names_line(room, users_in_room(room))], None
+        return [names_line(room, names_in_room(room))], None
 
     if cmd == "topic":
         if not arg:

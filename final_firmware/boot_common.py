@@ -43,51 +43,61 @@ def _clear_count():
 
 
 def boot_with_retry(module_name):
-    """Imports module_name, retrying transient failures a few times and
-    stopping cleanly (not endlessly rebooting) on a persistent one --
-    see main.py's own header comment for the full transient-vs-persistent
-    reasoning this preserves unchanged. Never returns on success (the
-    imported module owns the board from here); on a persistent failure
-    it prints the reason and returns, leaving the board idle at a REPL
-    rather than power-cycling forever."""
+    """Imports module_name -- the node, which owns the board from then on.
+
+    If it stops on an error (while starting, or weeks later), the error is
+    kept for /admin (keepalive.note_crash) and the board starts again in 10
+    seconds. A field Stump has no one to read a console: it must never sit
+    idle. Failed starts are counted by keepalive.py; RESCUE_AFTER in a row
+    give a rescue start (no radio, no chain, no plugins: the Wi-Fi, the
+    pages and /admin), which tries a normal start again after a while.
+
+    The one exception is a missing module: an incomplete or mixed upload,
+    which no restart can fix -- the board stays idle at the REPL with the
+    message readable, as before."""
     try:
         __import__(module_name)
-        # Reaching here means startup got far enough to be considered
-        # good, so the failure counter shouldn't carry over to a later,
-        # unrelated problem.
         _clear_count()
-
+    except KeyboardInterrupt:
+        # Ctrl+C that got past the node's own handler (a second one, mid
+        # clean-up): the watchdog must still be disarmed before the REPL.
+        try:
+            import keepalive
+            keepalive.console_stop()
+        except Exception:
+            pass
+        raise
     except Exception as e:
-        attempts = _read_count() + 1
-        _write_count(attempts)
-
         print()
         print("=" * 52)
-        print("STARTUP FAILED (attempt %d of %d)" % (attempts, MAX_BOOT_ATTEMPTS))
+        print("THE STUMP STOPPED ON AN ERROR")
         print("=" * 52)
         print("  %s: %s" % (type(e).__name__, e))
         print()
-
-        # A missing module is never transient and is nearly always a
-        # partial or mixed upload, so name that directly rather than
-        # making someone infer it from a bare ImportError.
         if isinstance(e, ImportError):
+            attempts = _read_count() + 1
+            _write_count(attempts)
+            # A missing module is never transient and is nearly always a
+            # partial or mixed upload, so name that directly rather than
+            # making someone infer it from a bare ImportError.
             print("  A module is missing. That means the upload is incomplete, or")
             print("  mixes files from two different builds -- retrying cannot fix")
             print("  it. Re-upload a complete, single-build firmware folder:")
             print("    python3 provisioner.py --upload-app <port>")
             print()
-
-        if attempts >= MAX_BOOT_ATTEMPTS:
-            print("  Giving up on automatic restart -- the board is staying")
-            print("  powered and idle so this message remains readable.")
-            print("  Nothing else is running.")
-            print()
-            print("  Fix the cause, then reset the board (or power-cycle it).")
-            print("=" * 52)
-            _clear_count()   # so the next boot after a fix starts clean
-        else:
-            print("  Retrying in 10 seconds...")
-            print("=" * 52)
-            time.sleep(10)
-            machine.reset()
+            if attempts >= MAX_BOOT_ATTEMPTS:
+                print("  The board is staying idle so this message remains readable.")
+                print("  Fix the upload, then reset the board.")
+                print("=" * 52)
+                _clear_count()
+                return
+        try:
+            import keepalive
+            keepalive.note_crash("%s: %s" % (type(e).__name__, e))
+        except Exception:
+            pass
+        print("  Starting again in 10 seconds (after %d failed starts in a row," % 3)
+        print("  a rescue start: the Wi-Fi, the pages and /admin only).")
+        print("=" * 52)
+        time.sleep(10)
+        machine.reset()

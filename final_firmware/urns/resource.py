@@ -4,7 +4,7 @@
 
 import time
 from . import const, umsgpack
-from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_NOTICE
+from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_NOTICE, sl
 from .identity import Identity
 from .crypto.hashes import sha256
 
@@ -118,7 +118,8 @@ class Resource:
             if compressed and len(compressed) < len(data):
                 data = compressed
                 self.compressed = True
-                log("Resource compressed " + self.hash.hex()[:8] + ": " + str(self.total_data_size) + "B -> " + str(len(data)) + "B", LOG_DEBUG)
+                if sl(LOG_DEBUG):
+                    log("Resource compressed " + self.hash.hex()[:8] + ": " + str(self.total_data_size) + "B -> " + str(len(data)) + "B", LOG_DEBUG)
             if compressed:
                 del compressed
         except Exception:
@@ -332,7 +333,8 @@ class Resource:
         self.link.send(adv_packed, const.CTX_RESOURCE_ADV)
         self.status = ADVERTISED
         self.last_adv_at = time.time()
-        log("Resource advertised: " + self.hash.hex()[:8], LOG_DEBUG)
+        if sl(LOG_DEBUG):
+            log("Resource advertised: " + self.hash.hex()[:8], LOG_DEBUG)
 
     def check_adv_timeout(self):
         """(Sender) Re-advertise while no part request has arrived. The single
@@ -552,7 +554,8 @@ class Resource:
 
         self.status = ASSEMBLING
         t0 = time.time()
-        log("Resource assembling " + self.hash.hex()[:8], LOG_DEBUG)
+        if sl(LOG_DEBUG):
+            log("Resource assembling " + self.hash.hex()[:8], LOG_DEBUG)
 
         # Join parts
         gc.collect()
@@ -582,7 +585,8 @@ class Resource:
 
         # Decompress before verification (hash is of original uncompressed data)
         if self.flags & FLAG_COMPRESSED:
-            log("Resource decompressing " + self.hash.hex()[:8] + " (" + str(len(self.data)) + "B compressed)", LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Resource decompressing " + self.hash.hex()[:8] + " (" + str(len(self.data)) + "B compressed)", LOG_DEBUG)
             from .bz2dec import decompress as bz2_decompress
             self.data = bz2_decompress(self.data)
             gc.collect()
@@ -622,7 +626,8 @@ class Resource:
         """(Sender) Validate proof from receiver."""
         hash_len = 32  # Identity.HASHLENGTH // 8
         if len(proof_data) != hash_len * 2:
-            log("Resource proof wrong size: " + str(len(proof_data)), LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Resource proof wrong size: " + str(len(proof_data)), LOG_DEBUG)
             return False
 
         received_hash = proof_data[:hash_len]
@@ -731,7 +736,8 @@ class Resource:
             self.status = FAILED
             if signal:
                 self._signal_cancel()
-            log("Resource cancelled: " + self.hash.hex()[:8], LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Resource cancelled: " + self.hash.hex()[:8], LOG_DEBUG)
             self._conclude()
 
     def _signal_cancel(self):
@@ -748,7 +754,8 @@ class Resource:
                 const.PKT_DATA, context=context, create_receipt=False,
             ).send()
         except Exception as e:
-            log("Resource cancel signal failed: " + str(e), LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Resource cancel signal failed: " + str(e), LOG_DEBUG)
 
     def is_timed_out(self):
         return time.time() - self.created_at > TIMEOUT

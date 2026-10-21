@@ -40,6 +40,7 @@ class LoRaInterface(Interface):
     def __init__(self, config):
         name = config.get("name", "LoRa SX1262")
         super().__init__(name)
+        self.bulk_ok = False      # a radio: big transfers stay off it
 
         # Max on-air RNS packet: RNode protocol splits >254B into 2 frames
         # (max 508B total). Used for link-MTU clamping at transit.

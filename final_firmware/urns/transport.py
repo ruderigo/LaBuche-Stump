@@ -155,7 +155,8 @@ class Transport:
             Transport.control_destinations.append(d)
             if d.hash not in Transport.control_hashes:
                 Transport.control_hashes.append(d.hash)
-            log("Registered path-request control destination " + d.hash.hex()[:8], LOG_VERBOSE)
+            if sl(LOG_VERBOSE):
+                log("Registered path-request control destination " + d.hash.hex()[:8], LOG_VERBOSE)
         except Exception as e:
             log("Control destination registration failed: " + str(e), LOG_ERROR)
 
@@ -186,7 +187,8 @@ class Transport:
     def register_interface(interface):
         if interface not in Transport.interfaces:
             Transport.interfaces.append(interface)
-            log("Interface registered: " + str(interface), LOG_VERBOSE)
+            if sl(LOG_VERBOSE):
+                log("Interface registered: " + str(interface), LOG_VERBOSE)
 
     @staticmethod
     def deregister_interface(interface):
@@ -234,7 +236,8 @@ class Transport:
                         result = interface.process_outgoing(raw)
                         if result or result is None:
                             sent = True
-                            log("TX sent on " + interface.name, LOG_DEBUG)
+                            if sl(LOG_DEBUG):
+                                log("TX sent on " + interface.name, LOG_DEBUG)
                         else:
                             log("TX failed on " + interface.name, LOG_WARNING)
                     except Exception as e:
@@ -262,7 +265,8 @@ class Transport:
 
     @staticmethod
     def _cache_packet_hash(packet):
-        packet_hash = packet.get_hash()
+        # unpack() already computed it; hashing again cost ~1 ms on a CAM.
+        packet_hash = getattr(packet, "packet_hash", None) or packet.get_hash()
         if (packet_hash in Transport.packet_hashlist
                 or packet_hash in Transport.packet_hashlist_prev):
             return
@@ -504,7 +508,8 @@ class Transport:
                 aa = getattr(interface, "_announce_allowed_at", 0)
                 if allowed_at == 0 or aa < allowed_at:
                     allowed_at = aa
-                log("Announce airtime cap hit on " + str(interface), LOG_DEBUG)
+                if sl(LOG_DEBUG):
+                    log("Announce airtime cap hit on " + str(interface), LOG_DEBUG)
                 continue
             if Transport.transmit(interface, new_raw):
                 sent_on.append(interface.name)
@@ -553,7 +558,8 @@ class Transport:
 
         entry = Transport.path_table.get(dest)
         if entry is None:
-            log("Transit: no path to " + dest.hex()[:8] + ", dropping", LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Transit: no path to " + dest.hex()[:8] + ", dropping", LOG_DEBUG)
             return True   # consumed (dropped) — do not deliver locally
 
         next_hop = entry[const.IDX_PT_NEXT_HOP]
@@ -684,13 +690,101 @@ class Transport:
                     out_if = nh_if
         if out_if is None:
             return False   # not our turn / hop mismatch
+        if not Transport._bulk_allowed(packet.destination_hash, out_if, packet.context, len(packet.raw)):
+            return True            # dropped: a big transfer stays off the radio
         Transport._cache_packet_hash(packet)   # NOW remember — it's ours to relay
-        new_raw = packet.raw[0:1] + bytes([packet.hops]) + packet.raw[2:]
+        new_raw = packet.raw[0:1] + bytes([packet.hops]) + memoryview(packet.raw)[2:]
         Transport.transmit(out_if, new_raw)
         entry[const.IDX_LT_TIMESTAMP] = time.time()
         Transport.relayed_links += 1
-        log("Relay link " + packet.destination_hash.hex()[:8]
-            + " -> " + str(out_if), LOG_NOTICE)
+        if sl(LOG_NOTICE):
+            log("Relay link " + packet.destination_hash.hex()[:8]
+                + " -> " + str(out_if), LOG_NOTICE)
+        return True
+
+    # How much file-transfer data (resource parts) one link may relay onto
+    # a radio interface (bulk_ok False) per window. Enough for a voice
+    # note or a propagation-node sync (16 KB each); a big file is refused
+    # once it passes this, so transfers between Stumps chained over Wi-Fi
+    # never spill onto the shared LoRa channel. Set from config
+    # "bulk_radio_bytes" / "bulk_radio_window" (Reticulum.setup_interfaces).
+    BULK_RADIO_BYTES = 48000
+    BULK_RADIO_WINDOW = 600
+    _bulk = {}        # link_id -> [window_start, bytes, refused_logged]
+    bulk_refused = 0
+
+    @staticmethod
+    def _bulk_allowed(link_id, out_if, ctx, n):
+        if ctx != const.CTX_RESOURCE or getattr(out_if, "bulk_ok", True):
+            return True
+        now = time.time()
+        b = Transport._bulk.get(link_id)
+        if b is None or now - b[0] > Transport.BULK_RADIO_WINDOW:
+            if len(Transport._bulk) > 64:
+                Transport._bulk = {}
+            b = Transport._bulk[link_id] = [now, 0, False]
+        if b[1] + n > Transport.BULK_RADIO_BYTES:
+            Transport.bulk_refused += 1
+            if not b[2]:
+                b[2] = True
+                log("Not relaying a large transfer onto " + str(out_if) + " (link "
+                    + bytes(link_id[:4]).hex() + "): over " + str(Transport.BULK_RADIO_BYTES)
+                    + " bytes in " + str(Transport.BULK_RADIO_WINDOW) + " s", LOG_NOTICE)
+            return False
+        b[1] += n
+        return True
+
+    # Link contexts that legitimately repeat: packet_filter() never
+    # deduplicates them and _should_remember() never records them, so
+    # relaying them needs neither the Packet object nor its hash.
+    _FAST_CONTEXTS = (const.CTX_RESOURCE, const.CTX_RESOURCE_REQ, const.CTX_RESOURCE_PRF,
+                      const.CTX_KEEPALIVE, const.CTX_CHANNEL, const.CTX_CACHE_REQUEST)
+
+    @staticmethod
+    def _relay_fast(raw, interface):
+        """_transit_link for the packets that make up a file transfer, from
+        the raw bytes: same link-table lookup, same hop-count direction
+        checks, same output, without building a Packet or hashing it (the
+        packets it handles are never deduplicated). Anything it isn't sure
+        of -- another header or context, no table entry, a hop mismatch --
+        returns False and takes the general path unchanged."""
+        if len(raw) < 19:
+            return False
+        f = raw[0]
+        # HDR_1, destination type LINK, not an announce or link request.
+        if f & 0x40 or (f >> 2) & 0x03 != const.DEST_LINK:
+            return False
+        if f & 0x03 in (const.PKT_ANNOUNCE, const.PKT_LINKREQUEST):
+            return False
+        if raw[18] not in Transport._FAST_CONTEXTS:
+            return False
+        entry = Transport.link_table.get(raw[2:18])
+        if entry is None:
+            return False
+        hops = raw[1] + 1
+        if hops > 255:
+            return False
+        nh_if = entry[const.IDX_LT_NH_IF]
+        recv_if = entry[const.IDX_LT_RECV_IF]
+        out_if = None
+        if nh_if is recv_if:
+            if hops == entry[const.IDX_LT_REM_HOPS] or hops == entry[const.IDX_LT_HOPS]:
+                out_if = nh_if
+        elif interface is nh_if:
+            if hops == entry[const.IDX_LT_REM_HOPS]:
+                out_if = recv_if
+        elif interface is recv_if:
+            if hops == entry[const.IDX_LT_HOPS]:
+                out_if = nh_if
+        if out_if is None:
+            return False
+        if not Transport._bulk_allowed(raw[2:18], out_if, raw[18], len(raw)):
+            return True            # dropped: a big transfer stays off the radio
+        Transport.transmit(out_if, raw[0:1] + bytes((hops,)) + memoryview(raw)[2:])
+        entry[const.IDX_LT_TIMESTAMP] = time.time()
+        Transport.relayed_links += 1
+        if sl(LOG_NOTICE):
+            log("Relay link " + raw[2:6].hex() + " -> " + str(out_if), LOG_NOTICE)
         return True
 
     @staticmethod
@@ -740,7 +834,8 @@ class Transport:
             signed = packet.destination_hash + peer_pub + peer_sig_pub + signalling
             return bool(peer_identity.validate(data[:SIG], signed))
         except Exception as e:
-            log("LRPROOF validation error: " + str(e), LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("LRPROOF validation error: " + str(e), LOG_DEBUG)
             return False
 
     @staticmethod
@@ -854,7 +949,8 @@ class Transport:
             gc.collect()
 
             if ifac == expected_ifac:
-                log("IFAC verified " + str(len(new_raw)) + "B on " + interface.name, LOG_DEBUG)
+                if sl(LOG_DEBUG):
+                    log("IFAC verified " + str(len(new_raw)) + "B on " + interface.name, LOG_DEBUG)
                 return new_raw
             else:
                 log("Inbound: IFAC verification failed, dropping", LOG_DEBUG)
@@ -875,7 +971,8 @@ class Transport:
             if len(raw) < 2:
                 return
 
-            log("Inbound: " + str(len(raw)) + " bytes, flags=0x" + ("%02x" % raw[0]), LOG_EXTREME)
+            if sl(LOG_EXTREME):   # the string alone costs ~0.5 ms a packet on a CAM
+                log("Inbound: " + str(len(raw)) + " bytes, flags=0x" + ("%02x" % raw[0]), LOG_EXTREME)
 
             # IFAC validation (strips access-code, returns clean raw or None)
             raw = Transport._ifac_validate(raw, interface)
@@ -883,6 +980,13 @@ class Transport:
                 return
 
             if Transport.identity is None:
+                return
+
+            # Fast relay path for file and channel traffic inside a link we
+            # carry (see _relay_fast). Measured on a CAM: forwarding one
+            # 483-byte file packet took 6.8 ms through the general path
+            # (two SHA-256s and half a dozen 480-byte copies in PSRAM).
+            if Transport.link_table and Transport._relay_fast(raw, interface):
                 return
 
             packet = Packet(destination=None, data=raw)
@@ -1094,7 +1198,8 @@ class Transport:
                     d.announce()
                     n += 1
                 except Exception as e:
-                    log("Post-sync re-announce error: " + str(e), LOG_DEBUG)
+                    if sl(LOG_DEBUG):
+                        log("Post-sync re-announce error: " + str(e), LOG_DEBUG)
         if n:
             log("Re-announced " + str(n) + " destination(s) after clock sync", LOG_NOTICE)
 
@@ -1145,7 +1250,8 @@ class Transport:
             )
             pkt.send()
             Transport._path_request_times[destination_hash] = time.time()
-            log("Path request for " + destination_hash.hex()[:8], LOG_VERBOSE)
+            if sl(LOG_VERBOSE):
+                log("Path request for " + destination_hash.hex()[:8], LOG_VERBOSE)
         except Exception as e:
             log("Path request failed: " + str(e), LOG_ERROR)
 
@@ -1247,7 +1353,8 @@ class Transport:
                     and d.type == _Dest.SINGLE):
                 try:
                     d.announce(path_response=True, attached_interface=attached_interface)
-                    log("Path request: answered local dest " + dest_hash.hex()[:8], LOG_VERBOSE)
+                    if sl(LOG_VERBOSE):
+                        log("Path request: answered local dest " + dest_hash.hex()[:8], LOG_VERBOSE)
                 except Exception as e:
                     log("Local path answer error: " + str(e), LOG_ERROR)
                 return
@@ -1260,7 +1367,8 @@ class Transport:
             raw = Transport.get_cached(entry[const.IDX_PT_ANNOUNCE])
             if raw is not None:
                 Transport._enqueue_path_response(dest_hash, raw, entry, attached_interface)
-                log("Path request: answered " + dest_hash.hex()[:8] + " from cache", LOG_VERBOSE)
+                if sl(LOG_VERBOSE):
+                    log("Path request: answered " + dest_hash.hex()[:8] + " from cache", LOG_VERBOSE)
                 return
         # 3) Unknown path -> recursively discover it (re-originate on other ifaces).
         if Transport.transport_enabled:
@@ -1296,8 +1404,10 @@ class Transport:
             try:
                 Transport.request_path(dest_hash, on_interface=iface)
             except Exception as e:
-                log("Recursive request_path error: " + str(e), LOG_DEBUG)
-        log("Path request: recursive discovery for " + dest_hash.hex()[:8], LOG_VERBOSE)
+                if sl(LOG_DEBUG):
+                    log("Recursive request_path error: " + str(e), LOG_DEBUG)
+        if sl(LOG_VERBOSE):
+            log("Path request: recursive discovery for " + dest_hash.hex()[:8], LOG_VERBOSE)
 
     # ------------------------------------------------------------------
     # Maintenance, flood-control, failover, persistence (Phase 5/6)
@@ -1372,7 +1482,8 @@ class Transport:
         while times and times[0] < cutoff:
             times.pop(0)
         if len(times) >= const.ANNOUNCE_RATE_MAX:
-            log("Announce rate limit for " + dest_hash.hex()[:8] + ", throttling", LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Announce rate limit for " + dest_hash.hex()[:8] + ", throttling", LOG_DEBUG)
             return False
         times.append(now)
         return True
@@ -1399,7 +1510,8 @@ class Transport:
         Transport.path_table.pop(dest_hash, None)
         Transport.path_states.pop(dest_hash, None)
         Transport.reachable_destinations.pop(dest_hash, None)
-        log("Expired path to " + dest_hash.hex()[:8], LOG_VERBOSE)
+        if sl(LOG_VERBOSE):
+            log("Expired path to " + dest_hash.hex()[:8], LOG_VERBOSE)
 
     @staticmethod
     def save_path_table(path):
@@ -1421,7 +1533,8 @@ class Transport:
                 ]
             with open(path, "w") as f:
                 json.dump(out, f)
-            log("Saved " + str(len(out)) + " paths to " + path, LOG_VERBOSE)
+            if sl(LOG_VERBOSE):
+                log("Saved " + str(len(out)) + " paths to " + path, LOG_VERBOSE)
         except Exception as e:
             log("save_path_table error: " + str(e), LOG_ERROR)
 
@@ -1494,12 +1607,14 @@ class Transport:
         from .identity import Identity
         valid = Identity.validate_announce(packet)
         if not valid:
-            log("Invalid announce for " + packet.destination_hash.hex(), LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Invalid announce for " + packet.destination_hash.hex(), LOG_DEBUG)
             return
 
         dest = packet.destination_hash
         if dest in Transport.blackholed_identities:
-            log("Announce from blackholed " + dest.hex()[:8] + " dropped", LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Announce from blackholed " + dest.hex()[:8] + " dropped", LOG_DEBUG)
             return
         now = time.time()
         emitted = Transport._announce_emitted(packet)
@@ -1578,7 +1693,8 @@ class Transport:
                     and packet.hops <= entry[const.IDX_PT_HOPS]):
                 entry[const.IDX_PT_TIMESTAMP] = now
                 entry[const.IDX_PT_EXPIRES] = now + const.PATH_EXPIRY
-            log("Announce " + dest.hex()[:8] + " ignored (dup/worse/older)", LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Announce " + dest.hex()[:8] + " ignored (dup/worse/older)", LOG_DEBUG)
             return
 
         log("Valid announce from " + dest.hex(), LOG_NOTICE)
@@ -1633,7 +1749,8 @@ class Transport:
         # Dispatch to app announce handlers (fires once per new emission).
         app_data = Identity.recall_app_data(dest)
         if app_data:
-            log("Announce app_data: " + str(app_data), LOG_VERBOSE)
+            if sl(LOG_VERBOSE):
+                log("Announce app_data: " + str(app_data), LOG_VERBOSE)
         for d in Transport.destinations:
             if hasattr(d, '_announce_handler') and d._announce_handler:
                 try:

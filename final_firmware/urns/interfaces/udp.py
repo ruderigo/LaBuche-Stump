@@ -47,6 +47,8 @@ def _create_socket(listen_ip, listen_port):
 
 
 class UDPInterface(Interface):
+    RX_BATCH = 32       # packets handled per wake before yielding to the event loop
+
     # Watchdog: if we've transmitted but received nothing for this many
     # seconds, assume the RX socket is broken and recreate it.
     RX_WATCHDOG_TIMEOUT = 60
@@ -125,6 +127,11 @@ class UDPInterface(Interface):
             log("Socket recreation failed: " + str(e), LOG_ERROR)
             return False
 
+    def accept(self, data, addr):
+        """Whether a received datagram is a Reticulum packet for us (always,
+        here; chain.py's interfaces use it to learn peers and drop hellos)."""
+        return True
+
     def process_outgoing(self, data):
         if not self.online or not self._socket:
             return False
@@ -202,24 +209,36 @@ class UDPInterface(Interface):
                     await asyncio.sleep(0.05)
                     continue
 
-                try:
-                    data, addr = self._socket.recvfrom(self.HW_MTU)
-                    if data:
-                        log("UDP recv " + str(len(data)) + "B from " + str(addr), LOG_DEBUG)
+                # Drain what's waiting (up to a batch) before yielding. One
+                # packet per 10 ms wake, plus a full garbage collection per
+                # packet (15 ms on a CAM), capped this interface at well
+                # under 100 packets a second -- far below what Wi-Fi and the
+                # relay can carry between chained Stumps. GC still runs
+                # every 10 s above.
+                got = 0
+                while got < self.RX_BATCH:
+                    try:
+                        data, addr = self._socket.recvfrom(self.HW_MTU)
+                    except OSError as e:
+                        eno = e.args[0] if e.args else 0
+                        if eno != 11:
+                            _err_count += 1
+                            if _err_count <= 5:
+                                log("UDP recvfrom errno=" + str(eno) + ": " + str(e), LOG_WARNING)
+                        break
+                    if not data:
+                        break
+                    got += 1
+                    if self.accept(data, addr):
                         self.process_incoming(data)
-                        self._last_rx_time = now
-                        self._watchdog_retries = 0
-                        gc.collect()
-                except OSError as e:
-                    eno = e.args[0] if e.args else 0
-                    if eno != 11:
-                        _err_count += 1
-                        if _err_count <= 5:
-                            log("UDP recvfrom errno=" + str(eno) + ": " + str(e), LOG_WARNING)
+                    self._last_rx_time = now
+                    self._watchdog_retries = 0
             except Exception as e:
                 log("UDP poll error: " + str(e), LOG_ERROR)
+                got = 0
 
-            await asyncio.sleep(0.01)  # Yield to event loop
+            # Straight back if packets were waiting; otherwise a short nap.
+            await asyncio.sleep(0 if got else 0.01)
 
         log("UDP poll loop EXITED for " + self.name, LOG_ERROR)
 

@@ -7,18 +7,10 @@ Drop-in plugin for Project Stump Beta A. Unzips to
 
 ## Install
 
-1. Unzip this folder into `final_firmware/` so you have
-   `final_firmware/fservbot/`.
-2. Add two lines to `example_node.py` — after RRC exists, before the
-   server starts serving:
-
-```python
-import fservbot.install
-fservbot.install.activate()
-```
-
-3. Add the config block (or let the provisioner write it — see
-   `plugin.json`):
+Nothing to do: it ships in `final_firmware/fservbot/`, and the node's
+plugin loader (`plugins.py`, see `docs/PLUGINS.md`) finds it at boot.
+The config block is optional (the provisioner writes it — see
+`plugin.json`):
 
 ```python
 FSERVBOT_OP_PASSWORD = ""      # blank = dialogue editing off
@@ -26,50 +18,35 @@ FSERVBOT_TRIGGER_PREFIX = "!"
 FSERVBOT_BROADCAST_MINS = 0
 ```
 
-All three are optional. A `config.py` without them runs the bot on
-defaults — config is an override here, not a dependency.
+A `config.py` without them runs the bot on defaults.
 
-Uninstall is deleting the two lines and this folder.
+Switch it off without a laptop: `/admin <password> plugin off
+fservbot`, or `/admin` → **Plugins**.
 
 ### Boot log
-
-`activate()` prints its own result, like every other component:
 
 ```
 [fservbot] active: prefix '!', 7 trigger(s), notice off
 [fservbot] no operator password set -- dialogue editing is OFF
 ```
 
-The second line only appears when the password is blank. If neither
-line appears, `activate()` was never reached.
+The second line only appears when the password is blank.
 
 ---
 
-## The one design decision worth reviewing
+## How it hooks in (plugin API 1)
 
-The bot needs to see what people type in the channel. That text
-reaches `rrc.handle_input()` via barkeep's `POST /rrc/send`, so that
-one function is the entire integration point.
+`install.py` has `setup(stump)`, which registers:
 
-`install.py` **wraps it at runtime** rather than asking you to edit
-`barkeep.py`. That keeps `barkeep.py` and `rrc.py` byte-identical to
-the files you already tested and hashed, so no existing manifest entry
-changes and there is no merge to review.
+- the `/fs*` commands — **slash only** (`trigger=False`): several carry
+  the operator password, and a `!` line is posted to the room for all to
+  read;
+- a listener for the channel triggers (`!fserv`, `!list`, …), answering
+  as the bot's own name;
+- a 30-second timer for the periodic notice.
 
-The cost, stated plainly: monkey-patching is invisible in the source of
-the file being patched. Someone reading `rrc.py` will not see that
-`handle_input` has been wrapped. It's mitigated by the boot line, a
-refusal to double-wrap, and `deactivate()` — but it's a real
-trade-off.
-
-**If you'd rather have it explicit**, the equivalent is ~8 lines in
-barkeep's `/rrc/send` branch: dispatch `/fs*` names in `core.COMMANDS`
-to `core.handle_command()`, and after a plain line that `rrc` accepted
-cleanly, call `core.maybe_respond()` and post the result with
-`rrc.post()`. Then delete `install.py`. Both paths are supported; the
-wrapper is just the one that needs nothing from you.
-
----
+Before the plugin API it wrapped `rrc.handle_input`; that wrapper, its
+re-entry guard and `deactivate()` are gone.
 
 ## Two setup surfaces, one backend
 
@@ -137,20 +114,18 @@ without a ceiling.
 | `MAX_RESPONSE_LEN` | 300 |
 | `MIN_BROADCAST_MINS` | 5 |
 
-Storage: `/sd/fservbot.json`, created on first edit. With no card,
-edits last until reboot and every command that saves says so.
+Storage: `/sd/plugins/fservbot/fservbot.json`, created on first edit
+(an older `/sd/fservbot.json` is moved there on the first boot). With
+no card, edits last until reboot and every command that saves says so.
 
 ---
 
 ## Event loop
 
-Binds nothing. Starts no task. Adds no `await`.
-
-The periodic notice is driven by chat activity, not a timer — a
-background coroutine in a cooperative single-threaded loop is exactly
-what this project's "single most important structural fact" warns
-about, and an empty room doesn't need advertising to. `maybe_broadcast`
-is a timestamp comparison on a line someone already sent.
+Binds nothing. The periodic notice runs on the plugin API's shared
+timer (every 30 s, a timestamp comparison), and only in a room where
+someone has spoken since the last notice — an empty room, or a LoRa
+mesh, is never advertised to.
 
 ---
 
@@ -163,24 +138,14 @@ is a timestamp comparison on a line someone already sent.
 - **The operator password is plain chat over plain HTTP**, like every
   other credential here. It stops a curious walk-up visitor, nothing
   stronger.
-- **Wrapping is invisible at the patch site.** See above.
 - **A `/fs*` name added to `rrc.py` later would be shadowed** by this
-  plugin, since the wrapper looks first. `core.COMMANDS` is the list to
-  check against.
+  plugin, since plugin commands are looked up first. `core.COMMANDS` is
+  the list to check against.
 
 ---
 
 ## Testing
 
-Tested against real MicroPython (1.22, Unix port) with real sockets,
-against an **unmodified** `barkeep.py` and `rrc.py`:
-
-```bash
-cd final_firmware
-micropython -c "import fservbot.core"
-micropython -c "import fservbot.install"
-```
-
-Then the server harness from the main README, with
-`fservbot.install.activate()` after the imports, and drive it with
-`curl` against `POST /rrc/send`.
+Against real MicroPython (Unix port), through `plugins.load_all()` and
+`rrc.handle_input()`; the replies are compared line by line with the
+build before the plugin API.

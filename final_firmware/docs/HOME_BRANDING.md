@@ -51,7 +51,7 @@ Everything your section uses goes in the **same `home` folder**, next to
 
 ```
 SD card
-├── tools/
+├── tools/      (the Tools page, a folder per tool)
 └── home/
     ├── home.html
     ├── home.json

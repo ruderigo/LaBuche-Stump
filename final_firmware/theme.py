@@ -14,6 +14,61 @@ entirely -- including the per-browser choice from /admin.
 """
 
 THEMES = ("amber", "phosphor", "oled", "paper")
+BUILTIN_THEMES = THEMES
+
+# Themes added by packs (docs/PACKS.md): the Provisioner writes them to
+# themes.json on the board's flash, {name: {"label", "colors"}}. Checked
+# hard -- a name is lowercase letters, digits and "-", a colour variable
+# is one of the names below and a colour is #rgb or #rrggbb -- because
+# they are written straight into every page's CSS.
+THEMES_FILE = "themes.json"
+COLOR_VARS = ("--bg", "--panel", "--ember", "--ember-bright", "--text", "--muted", "--border",
+              "--panel-2", "--line", "--dim", "--action", "--dm", "--dm-nick", "--err")
+EXTRA = {}   # name -> {"label": str|dict, "colors": {var: colour}}
+
+
+def _ok_name(n):
+    return isinstance(n, str) and 0 < len(n) <= 20 and all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in n)
+
+
+def _ok_colour(c):
+    return isinstance(c, str) and len(c) in (4, 7) and c[0] == "#" and \
+        all(ch in "0123456789abcdefABCDEF" for ch in c[1:])
+
+
+def _load_extra():
+    try:
+        import ujson as json
+    except ImportError:
+        import json
+    try:
+        with open(THEMES_FILE) as f:
+            data = json.loads(f.read())
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+    for name, t in data.items():
+        if not _ok_name(name) or name in BUILTIN_THEMES or not isinstance(t, dict):
+            continue
+        colors = t.get("colors")
+        if not isinstance(colors, dict):
+            continue
+        clean = {k: v for k, v in colors.items() if k in COLOR_VARS and _ok_colour(v)}
+        if clean:
+            EXTRA[name] = {"label": t.get("label") or name, "colors": clean}
+
+
+_load_extra()
+THEMES = BUILTIN_THEMES + tuple(sorted(EXTRA))
+
+
+def label(name, lang=None):
+    """A pack theme's display name, in the visitor's language if given."""
+    lab = EXTRA.get(name, {}).get("label", name)
+    if isinstance(lab, dict):
+        return lab.get(lang) or lab.get("en") or next(iter(lab.values()), name)
+    return str(lab)
 
 try:
     from config import THEME as _CONFIGURED
@@ -21,14 +76,85 @@ except ImportError:
     _CONFIGURED = "amber"
 
 
-def site_theme():
-    """The node's theme, validated. "default" is accepted as amber (the
-    original look), and anything unrecognised falls back to amber rather
-    than leaving pages half-styled."""
-    t = (_CONFIGURED or "amber").strip().lower()
+# The theme an admin chose for everyone from /admin, saved on the board's
+# own memory (so it works without an SD card, and an update that keeps
+# config.py keeps it too). It wins over config.py's THEME until the admin
+# goes back to "as set up", which deletes the file.
+SITE_THEME_FILE = "/site_theme.json"
+
+
+def _load_admin_file():
+    try:
+        import json
+        with open(SITE_THEME_FILE) as f:
+            d = json.load(f)
+        t = d.get("theme")
+        return (t if t in THEMES else None), int(d.get("stamp", 1))
+    except Exception:
+        return None, 0
+
+
+def _load_admin_choice():
+    return _load_admin_file()[0]
+
+
+# _STAMP counts the admin's "for everyone" changes. A browser's own pick
+# (the per-browser buttons in /admin) is saved with the stamp it was made
+# under; once the admin changes the theme for everyone, the stamp moves
+# on and every browser drops its older pick (STARTUP_SCRIPT), so "for
+# everyone" means everyone -- it used to lose, forever, to any browser
+# that had once clicked a per-browser button.
+_ADMIN_CHOICE, _STAMP = _load_admin_file()
+
+
+def _valid(t):
+    t = (t or "amber").strip().lower()
     if t == "default":
         return "amber"
     return t if t in THEMES else "amber"
+
+
+def configured_theme():
+    """config.py's THEME (what the Provisioner set up), validated."""
+    return _valid(_CONFIGURED)
+
+
+def admin_choice():
+    """The theme an admin chose for everyone, or None."""
+    return _ADMIN_CHOICE
+
+
+def set_site_theme(name):
+    """Saves an admin's choice for everyone (None: back to config.py's).
+    Returns True if it was saved."""
+    global _ADMIN_CHOICE, _STAMP
+    import json
+    if name is not None and name not in THEMES:
+        return False
+    try:
+        with open(SITE_THEME_FILE, "w") as f:
+            json.dump({"theme": name, "stamp": _STAMP + 1}, f)
+    except OSError:
+        return False
+    _ADMIN_CHOICE, _STAMP = name, _STAMP + 1
+    return True
+
+
+def site_stamp():
+    return str(_STAMP)
+
+
+def startup_script():
+    """STARTUP_SCRIPT with the current stamp, for each page's <head>."""
+    return STARTUP_SCRIPT.replace("STUMP_SITE_STAMP", "'" + str(_STAMP) + "'")
+
+
+def site_theme():
+    """The node's theme, validated: an admin's choice from /admin, else
+    config.py's. "default" is accepted as amber (the original look), and
+    anything unrecognised falls back to amber rather than leaving pages
+    half-styled."""
+    return _ADMIN_CHOICE or _valid(_CONFIGURED)
 
 
 def html_open():
@@ -72,6 +198,24 @@ CSS = """
 }
 """
 
+# Scroll bars out of sight until used: the thumb shows while something
+# scrolls (and for a moment after: STARTUP_SCRIPT adds .scrolling), and
+# while the pointer is on it in browsers that style it (Safari, older
+# Chrome). Phones already draw overlay bars of their own.
+CSS += """
+*{scrollbar-width:thin; scrollbar-color:transparent transparent;}
+.scrolling{scrollbar-color:var(--dim) transparent;}
+::-webkit-scrollbar{width:8px; height:8px; background:transparent;}
+::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent;}
+::-webkit-scrollbar-thumb{background:transparent; border-radius:4px;}
+.scrolling::-webkit-scrollbar-thumb,::-webkit-scrollbar-thumb:hover{background:var(--dim);}
+"""
+
+# Pack themes start from amber (any variable they leave out) and override.
+CSS += "".join("[data-theme='%s']{%s}\n" % (n, " ".join("%s:%s;" % kv for kv in sorted(t["colors"].items())))
+               for n, t in sorted(EXTRA.items()))
+
+
 # Runs in <head>, before the body renders. The server has already set
 # data-theme to the site theme; this only applies a per-browser
 # override from /admin, if one exists. Each localStorage access is
@@ -79,12 +223,28 @@ CSS = """
 # stored value must never take a page down over a cosmetic preference.
 STARTUP_SCRIPT = """
 (function(){
+  // Show a scroll bar only while its box scrolls (see .scrolling in CSS).
+  document.addEventListener('scroll', function(e){
+    var el = (e.target === document) ? document.documentElement : e.target;
+    if (!el || !el.classList) return;
+    el.classList.add('scrolling');
+    clearTimeout(el._stumpScroll);
+    el._stumpScroll = setTimeout(function(){ el.classList.remove('scrolling'); }, 900);
+  }, true);
+})();
+(function(){
   try {
     var t = localStorage.getItem('stump_theme');
+    if (t && localStorage.getItem('stump_theme_stamp') !== STUMP_SITE_STAMP) {
+      // Picked before the admin last set the theme for everyone: drop it.
+      localStorage.removeItem('stump_theme');
+      localStorage.removeItem('stump_theme_stamp');
+      t = null;
+    }
     if (t === 'custom') {
       var c = JSON.parse(localStorage.getItem('stump_custom_colors') || '{}');
       for (var k in c) document.documentElement.style.setProperty(k, c[k]);
-    } else if (t === 'amber' || t === 'phosphor' || t === 'oled' || t === 'paper') {
+    } else if (STUMP_THEME_NAMES.indexOf(t) >= 0) {
       document.documentElement.setAttribute('data-theme', t);
     }
   } catch (e) {}
@@ -102,3 +262,7 @@ STARTUP_SCRIPT = """
   } catch (e) {}
 })();
 """
+
+# The names a browser may pick from /admin (built-in and pack themes).
+STARTUP_SCRIPT = STARTUP_SCRIPT.replace(
+    "STUMP_THEME_NAMES", "[" + ",".join("'" + n + "'" for n in THEMES) + "]")

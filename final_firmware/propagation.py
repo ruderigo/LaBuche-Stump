@@ -423,6 +423,9 @@ def _deliver_here(lxm, destination, to_mailbox):
     if plain is None:
         return
     message = LXMessage.unpack_from_bytes(lxm[:DEST_LEN] + plain)
+    if message.unverified_reason == LXMessage.SIGNATURE_INVALID:
+        print("[propagation] dropped a message whose signature doesn't match its sender")
+        return
     stats["local"] += 1
     if to_mailbox:
         _mailbox_inbox.append({"text": message.content_as_string() or "",

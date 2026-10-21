@@ -45,6 +45,10 @@ except ImportError:
 # silently stale.
 
 STORAGE_FILE = "/sd/stumpid.json"
+# The access settings changed live (/admin ... mode, /admin ... room), kept
+# across restarts and power cuts. Set by install.py (on the card, or on
+# the board's flash without one); None = not kept (tests of core alone).
+STATE_FILE = None
 
 # A challenge is only good for this long and only good once. Both limits
 # matter: an unbounded window lets a captured nonce sit around waiting to
@@ -293,6 +297,47 @@ def is_verified(client_id):
     return client_id in _verified_this_session
 
 
+def _is_mesh_client(client_id):
+    """A FireFly over LoRa: its client_id is its LXMF address (32 hex
+    characters, never an IP), and a node that isn't open only takes its
+    messages when their signature checks out (rrc_mesh.on_message) -- it
+    has answered for its identity on every message."""
+    s = str(client_id or "")
+    return len(s) == 32 and all(c in "0123456789abcdef" for c in s)
+
+
+def _identified(client_id):
+    return is_verified(client_id) or _is_mesh_client(client_id)
+
+
+# The three access modes:
+#   open       everyone reads and writes, everywhere
+#   hybrid     everyone reads every room; anyone writes in #main; writing
+#              anywhere else (other rooms, private messages) takes a
+#              verified identity -- the /auth challenge, which a FireFly
+#              answers
+#   mandatory  reading and writing both take a verified identity
+# A FireFly over LoRa counts as verified: a node that isn't open only
+# takes its messages when their signature checks out.
+def _free_rooms():
+    try:
+        import rrc as _r
+        return (_r.DEFAULT_ROOM,)
+    except Exception:
+        return ("main",)
+
+
+def hybrid_free(room):
+    """Hybrid: may anyone write in this room? (#main only.)"""
+    return _canon(str(room or "").lstrip("#").lower()) in _free_rooms()
+
+
+def can_read(client_id):
+    """May this client read the rooms and its private messages? Everyone,
+    except in mandatory mode, where it takes a verified identity."""
+    return AUTH_MODE != "mandatory" or _identified(client_id)
+
+
 # ---------------------------------------------------------------------
 # Mode gating
 # ---------------------------------------------------------------------
@@ -307,7 +352,28 @@ _ALWAYS_ALLOWED = ("auth", "whoami", "help")
 _WRITE_COMMANDS = ("join", "part", "msg", "me", "topic")
 
 
-def requires_verification(client_id, text):
+def _hybrid_blocks(client_id, text, room):
+    """Hybrid: anyone is in any room and writes in #main; writing in any
+    other room, and private messages, take a verified identity (or a
+    FireFly over LoRa, signed)."""
+    if _identified(client_id):
+        return False
+    stripped = text.strip()
+    if not stripped.startswith("/"):
+        return room is None or not hybrid_free(room)
+    rest = stripped[1:].split(" ", 1)
+    cmd = rest[0].lower()
+    arg = rest[1].strip() if len(rest) > 1 else ""
+    if cmd in _ALWAYS_ALLOWED or cmd in ("join", "j", "part", "leave"):
+        return False                # being in a room is reading: allowed
+    if cmd == "me":
+        return room is None or not hybrid_free(room)
+    if cmd == "topic":
+        return bool(arg) and (room is None or not hybrid_free(room))
+    return cmd in _WRITE_COMMANDS   # /msg: a private message
+
+
+def requires_verification(client_id, text, room=None):
     """True if this input should be blocked pending verification, under
     the node's current AUTH_MODE.
 
@@ -316,8 +382,10 @@ def requires_verification(client_id, text):
     """
     if AUTH_MODE == "open":
         return False
-    if is_verified(client_id):
+    if _identified(client_id):
         return False
+    if AUTH_MODE == "hybrid":
+        return _hybrid_blocks(client_id, text, room)
 
     stripped = text.strip()
     if not stripped.startswith("/"):
@@ -393,12 +461,71 @@ def set_mode(new_mode):
     if new_mode not in ("open", "mandatory", "hybrid"):
         return False
     AUTH_MODE = new_mode
+    _save_state()
     return True
+
+
+def _save_state():
+    """Writes the live access settings (mode, room tiers) to STATE_FILE,
+    whole or not at all (a temporary file, then a rename), so a power cut
+    mid-write leaves the previous settings. Room invites aren't kept:
+    they're tied to a visitor's address, which changes anyway."""
+    if not STATE_FILE:
+        return
+    data = {"mode": AUTH_MODE, "rooms": {r: p["tier"] for r, p in _room_policy.items()}}
+    tmp = STATE_FILE + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.rename(tmp, STATE_FILE)       # replaces, on FAT too (MicroPython)
+    except OSError as e:
+        print("[stumpid] couldn't save the access settings:", e)
+
+
+def load_state():
+    """Restores what _save_state() kept, at start-up. Returns True if
+    anything was restored."""
+    global AUTH_MODE
+    if not STATE_FILE:
+        return False
+    try:
+        os.remove(STATE_FILE + ".tmp")    # a save a power cut interrupted
+    except OSError:
+        pass
+    try:
+        with open(STATE_FILE) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    mode = data.get("mode")
+    if mode in ("open", "mandatory", "hybrid"):
+        AUTH_MODE = mode
+    for room, tier in (data.get("rooms") or {}).items():
+        if tier in VALID_TIERS and tier != "open":
+            _room_policy[_canon(room)] = {"tier": tier, "invited": set()}
+    return True
+
+
+def reset_access():
+    """Back to config.py's access settings: the mode from config.py, no
+    room tiers, and the saved settings forgotten."""
+    global AUTH_MODE
+    _room_policy.clear()
+    try:
+        from config import AUTH_MODE as _cfg_mode
+        AUTH_MODE = _cfg_mode
+    except ImportError:
+        AUTH_MODE = "open"
+    if STATE_FILE:
+        try:
+            os.remove(STATE_FILE)
+        except OSError:
+            pass
 
 
 def mesh_landing_room(client_id):
     """The room a mesh peer should land in on first contact: rrc.MESH_ROOM
-    ("#lxmf"), always -- not a name this module chooses or configures.
+    ("#lora-mesh", once "#lxmf"), always -- not a name this module chooses or configures.
     That room exists unconditionally now (seeded in rrc.py exactly like
     #main), so there is nothing to set up first; a fresh, unconfigured
     node already has it. Auth is secondary to this, not a precondition
@@ -456,9 +583,18 @@ _room_policy = {}
 VALID_TIERS = ("open", "minted", "hybrid")
 
 
+def _canon(room):
+    """A room's current name (#lxmf became #lora-mesh)."""
+    try:
+        import rrc as _r
+        return _r.canon(room)
+    except Exception:
+        return room
+
+
 def room_tier(room):
     """'open' unless a stricter tier was explicitly set."""
-    pol = _room_policy.get(room)
+    pol = _room_policy.get(_canon(room))
     return pol["tier"] if pol else "open"
 
 
@@ -473,11 +609,13 @@ def set_room_tier(room, tier):
     """
     if tier not in VALID_TIERS:
         return False
+    room = _canon(room)
     if tier == "open":
         _room_policy.pop(room, None)
     else:
         pol = _room_policy.setdefault(room, {"tier": tier, "invited": set()})
         pol["tier"] = tier
+    _save_state()
     return True
 
 
@@ -497,7 +635,7 @@ def invite_to_room(room, target_client_id):
     room is a no-op (invites don't apply there -- only a verified
     identity ever qualifies). Returns (ok, reason_if_not).
     """
-    pol = _room_policy.get(room)
+    pol = _room_policy.get(_canon(room))
     if pol is None or pol["tier"] != "hybrid":
         # A plain internal marker, NOT user-facing text: this function
         # only has target_client_id in scope, but the reply goes to
@@ -534,6 +672,10 @@ def can_join_room(client_id, room):
     broader gate already blocked an unverified client before this
     point is ever reached.
     """
+    if AUTH_MODE == "mandatory" and not hybrid_free(room) and not _identified(client_id):
+        # Reading takes it too. #main stays the place everyone is (what
+        # they see there is held back by can_read()).
+        return False, "needs_verified"
     tier = room_tier(room)
     if tier == "open":
         return True, None
@@ -549,7 +691,7 @@ def can_join_room(client_id, room):
         return False, "needs_verified"
 
     # tier == "hybrid"
-    pol = _room_policy.get(room)
+    pol = _room_policy.get(_canon(room))
     if pol and client_id in pol.get("invited", ()):
         return True, None
     return False, "invite_only"

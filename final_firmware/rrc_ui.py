@@ -23,6 +23,7 @@ import rrc
 import theme
 import features
 import i18n
+import radio
 
 STYLE = """
 *{box-sizing:border-box;}
@@ -62,10 +63,54 @@ header b{color:var(--ember);}
   color:var(--ember-bright); border-color:var(--ember); outline:none;
 }
 main{flex:1; display:flex; min-height:0;}
-#rooms{
-  width:132px; border-right:1px solid var(--border); background:var(--panel-2);
-  overflow-y:auto; flex-shrink:0;
+/* The left column runs to the bottom of the window: rooms and people
+   above, the profile (you, this Stump, its radio) below. */
+#side{
+  width:132px; background:var(--panel-2); flex-shrink:0;
+  display:flex; flex-direction:column; min-height:0;
 }
+#rooms{flex:1; overflow-y:auto; min-height:0;}
+#chatcol{flex:1; display:flex; flex-direction:column; min-width:0; min-height:0;}
+#profile{border-top:1px solid var(--border); position:relative;}
+#me-btn{display:flex; align-items:center; gap:8px; width:100%; padding:10px; background:none; border:none;
+  border-radius:0; color:var(--ember-bright); font:inherit; font-weight:bold; text-align:left; cursor:pointer;}
+#me-btn:hover,#me-btn[aria-expanded=true]{background:var(--line);}
+#me{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;}
+/* The details, over the chat, anchored to the name. */
+#pop{position:absolute; left:8px; bottom:calc(100% + 6px); z-index:20; width:280px; max-width:calc(100vw - 24px);
+  max-height:calc(100dvh - 140px); overflow-y:auto;
+  background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px 14px;
+  box-shadow:0 8px 24px rgba(0,0,0,.35); font-size:12px; color:var(--muted);}
+#pop .ph{font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:10px 0 4px;}
+#pop .ph:first-child{margin-top:0;}
+#pop .pv{color:var(--text); overflow-wrap:anywhere;}
+#pop form{display:flex; gap:6px;}
+#pop input{flex:1; min-width:0; background:var(--bg); color:var(--text); border:1px solid var(--border);
+  border-radius:6px; padding:6px 8px; font:inherit;}
+#pop button{padding:6px 10px; font-size:12px;}
+#pop .radio{display:flex; gap:8px; align-items:baseline; color:var(--text); width:100%; text-align:left;
+  background:none; border:none; padding:4px 0; font:inherit; font-size:12px; font-weight:normal; cursor:default;}
+#pop button.radio{cursor:pointer; border-radius:6px;}
+#pop button.radio:hover{background:var(--line);}
+#pop .radio .chev{margin-left:auto; color:var(--ember); white-space:nowrap;}
+#pop .radio-edit{display:grid; gap:6px; margin-top:8px; padding-top:8px; border-top:1px solid var(--line);}
+#pop .radio-edit label{display:grid; gap:2px; color:var(--muted);}
+#pop .radio-edit select{background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:6px;
+  padding:5px 6px; font:inherit;}
+#pop .radio-edit .note{margin:0; color:var(--muted);}
+#pop .radio-edit small{color:var(--dim);}
+#pop .radio-edit .msg{margin:0; min-height:1em;}
+#pop .radio-edit .msg.ok{color:#3fb950;} #pop .radio-edit .msg.bad{color:var(--err);}
+#pop .radio .hw-dot{position:relative; top:1px;}
+#pop .radio small{display:block; color:var(--muted); overflow-wrap:anywhere;}
+/* The radio's state, by your name: green online, white no radio
+   needed, glowing orange connecting, red trouble. */
+.hw-dot{width:10px; height:10px; border-radius:50%; flex-shrink:0;
+  border:1px solid var(--border); background:#f2efe8;}
+.hw-dot.online{background:#3fb950; border-color:#3fb950;}
+.hw-dot.connecting{background:#f0a030; border-color:#f0a030; animation:hwglow 1.2s ease-in-out infinite;}
+.hw-dot.error{background:#e5534b; border-color:#e5534b;}
+@keyframes hwglow{0%,100%{box-shadow:0 0 0 0 rgba(240,160,48,.7);}50%{box-shadow:0 0 8px 3px rgba(240,160,48,.9);}}
 #rooms div{padding:7px 10px; cursor:pointer; border-bottom:1px solid var(--line);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 #rooms div:hover{background:var(--line);}
@@ -118,8 +163,14 @@ button{
   padding:9px 16px; font-family:inherit; font-weight:bold; cursor:pointer;
 }
 button:hover{background:var(--ember-bright);}
+/* The bar between the room list and the chat: drag it to widen the list
+   (long names stop being cut), double-click it to put it back. */
+#grip{width:7px; flex-shrink:0; cursor:col-resize; touch-action:none; align-self:stretch;
+  background:var(--panel-2); border-right:1px solid var(--border);}
+#grip:hover,#grip.drag{background:var(--ember);}
+#rooms .mark{margin-right:5px;}
 @media (max-width:520px){
-  #rooms{width:96px;}
+  #side{width:96px;}
   header{font-size:13px;}
 }
 /* Language switcher, sitting just below the header. Small and out of
@@ -152,6 +203,34 @@ button:hover{background:var(--ember-bright);}
 SCRIPT = """
 var room=ROOM_INIT, lastId=0, nick=NICK_INIT, polling=false, pollAgain=false;
 var log=document.getElementById('log');
+(function(){
+  // Drag the bar to size the room list; remembered on this device.
+  var side=document.getElementById('side'), grip=document.getElementById('grip');
+  if(!side || !grip) return;
+  try{ var w=parseInt(localStorage.getItem('rrcSideW'),10); if(w>0) side.style.width=w+'px'; }catch(e){}
+  function clamp(w){ return Math.max(80, Math.min(Math.round(window.innerWidth*0.7), w)); }
+  grip.addEventListener('pointerdown', function(e){
+    e.preventDefault();
+    var x0=e.clientX, w0=side.offsetWidth;
+    grip.classList.add('drag');
+    try{ grip.setPointerCapture(e.pointerId); }catch(err){}
+    function move(ev){ side.style.width=clamp(w0+ev.clientX-x0)+'px'; }
+    function up(){
+      grip.classList.remove('drag');
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      grip.removeEventListener('pointercancel', up);
+      try{ localStorage.setItem('rrcSideW', side.offsetWidth); }catch(err){}
+    }
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointercancel', up);
+  });
+  grip.addEventListener('dblclick', function(){
+    side.style.width='';
+    try{ localStorage.removeItem('rrcSideW'); }catch(err){}
+  });
+})();
 // DM thread state -- purely client-side and session-scoped, since the
 // server has no concept of "threads": it just delivers a flat inbox
 // per recipient (rrc.py's _dms). Grouping by sender, tracking unread
@@ -177,14 +256,163 @@ function adoptThread(exact){
     }
   }
 }
+// Someone known by a new name (the server's "renamed": old -> new, e.g. a
+// FireFly's new nickname, or its LoRa name giving way to its Wi-Fi one):
+// the thread under the old name is theirs, folded into the new one.
+function followRenames(map){
+  for(var old in map){
+    var nu=map[old];
+    if(!nu || nu===old || !dmThreads[old]) continue;
+    dmThreads[nu]=dmThreads[old].concat(dmThreads[nu]||[]);   // (the old name's part came first)
+    delete dmThreads[old];
+    if(dmUnread[old]){ dmUnread[nu]=(dmUnread[nu]||0)+dmUnread[old]; delete dmUnread[old]; }
+    if(viewingDM===old){ viewingDM=nu; if(typeof openDM==='function') openDM(nu); }
+  }
+}
 function stumpTag(el, name){
-  // A separate element, never part of the name: the name is what
-  // /msg and openDM use, so it has to stay exactly the nick.
+  // A log in front of another Stump of the chain. A separate element,
+  // never part of the name: the name is what /msg and openDM use, so it
+  // has to stay exactly the nick.
+  el.title=name;               // the whole name, when the column cuts it
   if(!stumps[name]) return;
   var t=document.createElement('span');
-  t.className='tag';
-  t.textContent='stump';
-  el.appendChild(t);
+  t.className='mark';
+  t.textContent='\\ud83e\\udeb5';
+  el.insertBefore(t, el.firstChild);
+}
+var lastUsers=[];
+var PROF=I18N_PROFILE, HWT=I18N_HW, RAD=I18N_RADIO, registered=false, nodeInfo=null, hwInfo=null, radioOpen=false, radioMsg='';
+function setHw(h){
+  // The status dot by your name, at the foot of the column.
+  hwInfo=h;
+  var dot=document.getElementById('hw');
+  if(dot){ dot.className='hw-dot '+h.state; dot.title=HWT[h.state]||h.state; }
+}
+function renderProfile(force){
+  var me=document.getElementById('me');
+  if(me && me.textContent!==nick) me.textContent=nick;
+  var p=document.getElementById('pop');
+  if(!p || p.hidden) return;
+  // Not under someone typing or setting the radio: polls leave it alone.
+  if(!force && (radioOpen || (document.activeElement && p.contains(document.activeElement)))) return;
+  p.innerHTML='';
+  function head(t){ var d=document.createElement('div'); d.className='ph'; d.textContent=t; p.appendChild(d); }
+  function val(t){ var d=document.createElement('div'); d.className='pv'; d.textContent=t; p.appendChild(d); return d; }
+  head(PROF.you);
+  var f=document.createElement('form');
+  var i=document.createElement('input'); i.id='pnick'; i.value=nick; i.maxLength=16; i.setAttribute('aria-label', PROF.nick);
+  var b=document.createElement('button'); b.type='submit'; b.textContent=PROF.set;
+  f.appendChild(i); f.appendChild(b);
+  f.onsubmit=function(e){ e.preventDefault(); var v=i.value.trim(); if(v && v!==nick){ send('/nick '+v); } i.blur(); closePop(); };
+  p.appendChild(f);
+  var pl=document.createElement('a'); pl.href='/profile'; pl.className='pv';
+  pl.textContent=registered?PROF.mine:PROF.reg; p.appendChild(pl);
+  if(nodeInfo){
+    head(PROF.stump);
+    val(nodeInfo.name||'?');
+    if(nodeInfo.lxmf){ var l=val(nodeInfo.lxmf); l.style.color='var(--muted)'; }
+  }
+  head(PROF.radio);
+  var st=hwInfo?hwInfo.state:'none';
+  var lines=(hwInfo && hwInfo.title)?hwInfo.title.split('\\n'):[''];
+  var hasRadio=!!(hwInfo && hwInfo.settings);
+  lines.forEach(function(l){
+    var r=document.createElement(hasRadio?'button':'div'); r.className='radio';
+    if(hasRadio){ r.type='button'; r.setAttribute('aria-expanded', radioOpen?'true':'false');
+      r.onclick=function(){ radioOpen=!radioOpen; radioMsg=''; renderProfile(true); }; }
+    var d=document.createElement('span'); d.className='hw-dot '+st;
+    var t=document.createElement('div'); t.textContent=HWT[st]||st;
+    if(l){ var sm=document.createElement('small'); sm.textContent=l; t.appendChild(sm); }
+    r.appendChild(d); r.appendChild(t);
+    if(hasRadio){ var c=document.createElement('span'); c.className='chev'; c.textContent=radioOpen?'\u25be':RAD.tap+' \u25b8'; r.appendChild(c); }
+    p.appendChild(r);
+  });
+  if(hasRadio && radioOpen) p.appendChild(radioEditor(hwInfo.settings, hwInfo.edit));
+}
+function radioEditor(cur, can){
+  // The radio's settings, under its row: the pop-up grows. Only whoever
+  // runs the Stump may apply them (/admin/radio.json checks it again).
+  var box=document.createElement('form'); box.className='radio-edit';
+  var note=document.createElement('p'); note.className='note'; note.textContent=can?RAD.intro:RAD.owner; box.appendChild(note);
+  function row(label, ctl){ var l=document.createElement('label'); l.textContent=label; l.appendChild(ctl); box.appendChild(l); return ctl; }
+  function sel(name, values, value, fmt){
+    var s=document.createElement('select'); s.name=name;
+    values.forEach(function(v){ var o=document.createElement('option'); o.value=v; o.textContent=fmt?fmt(v):v; if(v===value) o.selected=true; s.appendChild(o); });
+    return s;
+  }
+  function range(a,b){ var r=[]; for(var x=a;x<=b;x++) r.push(x); return r; }
+  var f=document.createElement('input'); f.name='freq'; f.inputMode='decimal'; f.value=(cur.frequency/1e6).toFixed(3);
+  f.setAttribute('list','freqs');
+  var dl=document.createElement('datalist'); dl.id='freqs';
+  ['915.000','868.000','869.525','433.000'].forEach(function(v){ var o=document.createElement('option'); o.value=v; dl.appendChild(o); });
+  row(RAD.freq, f); box.appendChild(dl);
+  var hint=document.createElement('small'); hint.textContent=RAD.presets; box.appendChild(hint);
+  row(RAD.bw, sel('bw', RAD.bandwidths, cur.bandwidth, function(v){ return (v/1000)+' kHz'; }));
+  row(RAD.sf, sel('sf', range(RAD.sf_range[0], RAD.sf_range[1]), cur.sf));
+  row(RAD.cr, sel('cr', range(RAD.cr_range[0], RAD.cr_range[1]), cur.cr, function(v){ return '4/'+v; }));
+  var tx=document.createElement('input'); tx.name='txp'; tx.type='number'; tx.min=RAD.txp_range[0]; tx.max=RAD.txp_range[1]; tx.value=cur.txpower;
+  row(RAD.txp, tx);
+  var go=document.createElement('button'); go.type='submit'; go.textContent=RAD.apply; box.appendChild(go);
+  var msg=document.createElement('p'); msg.className='msg'; msg.textContent=radioMsg; box.appendChild(msg);
+  if(!can){ Array.prototype.forEach.call(box.querySelectorAll('input,select,button'), function(e){ e.disabled=true; }); }
+  box.onsubmit=function(e){
+    e.preventDefault();
+    var body=['freq','bw','sf','cr','txp'].map(function(k){ return k+'='+encodeURIComponent(box.elements[k].value); }).join('&');
+    go.disabled=true;
+    fetch('/admin/radio.json',{method:'POST',body:body,credentials:'same-origin',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'}})
+      .then(function(r){ return r.json(); })
+      .then(function(d){ radioMsg=d.message||''; msg.textContent=radioMsg; msg.className='msg '+(d.ok?'ok':'bad'); })
+      .catch(function(){ msg.textContent='\u2715'; })
+      .then(function(){ go.disabled=false; });
+  };
+  return box;
+}
+function closePop(){
+  var p=document.getElementById('pop'), btn=document.getElementById('me-btn');
+  if(p){ p.hidden=true; } if(btn){ btn.setAttribute('aria-expanded','false'); }
+}
+(function(){
+  var btn=document.getElementById('me-btn'), p=document.getElementById('pop');
+  if(!btn || !p) return;
+  btn.setAttribute('aria-expanded','false');
+  btn.onclick=function(e){
+    e.stopPropagation();
+    if(p.hidden){ p.hidden=false; btn.setAttribute('aria-expanded','true'); radioOpen=false; renderProfile(true); }
+    else closePop();
+  };
+  p.onclick=function(e){ e.stopPropagation(); };
+  document.addEventListener('click', closePop);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') closePop(); });
+})();
+function renderStumps(){
+  // The other Stumps, together at the bottom of the column (with their
+  // DM threads, if any), after the people.
+  var old=document.getElementById('stump-section');
+  if(old) old.remove();
+  var box=document.getElementById('rooms');
+  if(!box) return;
+  var seen={}, names=[];
+  lastUsers.concat(Object.keys(dmThreads)).forEach(function(u){
+    if(stumps[u] && u!==nick && !seen[u]){ seen[u]=1; names.push(u); }
+  });
+  if(names.length===0) return;
+  var sec=document.createElement('div');
+  sec.id='stump-section';
+  var hdr=document.createElement('div');
+  hdr.className='dm-header';
+  hdr.textContent=I18N_STUMPS;
+  sec.appendChild(hdr);
+  names.sort().forEach(function(u){
+    var unread=dmUnread[u]||0;
+    var d=document.createElement('div');
+    d.className='dm-entry'+(viewingDM===u?' active':'')+(unread>0?' unread':'');
+    d.textContent=u+(unread>0?' ('+unread+')':'');
+    stumpTag(d, u);
+    d.onclick=function(){ openDM(u); };
+    sec.appendChild(d);
+  });
+  box.appendChild(sec);
 }
 var inp=document.getElementById('in');
 // The most recent user list from a poll, in each person's own
@@ -236,6 +464,19 @@ function updateVoiceButton(){ vbtn.style.display = viewingDM ? '' : 'none'; }
 function liveMic(){
   return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
 }
+// With a certificate, the chat stays on plain HTTP (its polls are free
+// there) and the microphone opens in a small HTTPS window, /rrc/rec, that
+// records and hands the audio back here (postMessage). Only if this phone
+// accepts the certificate: checked once, quietly, like the old upgrade.
+var REC_URL=REC_URL_INIT, recOrigin=REC_URL ? REC_URL.split('/').slice(0,3).join('/') : '', recOk=false, recTo=null;
+if(REC_URL && !window.isSecureContext){
+  fetch(recOrigin+'/tls-ok',{mode:'no-cors',cache:'no-store'}).then(function(){ recOk=true; }, function(){});
+}
+window.addEventListener('message', function(e){
+  if(!recOrigin || e.origin!==recOrigin || !e.data || !e.data.stumpVoice || !recTo) return;
+  var to=recTo; recTo=null;
+  sendVoiceFrom(e.data.stumpVoice, to);
+});
 function voiceState(busy){
   voiceBusy=busy; vbtn.disabled=busy; vbtn.textContent = busy ? '\u22ef' : '\u266a';
 }
@@ -293,8 +534,8 @@ function prepVoice(ab, rate){
   for(k=0;k<outN;k++){ var z=Math.max(-1, Math.min(1, y[k]*gain)); out[k]=Math.round(z*32767); }
   return out;
 }
-function sendVoiceFrom(buf){
-  var to=viewingDM;
+function sendVoiceFrom(buf, toNick){
+  var to=toNick||viewingDM;
   if(!to) return;
   voiceState(true);
   var decoded=decodeAny(buf).then(null, function(){ throw 'unreadable'; });
@@ -326,7 +567,15 @@ function voiceFailed(){ line(esc(VOICE.unreadable),'err'); voiceState(false); }
 vbtn.onclick=function(){
   if(voiceRec){ voiceRec.stop(); return; }
   if(voiceBusy) return;
-  if(!liveMic()){ vfile.click(); return; }
+  if(!liveMic()){
+    if(recOk){
+      recTo=viewingDM;
+      var w=window.open(REC_URL+'?o='+encodeURIComponent(location.origin), 'stumprec', 'width=380,height=440');
+      if(w) return;
+      recTo=null;               // pop-up blocked: the recorder app instead
+    }
+    vfile.click(); return;
+  }
   navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
     voiceChunks=[]; voiceRec=new MediaRecorder(stream);
     voiceRec.ondataavailable=function(e){ if(e.data && e.data.size) voiceChunks.push(e.data); };
@@ -478,7 +727,8 @@ function renderUserList(users){
   // two different actions. Someone you already have a thread with is
   // reachable from that thread already; this list is specifically for
   // starting a NEW one.
-  var others=(users||[]).filter(function(u){ return u!==nick && !dmThreads[u]; });
+  lastUsers=users||[];
+  var others=lastUsers.filter(function(u){ return u!==nick && !dmThreads[u] && !stumps[u]; });
   if(others.length===0) return;
   var sec=document.createElement('div');
   sec.id='user-section';
@@ -506,7 +756,8 @@ function renderDMSidebar(){
   var dmBox=document.getElementById('dm-section');
   if(!dmBox) return;
   dmBox.innerHTML='';
-  var senders=Object.keys(dmThreads);
+  var senders=Object.keys(dmThreads).filter(function(s){ return !stumps[s]; });
+  renderStumps();
   if(senders.length===0) return;
   var hdr=document.createElement('div');
   hdr.className='dm-header';
@@ -568,6 +819,7 @@ function poll(){
        if(m.id<=lastId) return;
        if(!viewingDM) render(m);
      });
+     if(d.renamed) followRenames(d.renamed);
      (d.dms||[]).forEach(function(m){
        if(m.id>maxId) maxId=m.id;
        // DMs are remembered by id, not by lastId alone: switching rooms
@@ -586,9 +838,13 @@ function poll(){
      });
      lastId=maxId;
      if(d.stumps){ stumps={}; d.stumps.forEach(function(n){ stumps[n]=1; }); }
+     if(d.hw) setHw(d.hw);
+     if(d.node) nodeInfo=d.node;
+     registered=!!d.registered;
      if(d.rooms) setRooms(d.rooms, room, d.users); else renderDMSidebar();
      if(d.topic!==undefined) document.getElementById('topic').textContent=d.topic?('— '+d.topic):'';
-     if(d.nick && d.nick!==nick){ nick=d.nick; document.getElementById('me').textContent=nick; }
+     if(d.nick && d.nick!==nick){ nick=d.nick; }
+     renderProfile();
      onPollOk();
    })
    .catch(function(){ onPollFail(); })
@@ -629,7 +885,7 @@ function send(text){
   // mirrors rrc.py's own parsing exactly (arg.split(" ", 1) there,
   // same nick-then-rest-of-line shape here) so what this recognizes as
   // a DM is exactly what the server will actually treat as one.
-  var directMsgMatch=(!isDMReply) && text.match(/^\/(?:msg|m|w)\s+(\S+)\s+([\s\S]+)/i);
+  var directMsgMatch=(!isDMReply) && text.match(/^\\/(?:msg|m|w)\\s+(\\S+)\\s+([\\s\\S]+)/i);
   var outgoing=isDMReply ? ('/msg '+viewingDM+' '+text) : text;
   fetch('/rrc/send',{method:'POST',body:outgoing})
    .then(function(r){return r.json();})
@@ -790,13 +1046,16 @@ def _nav_links(lang):
     # Only features this node offers (features.py); home and tools always.
     # The same order as every other page's row (barkeep.NAV_ORDER: chat,
     # billboard, files, tools, about, home), minus chat itself.
-    items = (
-        ("billboard", "/billboard", "Billboard", _NAV_BOARD, "nav_board"),
-        ("files", "/files", "Files", _NAV_FILES, "nav_files"),
-        (None, "/tools", "Tools", _NAV_TOOLS, "nav_tools"),
-        ("about", "/about", "About", _NAV_ABOUT, "nav_about"),
-        (None, "/", "Home", _NAV_HOME, "nav_home"),
-    )
+    import layout
+    by_key = {
+        "board": ("billboard", "/billboard", "Billboard", _NAV_BOARD, "nav_board"),
+        "files": ("files", "/files", "Files", _NAV_FILES, "nav_files"),
+        "tools": (None, "/tools", "Tools", _NAV_TOOLS, "nav_tools"),
+        "about": ("about", "/about", "About", _NAV_ABOUT, "nav_about"),
+        "home": (None, "/", "Home", _NAV_HOME, "nav_home"),
+    }
+    # In the admin's order (layout.py), like every other page's row.
+    items = [by_key[k] for k in layout.nav() if k in by_key]
     return (
         "<nav class='nav'>"
         + "".join(
@@ -824,7 +1083,7 @@ def _esc(s):
              .replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;"))
 
 
-def render_page(room, nick, lang=None):
+def render_page(room, nick, lang=None, rec_url=None):
     """The whole client, one self-contained page.
 
     room/nick go through json.dumps, not hand-written quotes: clean_nick
@@ -839,10 +1098,23 @@ def render_page(room, nick, lang=None):
     if lang is None:
         lang = i18n.DEFAULT_LANG
     script = (SCRIPT
+              .replace("REC_URL_INIT", _js(rec_url or ""))
               .replace("ROOM_INIT", _js(room))
               .replace("NICK_INIT", _js(nick))
               .replace("I18N_MESSAGE_SOMEONE", _js(i18n.t("rrc_message_someone", lang)))
               .replace("I18N_DIRECT_MESSAGES", _js(i18n.t("rrc_direct_messages", lang)))
+              .replace("I18N_STUMPS", _js(i18n.t("rrc_stumps", lang)))
+              .replace("I18N_PROFILE", _js({k: i18n.t("rrc_profile_" + k, lang)
+                                            for k in ("you", "nick", "set", "stump", "radio", "reg", "mine")}))
+              .replace("I18N_HW", _js({k: i18n.t("rrc_hw_" + k, lang)
+                                       for k in ("none", "online", "connecting", "error")}))
+              .replace("I18N_RADIO", _js(dict(
+                  {k: i18n.t(v, lang) for k, v in (("tap", "rrc_radio_tap"), ("owner", "rrc_radio_owner_only"),
+                                                   ("presets", "rrc_radio_presets"), ("intro", "rrc_radio_same"),
+                                                   ("freq", "radio_freq"), ("bw", "radio_bw"), ("sf", "radio_sf"),
+                                                   ("cr", "radio_cr"), ("txp", "radio_txp"), ("apply", "admin_radio_save"))},
+                  bandwidths=list(radio.BANDWIDTHS), sf_range=[radio.SF_MIN, radio.SF_MAX],
+                  cr_range=[radio.CR_MIN, radio.CR_MAX], txp_range=[radio.TXP_MIN, radio.TXP_MAX])))
               .replace("I18N_NOT_SENT", _js(i18n.t("rrc_not_sent", lang)))
               .replace("I18N_VOICE", _js({"record": i18n.t("voice_record", lang),
                   "unreadable": i18n.t("voice_unreadable", lang), "recording": i18n.t("voice_recording", lang),
@@ -858,12 +1130,14 @@ def render_page(room, nick, lang=None):
         "<!DOCTYPE html>" + theme.html_open() + "<head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<title>RRC — Stump</title><style>" + theme.CSS + STYLE + "</style>"
-        "<script>" + theme.STARTUP_SCRIPT + "</script></head><body>"
+        "<script>" + theme.startup_script() + "</script></head><body>"
         "<header><b>RRC</b><span id='topic'></span>"
-        "<span class='me'>" + i18n.t("rrc_you_are", lang) + " <span id='me'>" + _esc(nick) + "</span></span>"
         + _nav_links(lang) + "</header>"
         + i18n.switcher_html(lang, "/rrc") +
-        "<main><div id='rooms'></div><div id='log'></div></main>"
+        "<main><div id='side'><div id='rooms'></div><div id='profile'><button id='me-btn' type='button' aria-haspopup='dialog'>"
+        "<span id='hw' class='hw-dot none'></span><span id='me'>" + _esc(nick) + "</span></button>"
+        "<div id='pop' role='dialog' hidden></div></div></div>"
+        "<div id='grip' title='\u2194'></div><div id='chatcol'><div id='log'></div>"
         "<footer>"
         "<input id='in' maxlength='" + str(rrc.MAX_MESSAGE_LEN) + "' "
         "autocomplete='off' autocapitalize='none' spellcheck='false' "
@@ -872,9 +1146,67 @@ def render_page(room, nick, lang=None):
         "<button id='voice' style='display:none' title='" + _attr(i18n.t("voice_record", lang))
         + "' aria-label='" + _attr(i18n.t("voice_record", lang)) + "'>\u266a</button>"
         "<input id='voicefile' type='file' accept='audio/*' capture hidden>"
-        "</footer>"
+        "</footer></div></main>"
         "<script src='/codec2.js'></script>"
         "<script src='/opus.js'></script>"
         "<script>" + script + "</script>"
+        "</body></html>"
+    )
+
+
+REC_SCRIPT = r"""
+var T=REC_TEXT, MAX_S=15, rec=null, chunks=[], timer=null, left=0, tick=null;
+var q=location.search.match(/[?&]o=([^&]*)/), back=q ? decodeURIComponent(q[1]) : '';
+var b=document.getElementById('rec'), say=document.getElementById('say');
+function msg(t){ say.textContent=t; }
+// Only the chat on this same Stump (its address or its name) gets the audio back.
+var ok=!!(window.opener && REC_ORIGINS.indexOf(back)>=0);
+if(!ok){ b.disabled=true; msg(T.no_opener); }
+b.onclick=function(){
+  if(rec){ rec.stop(); return; }
+  navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+    chunks=[]; rec=new MediaRecorder(stream);
+    rec.ondataavailable=function(e){ if(e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop=function(){
+      stream.getTracks().forEach(function(t){ t.stop(); });
+      clearTimeout(timer); clearInterval(tick); rec=null;
+      b.textContent='\u266a'; b.className=''; msg(T.sending);
+      var blob=new Blob(chunks);
+      (blob.arrayBuffer ? blob.arrayBuffer() : new Promise(function(res, rej){
+        var r=new FileReader(); r.onload=function(){ res(r.result); }; r.onerror=rej; r.readAsArrayBuffer(blob);
+      })).then(function(buf){
+        window.opener.postMessage({stumpVoice:buf}, back, [buf]);
+        window.close();
+      });
+    };
+    rec.start(); b.textContent='\u25a0'; b.className='rec';
+    left=MAX_S; msg(T.recording+' '+left+' s');
+    tick=setInterval(function(){ left--; msg(T.recording+' '+left+' s'); }, 1000);
+    timer=setTimeout(function(){ if(rec) rec.stop(); }, MAX_S*1000);
+  }, function(){ msg(T.refused); });
+};
+"""
+
+
+def render_recorder(lang=None, origins=()):
+    """/rrc/rec: the voice recorder, opened by the chat over HTTPS. One
+    button; the audio goes back to the chat window, which sends it."""
+    if lang is None:
+        lang = i18n.DEFAULT_LANG
+    text = {"recording": i18n.t("voice_recording", lang), "sending": i18n.t("rec_sending", lang),
+            "refused": i18n.t("rec_refused", lang), "no_opener": i18n.t("rec_no_opener", lang)}
+    return (
+        "<!DOCTYPE html>" + theme.html_open() + "<head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>" + _esc(i18n.t("voice_record", lang)) + " — Stump</title><style>" + theme.CSS +
+        "body{display:flex;flex-direction:column;align-items:center;justify-content:center;"
+        "min-height:90vh;text-align:center;gap:1em}"
+        "#rec{font-size:3em;width:2.2em;height:2.2em;border-radius:50%}"
+        "#rec.rec{background:var(--ember-bright,#e33);color:#fff}"
+        "</style><script>" + theme.startup_script() + "</script></head><body>"
+        "<p>" + _esc(i18n.t("rec_hint", lang)) + "</p>"
+        "<button id='rec' aria-label='" + _attr(i18n.t("voice_record", lang)) + "'>\u266a</button>"
+        "<p id='say'></p>"
+        "<script>" + REC_SCRIPT.replace("REC_TEXT", _js(text)).replace("REC_ORIGINS", _js(list(origins))) + "</script>"
         "</body></html>"
     )

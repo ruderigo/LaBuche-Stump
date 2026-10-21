@@ -30,6 +30,11 @@ LIST_LIMIT = 12
 # not each reader's. Rewrite the voice here, in all three.
 TEXT = {
     "fr": {
+        "find_usage": "{p}find <ce que tu cherches> — ex. {p}find film, {p}find jardinage",
+        "find_files": "étagère : {items}",
+        "find_board": "babillard : {items}",
+        "find_none": "rien sur « {topic} » pour l'instant.",
+        "find_kind_none": "pas de ça sur l'étagère pour l'instant.",
         "about": "{bot} — bot de fichiers de ce Stump. {p}help pour les commandes, {p}list pour ce qu'il y a sur l'étagère.",
         "no_triggers": "aucun déclencheur configuré pour l'instant.",
         "triggers": "Je réponds à : {names}",
@@ -45,6 +50,11 @@ TEXT = {
         "video": "vidéo", "music": "musique", "document": "document", "other": "autre",
     },
     "en": {
+        "find_usage": "{p}find <what you're looking for> -- e.g. {p}find movie, {p}find gardening",
+        "find_files": "shelf: {items}",
+        "find_board": "billboard: {items}",
+        "find_none": "nothing about \"{topic}\" yet.",
+        "find_kind_none": "none of those on the shelf right now.",
         "about": "{bot} -- fserv bot on this Stump. {p}help for commands, {p}list for what's on the shelf.",
         "no_triggers": "no triggers configured right now.",
         "triggers": "I answer to: {names}",
@@ -60,6 +70,11 @@ TEXT = {
         "video": "video", "music": "music", "document": "document", "other": "other",
     },
     "es": {
+        "find_usage": "{p}find <lo que buscas> — p. ej. {p}find película, {p}find jardín",
+        "find_files": "estante: {items}",
+        "find_board": "tablón: {items}",
+        "find_none": "nada sobre «{topic}» por ahora.",
+        "find_kind_none": "no hay de eso en el estante por ahora.",
         "about": "{bot} — bot de archivos de este Stump. {p}help para los comandos, {p}list para ver qué hay en el estante.",
         "no_triggers": "no hay disparadores configurados ahora.",
         "triggers": "Respondo a: {names}",
@@ -121,6 +136,36 @@ def list_(ctx):
     return line
 
 
+FIND_LIMIT = 5
+
+
+def find_(ctx, arg):
+    """!find <words>: BarKeep the librarian (librarian.py) on one line --
+    up to FIND_LIMIT file names and two notice titles. Posted to the room,
+    and over LoRa to anyone in it, so short."""
+    if not arg.strip():
+        return _t(ctx, "find_usage", p=ctx["prefix"])
+    import librarian
+    try:
+        import features
+        files_on, board_on = features.enabled("files"), features.enabled("billboard")
+    except ImportError:
+        files_on = board_on = True
+    r = librarian.search(arg, files_on, board_on, FIND_LIMIT)
+    asked_files = r["words"] or [c for c in librarian.CATS if c in r["intents"]]
+    parts = []
+    if asked_files and not files_on:
+        parts.append(_t(ctx, "files_off"))
+    elif r["files"] or r["others"]:
+        parts.append(_t(ctx, "find_files", items=", ".join(f["name"] for f in (r["files"] or r["others"]))))
+    if r["posts"]:
+        parts.append(_t(ctx, "find_board", items=", ".join(p["title"] for p in r["posts"][:2])))
+    if not parts:
+        topic = r["topic"] if r["words"] else ""
+        parts.append(_t(ctx, "find_none", topic=topic) if topic else _t(ctx, "find_kind_none"))
+    return " · ".join(parts)
+
+
 def info(ctx):
     mode = _t(ctx, "credits_on" if fserv.CREDITS_ENABLED else "free")
     card = _t(ctx, "card_ok" if fserv.sd_ok else "card_none")
@@ -145,6 +190,14 @@ BASE_TEMPLATES = {
     "files": list_,
     "info": info,
     "rules": rules,
+}
+
+# Triggers that take the rest of the line (!find gardening).
+ARG_TEMPLATES = {
+    "find": find_,
+    "search": find_,
+    "cherche": find_,
+    "busca": find_,
 }
 
 # What the periodic broadcast says. Same text as !fserv by design --

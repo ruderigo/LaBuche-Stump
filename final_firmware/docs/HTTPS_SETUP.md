@@ -14,6 +14,16 @@ warning, even with no internet, because phones already trust Let's
 Encrypt. On the regular internet, the same name shows your Firebase
 page.
 
+**What uses HTTPS, and what doesn't.** Only two things: the **voice
+recorder** and **`/admin`** (a password is typed there). The chat and
+every other page stay on plain HTTP: the chat asks for news every 2
+seconds, and over HTTPS each of those was a new secure handshake for
+the CAM — a few people chatting kept it busy doing nothing else. So when
+someone taps ♪ in a private message, a small window opens at
+`https://stump.labuche.org/rrc/rec`: tap ♪, speak, tap ■, and the window
+closes and hands the recording back to the chat, which sends it. A
+browser that blocks the window falls back to the phone's recorder app.
+
 The examples use `labuche.org` and `stump.labuche.org`. Replace them with
 yours everywhere.
 
@@ -28,12 +38,14 @@ yours everywhere.
 
 ## 0. Check the board first (5 minutes)
 
-Put `tls_probe.py` in the same folder as `provisioner.py`, plug the CAM
-in, and run from that folder:
+Plug the CAM in and, from the Stump download (or your clone):
 
 ```
-mpremote connect /dev/cu.usbmodem… run tls_probe.py
+mpremote connect /dev/cu.usbmodem… run bench/tls_probe.py
 ```
+
+It serves HTTPS on port 8443 for two minutes, with the Stump's own
+certificate if one is installed, else a throwaway one (hence `-k` below).
 
 Then, from your Mac joined to the Stump's Wi-Fi:
 
@@ -41,9 +53,8 @@ Then, from your Mac joined to the Stump's Wi-Fi:
 curl -sk -o /dev/null -w "handshake %{time_appconnect}s\n" https://192.168.4.1:8443/
 ```
 
-Then test a burst and a crowd, because on HTTPS **every page load and
-every 2-second chat poll is a new secure connection** (the Stump closes
-each connection after one request):
+Then test a burst and a crowd (the Stump closes each connection after
+one request, so each is a full handshake):
 
 ```
 for i in $(seq 10); do curl -sk -o /dev/null -w "%{time_appconnect}s\n" https://192.168.4.1:8443/; done
@@ -51,11 +62,11 @@ seq 6 | xargs -P6 -I{} curl -sk -o /dev/null -w "parallel %{time_appconnect}s\n"
 ```
 
 The probe prints, for each connection, how long it took and the free
-memory after it. As a rule of thumb: handshakes under ~0.3 s and free
-memory staying steady mean a handful of people chatting over HTTPS is
-fine; handshakes over ~1 s, or free memory dropping with each one, mean
-the CAM will struggle with more than one or two at once — tell me the
-numbers before going further.
+memory after it, then a summary. Only voice notes and `/admin` use HTTPS
+(a few connections per note), so even slow handshakes are fine. Under
+~0.3 s and steady free memory: several people can record at once. Over
+~1 s, or free memory dropping with each connection: voice notes still
+work, one or two people at a time.
 
 The probe ends with `RESULT: HTTPS works on this board`. If it says the
 firmware can't serve TLS, stop here: the board's MicroPython needs
@@ -223,12 +234,12 @@ there.
 Let's Encrypt certificates last **90 days**, and are getting shorter
 (Let's Encrypt has announced 45-day certificates by 2028).
 
-**A lapsed certificate never shows visitors a warning.** The Stump
-doesn't redirect to HTTPS itself: each page first asks the *phone*
-whether it accepts the certificate (checked against the phone's own
-clock), and only moves to HTTPS if it does. With an expired certificate
-— or a phone whose clock is wrong — visitors simply stay on plain HTTP,
-and ♪ uses the recorder-app fallback, until you renew. `/admin` shows
+**A lapsed certificate never shows visitors a warning.** The chat first
+asks the *phone* whether it accepts the certificate (checked against the
+phone's own clock) before opening the HTTPS recorder; `/admin` does the
+same before moving to HTTPS. With an expired certificate — or a phone
+whose clock is wrong — ♪ uses the recorder-app fallback and `/admin`
+stays on plain HTTP, until you renew. `/admin` shows
 the expiry date, and the days left (bold under 21) when the node's
 clock is set.
 

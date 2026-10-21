@@ -1,5 +1,8 @@
 """µReticulum (final_firmware/urns) against the reference Reticulum and LXMF.
 
+Run by .github/workflows/tests.yml twice (job "reference"): against the rns/lxmf
+FireFly for Android pins, and the newest release.
+
 A Stump node only works if what urns puts on the air is exactly what Sideband,
 NomadNet and FireFly (all running the official rns/lxmf packages) expect, and
 the other way round. These tests run urns under CPython (tests/shims stands in
@@ -18,11 +21,9 @@ from urns.lxmf import LXMessage as ULXMessage, LXMRouter as ULXMRouter
 
 
 @pytest.fixture
-def verify_like_the_board(monkeypatch):
-    """On the board the native Ed25519 module is loaded, so incoming LXMF
-    signatures are checked. Here urns runs its pure-Python fallback, where it
-    skips the check by design (lxmf.py: verify_signatures = have_native())."""
-    monkeypatch.setattr(ULXMRouter, "verify_signatures", True)
+def verify_like_the_board():
+    """urns now checks every incoming LXMF signature (lxmf.py: unpack_from_bytes),
+    on the board and here alike, so there's nothing to switch on."""
 
 
 @pytest.fixture(scope="module")

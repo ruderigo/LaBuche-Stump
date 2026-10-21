@@ -1,0 +1,61 @@
+{
+  "plugin": "tavern",
+  "title": "Tavern (dice, fortunes, quotes, !seen, polls, flood guard)",
+  "version": "1.0",
+  "plugin_api": 1,
+  "summary": "The tavern's games and memory: !roll, !8ball, !slap, !seen, !quote and !vote, with a page for polls and quotes, and a flood guard that slows down anyone posting too fast. Text only, so it works for mesh users too.",
+  "modifies_core_files": false,
+  "binds_ports": false,
+  "starts_tasks": false,
+  "hooks": [
+    "/roll /8ball /slap /seen /quote /vote (and !roll ...)",
+    "on_message: !seen",
+    "gate, priority 30: flood guard",
+    "every 30 s: closes polls, saves",
+    "page /p/tavern/ (home card), /p/tavern/votes.json"
+  ],
+  "runtime_storage": {
+    "path": "/sd/plugins/tavern/tavern.json",
+    "note": "Quotes, polls and !seen. Without an SD card they last until the next restart."
+  },
+  "wizard": {
+    "note": "Everything has a working default.",
+    "prompts": [
+      {
+        "key": "TAVERN_NICK",
+        "prompt": "Name the tavern speaks as",
+        "type": "string",
+        "default": "Tavernier",
+        "advanced": true,
+        "writes_to": "config.py"
+      },
+      {
+        "key": "TAVERN_FLOOD_LINES",
+        "prompt": "Room lines allowed per person in 10 seconds (0 = no flood guard)",
+        "type": "int",
+        "default": 6,
+        "advanced": true,
+        "writes_to": "config.py"
+      },
+      {
+        "key": "TAVERN_VOTE_MINUTES",
+        "prompt": "Minutes a poll stays open",
+        "type": "int",
+        "default": 30,
+        "advanced": true,
+        "writes_to": "config.py"
+      }
+    ]
+  },
+  "files": [
+    "tavern/__init__.py",
+    "tavern/install.py",
+    "tavern/strings.py",
+    "tavern/plugin.json"
+  ],
+  "hashes": {
+    "tavern/__init__.py": "e6d8701248ccbe09",
+    "tavern/install.py": "abed5503dc6d3ef1",
+    "tavern/strings.py": "d8ea5d852c692427"
+  }
+}

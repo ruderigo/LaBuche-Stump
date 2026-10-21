@@ -34,6 +34,11 @@ class Interface:
             self.HW_MTU = 500
         self.OUT = True
         self.IN = True
+        # False on radio interfaces (LoRa, an RNode over serial or Wi-Fi):
+        # Transport then caps how much file-transfer data it relays onto
+        # them (Transport.BULK_*), so big transfers between Stumps chained
+        # over Wi-Fi never spill onto the shared radio channel.
+        self.bulk_ok = True
 
         # Statistics
         self.rxb = 0

@@ -1,165 +1,145 @@
 # Project Stump -- stumpid activation
 # Place at: firmware/stumpid/install.py
 #
-# Wraps rrc.handle_input exactly the way fservbot does: capture whatever
-# is CURRENTLY bound to it, replace it, delegate to the captured value
-# for anything this plugin doesn't own itself. Two plugins doing this
-# compose correctly regardless of which activates first -- each only
-# ever sees "the handler as it stood a moment ago", never a hardcoded
-# assumption about what that is.
+# Registers with the plugin API (plugins.py, docs/PLUGINS.md):
 #
-# ORDERING NOTE, stated plainly because it matters here in a way it
-# didn't for fservbot: stumpid needs to be the OUTERMOST wrapper, since
-# gating a write means intercepting it before anything else acts on it.
-# load_plugins() activates folders in alphabetical order, and
-# "stumpid" > "fservbot", so stumpid activates second and wraps outer.
-# That is correct today by virtue of the name, not by any enforced
-# priority -- worth knowing if a plugin sorting alphabetically ahead of
-# "stumpid" is ever added and also wants to gate writes.
+#   gate, priority 10     access control: room tiers on /join, and the
+#                         node's AUTH_MODE on everything else. Priority
+#                         0-19 is reserved for this plugin, so no other
+#                         gate can run before it.
+#   /auth /whoami         identity proof
+#   /admin /invite        (names reserved for stumpid in the core)
+#   on_result             tier labels on /rooms; keeps a verified
+#                         identity's saved nick in step with /nick
+#   service "identity"    this plugin's core module, for the parts of
+#                         the node that ask about access (the mesh
+#                         bridge, voice notes, the admin password) --
+#                         so they no longer import stumpid by name.
+#
+# Before the plugin API this wrapped rrc.handle_input and had to be the
+# OUTERMOST wrapper, which it was only because "stumpid" sorts after
+# "fservbot". The priority makes that explicit.
 
 import rrc
 import i18n
 from stumpid import core
 
-_original = None
-_installed_as = None
+VERSION = "1.1"
+STUMP_API = 1
+
+_api = []      # the plugin API object, once setup() has run
 
 
-def is_active():
-    return _original is not None
+def _t(key, lang, **kw):
+    """This plugin's strings (strings.py), then the core's."""
+    if _api:
+        return _api[0].t(key, lang, **kw)
+    return i18n.t(key, lang, **kw)
 
 
-def activate():
-    global _original, _installed_as
-    if _original is not None:
-        return False
-    _original = rrc.handle_input
-    rrc.handle_input = _dispatch
-    _installed_as = _dispatch
+def setup(stump):
+    _api.append(stump)
+    core.STORAGE_FILE = stump.storage_file("stumpid.json", legacy=core.STORAGE_FILE)
+    core.STATE_FILE = stump.storage_file("access.json")
+    if core.load_state():
+        print("[stumpid] access settings restored: mode=%s, %d tiered room(s)"
+              % (core.AUTH_MODE, len(core._room_policy)))
+        for room in core._room_policy:
+            rrc.create_room(room)
+    # First, so the admin password check exists even if something below fails.
+    stump.provide("identity", core)
+    stump.gate(_gate, priority=10)
+    # trigger=False: never answered as "!admin ..." -- a !line is posted
+    # to the room, password included. limit=False: a client answers the
+    # /auth challenge straight away. mesh_lines=0: replies as before.
+    for word, fn in (("auth", _on_auth), ("whoami", _on_whoami),
+                     ("admin", _on_admin), ("invite", _on_invite)):
+        stump.command(word, fn, trigger=False, limit=False, mesh_lines=0)
+    stump.on_result(_after, priority=10)
     print("[stumpid] active: mode=%s" % core.AUTH_MODE)
     if not core.admin_available():
         print("[stumpid] no admin password set (own or fservbot's) -- /admin is disabled")
-    return True
 
 
-def deactivate():
-    """Restores the original handler. Only does so if rrc.handle_input
-    is STILL exactly what activate() put there -- if something else
-    (a plugin activated after this one) has wrapped it since, this is
-    no longer the outermost layer, and blindly overwriting
-    rrc.handle_input would silently discard whatever wrapped on top.
-    Confirmed this corruption is real: deactivating two stacked plugins
-    in activation order rather than the reverse produced a
-    self-referential chain and blew MicroPython's recursion limit.
-    Refuses with a clear reason instead; deactivate the outer plugin
-    first."""
-    global _original, _installed_as
-    if _original is None:
-        return False
-    if rrc.handle_input is not _installed_as:
-        print("[stumpid] cannot deactivate cleanly -- something else has "
-              "wrapped rrc.handle_input since this plugin activated. "
-              "Deactivate that plugin first.")
-        return False
-    rrc.handle_input = _original
-    _original = None
-    _installed_as = None
-    print("[stumpid] deactivated")
-    return True
+def _on_auth(ctx, arg):
+    return _cmd_auth(ctx.client_id, ctx.text.strip())
 
 
-def _dispatch(client_id, room, text):
-    stripped = text.strip()
+def _on_whoami(ctx, arg):
+    if arg:
+        # "/whoami x" was never a command: answered as rrc would.
+        return [rrc.tok_unknown("whoami", i18n.t("unknown_command", ctx.lang, cmd="whoami"))]
+    return _cmd_whoami(ctx.client_id)
+
+
+def _on_admin(ctx, arg):
+    return _cmd_admin(ctx.client_id, ctx.text.strip())
+
+
+def _on_invite(ctx, arg):
+    return _cmd_invite(ctx.client_id, ctx.text.strip(), ctx.room)
+
+
+def _gate(ctx):
+    stripped = ctx.text.strip()
     low = stripped.lower()
+    client_id = ctx.client_id
 
-    if low == "/auth" or low.startswith("/auth "):
-        return _cmd_auth(client_id, stripped), None
-
-    if low == "/whoami":
-        return _cmd_whoami(client_id), None
-
-    if low.startswith("/admin"):
-        return _cmd_admin(client_id, stripped), None
-
-    if low == "/invite" or low.startswith("/invite "):
-        return _cmd_invite(client_id, stripped, room), None
+    # Our own commands are always allowed through: they are how someone
+    # verifies in the first place, and /admin carries its own password.
+    if ctx.command in ("auth", "whoami", "admin", "invite") and stripped.startswith("/"):
+        return None
 
     if low.startswith("/join ") or low.startswith("/j "):
-        # Room-tier gate, checked BEFORE falling through to whatever
-        # rrc.create_room()/handle_input() would otherwise do -- a
-        # blocked attempt never creates or enters the room at all.
-        #
-        # Runs regardless of the outcome of requires_verification()
-        # just below: a room's own tier is an ADDITIONAL restriction on
-        # top of the node's global AUTH_MODE, never a substitute for
-        # it. Confirmed this has to be unconditional, not skipped under
-        # global 'open' -- under 'open' nothing else here gates
-        # anything, so a minted-only or hybrid room would otherwise be
-        # wide open the moment the node itself wasn't in a stricter
-        # mode, which defeats the entire point of a PER-ROOM tier.
+        # Room-tier gate, checked BEFORE rrc.create_room() -- a blocked
+        # attempt never creates or enters the room at all. Unconditional,
+        # not skipped under global 'open': a room's tier is an ADDITIONAL
+        # restriction on top of AUTH_MODE, never a substitute for it.
         arg = stripped.split(" ", 1)[1].strip() if " " in stripped else ""
         if arg:
             target_room = rrc.clean_room(arg)
             ok, reason_code = core.can_join_room(client_id, target_room)
             if not ok:
-                lang = i18n.get_lang(client_id)
                 key = "room_needs_verified" if reason_code == "needs_verified" else "room_invite_only"
-                return [rrc.tok_refused(target_room, core.room_tier(target_room), i18n.t(key, lang))], None
+                tier = core.room_tier(target_room)
+                return [rrc.tok_refused(target_room, core.AUTH_MODE if tier == "open" else tier, i18n.t(key, ctx.lang))]
 
-    # Everything else is subject to the node's AUTH_MODE. Checked here,
-    # before falling through to whatever this plugin wrapped -- that is
-    # the entire mechanism. A blocked action never reaches fservbot's
-    # triggers or the real chat handler, so a gated node can't be
+    # Everything else is subject to the node's AUTH_MODE. A blocked line
+    # never reaches another plugin or rrc, so a gated node can't be
     # written to by any path that funnels through handle_input.
-    if core.requires_verification(client_id, stripped):
-        return [i18n.t("auth_required_generic", i18n.get_lang(client_id))], None
+    if core.requires_verification(client_id, stripped, getattr(ctx, "room", None)):
+        return [i18n.t("auth_required_generic", ctx.lang)]
+    return None
 
-    result = _original(client_id, room, text)
 
+def _after(ctx, replies, new_room):
+    # Not after our own commands: they never reached rrc before either,
+    # so the saved nick catches up on the next line, exactly as it did.
+    if ctx.command in ("auth", "whoami", "admin", "invite") and ctx.text.startswith("/"):
+        return None
+    out = None
     # Annotate /rooms with each room's tier, by POSITION rather than by
-    # parsing rrc's own reply text. rrc.room_names() is what rrc's own
-    # /rooms handler iterates internally too, in the same order, so
-    # zipping this module's tier lookups against the returned lines
-    # one-for-one gets the right answer without re-implementing any of
-    # rrc's user-count/topic formatting here -- duplicating that was
-    # exactly the pattern that caused real divergence bugs earlier in
-    # this project (see barkeep.py/fserv.py's history).
-    if low == "/rooms" and result[0]:
-        lines, new_room = result
+    # parsing rrc's reply text: rrc.room_names() is what rrc's own /rooms
+    # iterates, in the same order.
+    if ctx.text.strip().lower() == "/rooms" and replies:
         names = rrc.room_names()
-        if len(lines) == len(names):
+        if len(replies) == len(names):
             annotated = []
-            for line, name in zip(lines, names):
+            for line, name in zip(replies, names):
                 tier = core.room_tier(name)
                 annotated.append(line if tier == "open" else line + "  [%s]" % tier)
-            result = (annotated, new_room)
+            out = (annotated, new_room)
 
-    # If this session is verified, keep the identity record's saved
-    # nick in sync with whatever rrc actually settled on -- reading it
-    # back via rrc.get_user() AFTER delegating, rather than re-parsing
-    # "/nick" here ourselves, so this can never drift from rrc's own
-    # collision handling (a requested nick that's taken gets rejected
-    # by rrc, and this correctly does nothing in that case since the
-    # nick rrc reports back is unchanged).
-    #
-    # Never sync rrc's own auto-generated placeholder (rrc.default_nick,
-    # "guest-XXXX"). Confirmed this needs an explicit check, not just
-    # "only fire on /nick": a REJECTED /nick attempt (name taken) still
-    # reaches this point with the placeholder still in effect, and would
-    # otherwise persist "guest-c0fe" as if it were a real chosen name --
-    # silently defeating the None-means-nothing-chosen-yet signal
-    # /whoami and /admin list both rely on. Compared against
-    # default_nick(client_id) specifically, rather than a "guest-"
-    # prefix match, so a genuine chosen nick that happens to start with
-    # "guest-" is never wrongly excluded.
-    hexhash = core.verified_identity_for(client_id)
+    # A verified session's saved nick follows whatever rrc settled on --
+    # read back AFTER rrc handled the line, so a rejected /nick changes
+    # nothing. Never rrc's own placeholder (default_nick, "guest-XXXX").
+    hexhash = core.verified_identity_for(ctx.client_id)
     if hexhash is not None:
-        user = rrc.get_user(client_id)
+        user = rrc.get_user(ctx.client_id)
         nick = user.get("nick") if user else None
-        if nick and nick != rrc.default_nick(client_id):
+        if nick and nick != rrc.default_nick(ctx.client_id):
             core.set_nick_for(hexhash, nick)
-
-    return result
+    return out
 
 
 # ---------------------------------------------------------------------
@@ -188,6 +168,14 @@ def _cmd_auth(client_id, stripped):
         if not ok:
             return ["AUTH-FAIL " + result]
         core.mark_verified(client_id, result)
+        if not core._is_mesh_client(client_id):
+            # Proved over Wi-Fi: if this identity is known on LoRa too,
+            # it's one person now (rrc_mesh.same_person).
+            try:
+                import rrc_mesh
+                rrc_mesh.same_person(client_id, result)
+            except Exception as e:
+                print("[stumpid] couldn't link the LoRa identity:", e)
         return ["AUTH-OK " + result]
 
     return ["usage: /auth   (then)   /auth <pubkey_hex> <signature_hex>"]
@@ -207,11 +195,63 @@ def _cmd_whoami(client_id):
 # /admin <password> revoke <hexhash>
 # ---------------------------------------------------------------------
 
+def enforce_mode():
+    """The node's mode just changed: whoever is in a room they may no
+    longer be in (mandatory: the unverified, anywhere but #main) goes back
+    to #main, told why. Returns their nicks."""
+    moved = []
+    for room in list(rrc.room_names()):
+        if room != rrc.DEFAULT_ROOM:
+            moved += _enforce_room(room, core.AUTH_MODE)
+    return moved
+
+
+def _enforce_room(room, tier):
+    """A room just became stricter: whoever is in it and no longer
+    qualifies goes back to #main, told why -- the same refusal a /join
+    would get. Returns their nicks."""
+    home = rrc.DEFAULT_ROOM
+    if room == home:
+        return []
+    try:
+        import rrc_mesh
+        mesh = rrc_mesh._peers
+    except ImportError:
+        rrc_mesh, mesh = None, {}
+    moved = []
+    for cid, u in list(rrc._users.items()):
+        if u.get("room") != room:
+            continue
+        ok, reason = core.can_join_room(cid, room)
+        if ok:
+            continue
+        lang = i18n.get_lang(cid)
+        key = "room_needs_verified" if reason == "needs_verified" else "room_invite_only"
+        notice = rrc.tok_refused(room, tier, i18n.t(key, lang))
+        on_mesh = cid in mesh
+        shown = ("~" if on_mesh else "") + u["nick"]
+        rrc.system(room, rrc.ev_leave(shown))
+        rrc.touch_user(cid, room=home)
+        rrc.system(home, rrc.ev_join(shown))
+        if on_mesh:
+            mesh[cid]["room"] = home
+            rrc_mesh.notify(cid, rrc.moved(home) + "\n" + notice)
+        else:
+            rrc.send_dm("*", u["nick"], notice)
+        moved.append(shown)
+    return moved
+
+
 def _cmd_admin(client_id, stripped):
     parts = stripped.split(" ")
     args = parts[1:]
 
-    if len(args) < 2 or not core.check_admin_password(args[0]):
+    import guard
+    ok, wait = (False, 0) if len(args) < 2 else guard.password(lambda: core.check_admin_password(args[0]), client_id)
+    if wait:
+        import i18n as _i18n, rrc as _rrc
+        return [_rrc.tok_rate(_i18n.t("admin_locked", _i18n.get_lang(client_id), s=wait))]
+    if not ok:
         # One ambiguous message for both "wrong password" and "no
         # password configured anywhere" -- matching fservbot's own
         # denial wording. Distinguishing the two would tell an anonymous
@@ -228,6 +268,7 @@ def _cmd_admin(client_id, stripped):
         if not rest:
             return ["current mode: " + core.AUTH_MODE]
         if core.set_mode(rest[0]):
+            enforce_mode()
             return ["mode set to " + rest[0]]
         return ["unknown mode -- use open, hybrid, or mandatory"]
 
@@ -263,6 +304,7 @@ def _cmd_admin(client_id, stripped):
             return ["tier must be open, minted, or hybrid"]
         if not core.set_room_tier(target_room, tier):
             return ["could not set that tier"]
+        moved = []
         if tier != "open":
             # Admin-created, so it exists right away rather than only
             # coming into being the first time someone already minted
@@ -272,9 +314,25 @@ def _cmd_admin(client_id, stripped):
             new_room, err = rrc.create_room(target_room)
             if err:
                 return [err]
-        return ["#%s is now %s" % (target_room, tier)]
+            moved = _enforce_room(target_room, tier)
+        return ["#%s is now %s" % (target_room, tier)] + (
+            ["moved to #%s: %s" % (rrc.DEFAULT_ROOM, ", ".join(moved))] if moved else [])
 
-    return ["unknown admin command -- try mode, meshroom, revoke, or room"]
+    if sub == "reset-access":
+        # Back to config.py: its mode, no room tiers, the saved settings gone.
+        core.reset_access()
+        return ["access back to config.py: mode " + core.AUTH_MODE + ", no room tiers"]
+
+    if sub == "plugin":
+        # /admin <pw> plugin [on|off <name>] -- the plugin off switch
+        # (plugins.py), here because this is where /admin's password lives.
+        try:
+            import plugins
+            return plugins.admin_chat(rest, i18n.get_lang(client_id))
+        except ImportError:
+            pass
+
+    return ["unknown admin command -- try mode, meshroom, revoke, room, or reset-access"]
 
 
 # ---------------------------------------------------------------------
@@ -295,28 +353,28 @@ def _cmd_invite(client_id, stripped, current_room):
     parts = stripped.split(" ")
     args = parts[1:]
     if len(args) < 1:
-        return [i18n.t("invite_usage", lang)]
+        return [_t("invite_usage", lang)]
 
     target_nick = args[0]
     target_room = rrc.clean_room(args[1]) if len(args) > 1 else current_room
 
     my_hash = core.verified_identity_for(client_id)
     if my_hash is None:
-        return [i18n.t("invite_need_verified", lang)]
+        return [_t("invite_need_verified", lang)]
 
     if target_room != current_room:
-        return [i18n.t("invite_wrong_room", lang)]
+        return [_t("invite_wrong_room", lang)]
 
     # Checked before resolving the nick: if the room isn't invite-gated
     # at all, that's the useful thing to say regardless of whether the
     # named person even exists -- "not needed here" beats "no one by
     # that name" when the real answer is that neither matters.
     if core.room_tier(target_room) != "hybrid":
-        return [i18n.t("invite_not_gated", lang)]
+        return [_t("invite_not_gated", lang)]
 
     target_cid = rrc.find_client_by_nick(target_nick)
     if target_cid is None:
-        return [i18n.t("invite_no_such_user", lang, nick=target_nick)]
+        return [_t("invite_no_such_user", lang, nick=target_nick)]
 
     ok, reason_code = core.invite_to_room(target_room, target_cid)
     if not ok:
@@ -326,5 +384,5 @@ def _cmd_invite(client_id, stripped, current_room):
         # plain marker instead; client_id here is genuinely the right
         # one to translate against, since this IS the person reading
         # the reply.
-        return [i18n.t("invite_not_gated", lang)]
-    return [i18n.t("invite_done", lang, nick=target_nick, room=target_room)]
+        return [_t("invite_not_gated", lang)]
+    return [_t("invite_done", lang, nick=target_nick, room=target_room)]

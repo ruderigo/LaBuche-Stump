@@ -14,9 +14,16 @@ IP or a new LoRa session in a way `client_id` never could.
 
 ## How it works
 
-Wraps `rrc.handle_input` at runtime, exactly like `fservbot` does —
-never edits a core file, so hashed firmware stays byte-identical whether
-or not this plugin is installed.
+A plugin (`docs/PLUGINS.md`): `install.py`'s `setup(stump)` registers
+an access-control **gate at priority 10** (the 0–19 band is reserved for
+stumpid, so no other plugin's gate runs before it), the four commands
+below (slash only, never `!auth`), an `on_result` hook that labels
+tiered rooms in `/rooms` and keeps a verified identity's saved nick in
+step, and an **`identity` service** — its `core` module — which the mesh
+bridge, voice notes and the admin password check ask through
+`plugins.service_lookup("identity")` instead of importing stumpid by
+name. `/admin <password> plugin …` (the plugin off switch) lives here
+too; stumpid itself can't be switched off.
 
 ```
 /auth                          -- request a challenge (step 1)
@@ -47,13 +54,14 @@ request.
 ## Modes
 
 - `open` — today's behaviour, no proof required. Default.
-- `hybrid` — reading is open; posting, joining a room, DMing, etc.
-  require a verified identity. A bare `/topic` (reading the current
-  topic) stays open; `/topic <text>` (setting it) is gated — same
-  command, opposite classification, so this is checked by argument, not
-  just the verb.
-- `mandatory` — everything except `/auth`, `/whoami`, `/help` requires
-  one.
+- `hybrid` — everyone reads every room and writes in `#main`; writing
+  anywhere else (other rooms, private messages) takes a verified
+  identity (`/auth`, which a FireFly answers). A FireFly over LoRa
+  counts as verified: its messages are signed.
+- `mandatory` (closed) — reading and writing both take one
+  (`core.can_read()`: the web poll is empty before `/auth`); only
+  `/auth`, `/whoami`, `/help` work. Going mandatory moves the unverified
+  back to `#main` (`install.enforce_mode()`).
 
 Set via the Provisioner wizard, or live with `/admin <password> mode
 <m>`. A live change is runtime-only — it does not rewrite `config.py`,
@@ -64,7 +72,7 @@ anyone who ever learned the password could type.
 
 ## What does NOT persist across a reconnect
 
-A verified *identity* is durable (saved to `/sd/stumpid.json` if a card
+A verified *identity* is durable (saved to `/sd/plugins/stumpid/stumpid.json` if a card
 is fitted). The *binding* of that identity to a `client_id` is not, and
 is not meant to be — it lives only in memory for the session. Reconnect
 with a new IP and you're unverified again until you `/auth` a second
@@ -114,29 +122,20 @@ A wrong password and "no password configured anywhere" produce the
 them would tell an anonymous prompter whether this node has any admin
 protection at all, for free.
 
-## Wrapping order, and what happens if you unwrap it wrong
+## Order
 
-Discovered and activated alphabetically by `load_plugins()`, so
-`stumpid` activates after `fservbot` and becomes the *outer* wrapper.
-That's required here — gating a write means intercepting it before
-anything else (like a fservbot trigger) acts on it — but it currently
-depends on alphabetical ordering rather than an enforced priority. A
-future plugin sorting ahead of `stumpid` that also wants to gate writes
-would need this reconsidered.
-
-`deactivate()` on either plugin now refuses to unwind if it isn't still
-the outermost layer — confirmed this matters: deactivating two stacked
-plugins in *activation* order (rather than the reverse) used to corrupt
-`rrc.handle_input` into a self-referential chain and blow MicroPython's
-recursion limit. The correct order is last-activated-first-deactivated;
-getting it backwards is now a logged refusal, not a crash.
+Before the plugin API, stumpid wrapped `rrc.handle_input` and had to be
+the outermost wrapper — true only because "stumpid" sorts after
+"fservbot". Now the gate's priority (10) puts it first, explicitly, and
+its own commands are let through it so an unverified visitor can always
+`/auth`.
 
 ## For Firefly / client implementers
 
 The wire format is deliberately just chat text, so it works identically
 over WiFi (direct HTTP to `barkeep.py`) and over LoRa (via `rrc_mesh`,
 which routes mesh-peer commands through the same `rrc.handle_input`
-this plugin wraps) — one implementation, two transports. A mesh peer
+this plugin gates) — one implementation, two transports. A mesh peer
 using `/auth` gets the exact same handshake a web client does.
 
 Minting an identity is `Identity()` from `urns.identity` (or the
@@ -164,8 +163,9 @@ through the actual plugin dispatch, not a mock of it:
   write is genuinely blocked *before* reaching `fservbot`'s triggers
   under `mandatory` (confirmed the room doesn't grow), and the same
   trigger fires normally once verified.
-- `deactivate()` ordering: an out-of-order unwind is refused cleanly
-  (handler still callable afterward); correct order fully unwinds.
+- On the plugin API: every reply compared line by line with the build
+  before it (modes, tiers, invites, `/rooms` labels, the full Ed25519
+  handshake, the mesh bridge's `/join` and `#room` checks).
 - `/admin`: wrong password, no password configured, correct password,
   live mode changes actually reflected in gating immediately, `revoke`
   removing both the saved record and any live session, and the
@@ -173,7 +173,7 @@ through the actual plugin dispatch, not a mock of it:
   fservbot's side.
 - Persistence round-trip across a simulated reboot (identity known,
   session verification correctly *not* restored), and eight malformed
-  `/sd/stumpid.json` shapes (non-JSON, wrong types, wrong-length hash or
+  `stumpid.json` shapes (non-JSON, wrong types, wrong-length hash or
   key, a non-dict value under a real-looking key) — none corrupt the
   in-memory table or crash the boot; a genuinely valid entry survives
   sitting next to a garbage one in the same file.

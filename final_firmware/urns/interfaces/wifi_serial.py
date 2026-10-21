@@ -83,8 +83,38 @@ CMD_SF          = 0x04
 CMD_CR          = 0x05
 CMD_RADIO_STATE = 0x06
 RADIO_STATE_ON  = 0x01
+RADIO_STATE_OFF = 0x00
+CMD_LEAVE       = 0x0A
 CMD_ST_ALOCK    = 0x0B
 CMD_LT_ALOCK    = 0x0C
+# What an RNode reports back (RNS.Interfaces.RNodeInterface's KISS class):
+# the handshake, its firmware, and live radio statistics.
+CMD_DETECT      = 0x08
+DETECT_REQ      = 0x73
+DETECT_RESP     = 0x46
+CMD_STAT_RX     = 0x21
+CMD_STAT_TX     = 0x22
+CMD_STAT_RSSI   = 0x23
+CMD_STAT_SNR    = 0x24
+CMD_STAT_CHTM   = 0x25
+CMD_STAT_BAT    = 0x27
+CMD_STAT_TEMP   = 0x29
+CMD_BOARD       = 0x47
+CMD_PLATFORM    = 0x48
+CMD_MCU         = 0x49
+CMD_FW_VERSION  = 0x50
+# Bluetooth (rnodeconf --bluetooth-on/-off/-pair): CMD_BT_CTRL 0x00 off,
+# 0x01 on, 0x02 pairing mode; in pairing mode the RNode reports the PIN to
+# type on the other device (CMD_BT_PIN, 4 bytes).
+CMD_BT_CTRL     = 0x46
+CMD_BT_PIN      = 0x62
+CMD_BT_UNPAIR   = 0x70        # 0x01: forget every paired device
+BT_ACTIONS      = {"off": 0x00, "on": 0x01, "pair": 0x02}
+CMD_ERROR       = 0x90
+RSSI_OFFSET     = 157
+_ERRORS = {0x01: "the radio didn't start (bad settings for this board?)", 0x02: "a send failed",
+           0x03: "its EEPROM is locked (not provisioned: rnodeconf --autoinstall)",
+           0x04: "its queue is full", 0x05: "it's low on memory", 0x06: "the modem timed out"}
 
 
 def kiss_escape(data):
@@ -116,6 +146,7 @@ class WiFiSerialInterface(Interface):
     def __init__(self, config):
         name = config.get("name", "WiFi Serial")
         super().__init__(name)
+        self.bulk_ok = False      # a radio: big transfers stay off it
 
         self.target_host = config.get("target_host", None)
         self.target_port = config.get("target_port", 7633)
@@ -146,10 +177,21 @@ class WiFiSerialInterface(Interface):
         self._recv_mv = memoryview(self._recv_buf)
         self._reconnect_count = 0
         self._last_reconnect = 0
+        # What the radio says about itself, for /hw.json, the chat's status
+        # dot and /admin (see status()).
+        self.hw = {"detected": False, "error": None, "fw": None, "platform": None, "radio": {},
+                   "rssi": None, "snr": None, "noise": None, "channel_load": None, "airtime": None,
+                   "battery": None, "temp": None, "rx": None, "tx": None, "last_rx": None,
+                   "since": None}
+
+        # Bluetooth pairing: the PIN the RNode gave, kept out of self.hw so
+        # it never shows in the public status (/hw.json).
+        self.bt = {"pin": None, "at": 0, "asked": None, "heard": []}
 
         try:
             self._connect()
         except Exception as e:
+            self.hw["error"] = str(e)
             log("WiFi Serial initial connect failed: " + str(e), LOG_ERROR)
 
     def _connect(self):
@@ -174,6 +216,8 @@ class WiFiSerialInterface(Interface):
         self.online = True
         self._reconnect_count = 0
         self._last_activity = time.time()
+        self.hw["error"] = None
+        self.hw["since"] = time.time()
         log("WiFi Serial connected to " + self.target_host + ":" + str(self.target_port), LOG_NOTICE)
 
         # THE ACTUAL FIX: configure the radio on every connect, the way
@@ -216,6 +260,11 @@ class WiFiSerialInterface(Interface):
                 self._send_command(CMD_ST_ALOCK, bytes([(at >> 8) & 0xFF, at & 0xFF]))
             log("WiFi Serial radio configured: %d Hz / %d Hz / SF%d / CR%d / %ddBm" % (
                 self.frequency, self.bandwidth, self.sf, self.cr, self.txpower), LOG_NOTICE)
+            try:
+                import chain            # introduce this Stump on the radio (beacon soon)
+                chain.radio_up()
+            except Exception:
+                pass
         except Exception as e:
             log("WiFi Serial radio config failed: " + str(e), LOG_ERROR)
             self.online = False
@@ -261,6 +310,44 @@ class WiFiSerialInterface(Interface):
             # to the expensive part" rather than silently doing nothing
             # useful and leaving the interface's own state stale.
             self.online = False
+
+    def _health(self):
+        """Each poll while online: keep the link alive (the Heltec's Wi-Fi
+        mode drops a quiet one). RNodeSerialInterface also checks the
+        radio is still there."""
+        if (time.time() - self._last_activity) > self.KEEPALIVE_INTERVAL:
+            self._send_keepalive()
+
+    def bluetooth(self, action):
+        """The RNode's Bluetooth: "on", "off", or "pair" (pairing mode; the
+        PIN comes back in self.bt). False if the radio isn't connected."""
+        if action not in BT_ACTIONS and action != "unpair" or not self.online or not self._socket:
+            return False
+        try:
+            if action == "unpair":
+                self._send_command(CMD_BT_UNPAIR, b"\x01")
+                self.bt["asked"] = action
+                return True
+            if action == "pair":
+                self.bt.update(pin=None, at=0)
+                # Bluetooth on first: pairing mode does nothing while it's off.
+                self._send_command(CMD_BT_CTRL, bytes([BT_ACTIONS["on"]]))
+            self._send_command(CMD_BT_CTRL, bytes([BT_ACTIONS[action]]))
+            self.bt["asked"] = action
+            return True
+        except Exception as e:
+            log("Bluetooth command failed: " + str(e), LOG_ERROR)
+            return False
+
+    def retry_now(self):
+        """Connect again right away -- the handshake and the radio set-up
+        from scratch (/admin's "Reconnect the radio"), skipping the
+        backoff."""
+        self._close_socket()
+        self.online = False
+        self._reconnect_count = 0
+        self._last_reconnect = 0
+        self.hw["detected"] = False
 
     def prime(self):
         """Sends a keepalive right now, unconditionally (not waiting for
@@ -310,6 +397,7 @@ class WiFiSerialInterface(Interface):
         try:
             self._connect()
         except Exception as e:
+            self.hw["error"] = str(e)
             log("WiFi Serial reconnect failed: " + str(e), LOG_ERROR)
 
     def process_outgoing(self, data):
@@ -347,7 +435,10 @@ class WiFiSerialInterface(Interface):
         if self._in_frame and byte == FEND:
             self._in_frame = False
             if self._command == CMD_DATA and len(self._buffer) > 0:
+                self.hw["last_rx"] = time.time()
                 self.process_incoming(bytes(self._buffer))
+            elif self._command is not None:
+                self._on_command(self._command, bytes(self._buffer))
             self._buffer = bytearray()
             self._command = None
 
@@ -373,6 +464,71 @@ class WiFiSerialInterface(Interface):
                         byte = FESC
                     self._escape = False
                 self._buffer.append(byte)
+
+    def _on_command(self, cmd, data):
+        """An RNode's own reports: never fatal, only recorded."""
+        h = self.hw
+        try:
+            n = len(data)
+            if cmd == CMD_DETECT and n and data[0] == DETECT_RESP:
+                h["detected"] = True
+            elif cmd == CMD_FW_VERSION and n >= 2:
+                h["fw"] = "%d.%02d" % (data[0], data[1])
+            elif cmd == CMD_PLATFORM and n:
+                h["platform"] = {0x80: "ESP32", 0x70: "nRF52", 0x90: "AVR"}.get(data[0], hex(data[0]))
+            elif cmd == CMD_STAT_RSSI and n:
+                h["rssi"] = data[0] - RSSI_OFFSET
+            elif cmd == CMD_STAT_SNR and n:
+                v = data[0]
+                h["snr"] = (v - 256 if v > 127 else v) * 0.25
+            elif cmd == CMD_STAT_CHTM and n >= 8:
+                h["airtime"] = ((data[0] << 8) | data[1]) / 100.0
+                h["channel_load"] = ((data[4] << 8) | data[5]) / 100.0
+                if n >= 10:
+                    h["noise"] = data[9] - RSSI_OFFSET
+            elif cmd == CMD_STAT_BAT and n >= 2:
+                h["battery"] = data[1]
+            elif cmd == CMD_STAT_TEMP and n:
+                h["temp"] = data[0] - 120
+            elif cmd == CMD_STAT_RX and n >= 4:
+                h["rx"] = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3]
+            elif cmd == CMD_STAT_TX and n >= 4:
+                h["tx"] = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3]
+            elif cmd == CMD_BT_PIN and n >= 4:
+                self.bt["pin"] = "%06d" % ((data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3])
+                self.bt["at"] = time.time()
+            elif cmd == CMD_ERROR and n:
+                h["error"] = _ERRORS.get(data[0], "error %s" % hex(data[0]))
+                log("RNode reports: " + h["error"], LOG_ERROR)
+            elif cmd in (CMD_FREQUENCY, CMD_BANDWIDTH) and n >= 4:
+                h["radio"]["frequency" if cmd == CMD_FREQUENCY else "bandwidth"] = \
+                    (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3]
+            elif cmd in (CMD_TXPOWER, CMD_SF, CMD_CR, CMD_RADIO_STATE) and n:
+                h["radio"][{CMD_TXPOWER: "txpower", CMD_SF: "sf", CMD_CR: "cr",
+                            CMD_RADIO_STATE: "on"}[cmd]] = data[0]
+            elif cmd not in (CMD_STAT_RSSI, CMD_STAT_SNR, CMD_BOARD, CMD_MCU, CMD_DETECT):
+                # Anything else it says, kept (the last few) for /admin's
+                # Bluetooth box: what the Heltec answered while pairing.
+                heard = self.bt["heard"]
+                heard.append("%02x:%s" % (cmd, "".join("%02x" % b for b in data[:8])))
+                del heard[:-8]
+        except Exception:
+            pass
+
+    def status(self):
+        """{"state": "online" | "connecting" | "error", ...} for the status
+        dot, /hw.json and /admin."""
+        h = dict(self.hw)
+        if self.online:
+            state = "online"
+        elif h.get("error") and self._reconnect_count >= 1:
+            state = "error"
+        else:
+            state = "connecting"
+        h.update(state=state, name=self.name, where=str(self.target_host),
+                 kind="wifi", settings={"frequency": self.frequency, "bandwidth": self.bandwidth,
+                                         "txpower": self.txpower, "sf": self.sf, "cr": self.cr})
+        return h
 
     async def poll_loop(self):
         import uasyncio as asyncio
@@ -403,8 +559,8 @@ class WiFiSerialInterface(Interface):
             except Exception as e:
                 log("WiFi Serial poll error: " + str(e), LOG_ERROR)
 
-            if self.online and (time.time() - self._last_activity) > self.KEEPALIVE_INTERVAL:
-                self._send_keepalive()
+            if self.online:
+                self._health()
 
             await asyncio.sleep(0.01)
 

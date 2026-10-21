@@ -4,7 +4,7 @@
 import os
 import time
 from . import const
-from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_EXTREME, LOG_NOTICE
+from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_EXTREME, LOG_NOTICE, sl
 from .crypto import (
     X25519PrivateKey, X25519PublicKey,
     Ed25519PrivateKey, Ed25519PublicKey,
@@ -160,7 +160,8 @@ class Identity:
 
             public_key = packet.data[:keysize]
 
-            log("Announce validate: data=" + str(len(packet.data)) + "B hdr=" + str(packet.header_type) + " ctx_flag=" + str(packet.context_flag) + " ctx=" + str(packet.context), LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Announce validate: data=" + str(len(packet.data)) + "B hdr=" + str(packet.header_type) + " ctx_flag=" + str(packet.context_flag) + " ctx=" + str(packet.context), LOG_DEBUG)
 
             base = keysize + name_hash_len + 10
             has_ratchet = packet.context_flag == const.FLAG_SET
@@ -179,10 +180,12 @@ class Identity:
                 if len(packet.data) > base + sig_len:
                     app_data = packet.data[base + sig_len:]
 
-            log("Announce fields: ratchet=" + str(len(ratchet)) + " sig=" + str(len(signature)) + " app=" + str(len(app_data)), LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Announce fields: ratchet=" + str(len(ratchet)) + " sig=" + str(len(signature)) + " app=" + str(len(app_data)), LOG_DEBUG)
 
             if len(signature) != sig_len:
-                log("Announce rejected: bad sig length " + str(len(signature)) + " (expected " + str(sig_len) + ")", LOG_DEBUG)
+                if sl(LOG_DEBUG):
+                    log("Announce rejected: bad sig length " + str(len(signature)) + " (expected " + str(sig_len) + ")", LOG_DEBUG)
                 return False
 
             signed_data = destination_hash + public_key + name_hash + random_hash + ratchet + app_data
@@ -198,7 +201,8 @@ class Identity:
             if not only_validate_signature and destination_hash in Identity.known_destinations:
                 cached = Identity.known_destinations[destination_hash]
                 if cached[2] == public_key:
-                    log("Announce from known dest " + destination_hash.hex()[:8] + ", skip verify", LOG_VERBOSE)
+                    if sl(LOG_VERBOSE):
+                        log("Announce from known dest " + destination_hash.hex()[:8] + ", skip verify", LOG_VERBOSE)
                     Identity.remember(packet.get_hash(), destination_hash, public_key, app_data)
                     if ratchet:
                         Identity._remember_ratchet(destination_hash, ratchet)
@@ -206,11 +210,13 @@ class Identity:
 
             announced_identity = Identity(create_keys=False)
             announced_identity.load_public_key(public_key)
-            log("Announce identity loaded: hash=" + str(announced_identity.hexhash), LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Announce identity loaded: hash=" + str(announced_identity.hexhash), LOG_DEBUG)
 
             sig_valid = announced_identity.validate(signature, signed_data)
             _gc_after_crypto()
-            log("Announce sig_valid=" + str(sig_valid), LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Announce sig_valid=" + str(sig_valid), LOG_DEBUG)
 
             # Fallback: if verification failed, try opposite ratchet assumption.
             # Some transport paths or older Reticulum versions may encode the
@@ -290,7 +296,8 @@ class Identity:
                 ]
             with open(Identity.storagepath + "/known_destinations.json", "w") as f:
                 json.dump(data, f)
-            log("Saved " + str(len(data)) + " known destinations", LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Saved " + str(len(data)) + " known destinations", LOG_DEBUG)
         except Exception as e:
             log("Error saving known destinations: " + str(e), LOG_ERROR)
 
@@ -317,7 +324,8 @@ class Identity:
                 by_age = sorted(kd, key=lambda k: kd[k][0])
                 for k in by_age[:len(kd) - const.MAX_KNOWN_DESTINATIONS]:
                     del kd[k]
-            log("Loaded " + str(len(Identity.known_destinations)) + " known destinations", LOG_VERBOSE)
+            if sl(LOG_VERBOSE):
+                log("Loaded " + str(len(Identity.known_destinations)) + " known destinations", LOG_VERBOSE)
         except OSError:
             log("No known destinations file found", LOG_VERBOSE)
         except Exception as e:
@@ -367,7 +375,8 @@ class Identity:
         self.sig_pub = self.sig_prv.public_key()
         self.sig_pub_bytes = self.sig_pub.public_bytes()
         self.update_hashes()
-        log("Identity keys created for " + self.hexhash, LOG_VERBOSE)
+        if sl(LOG_VERBOSE):
+            log("Identity keys created for " + self.hexhash, LOG_VERBOSE)
 
     def get_private_key(self):
         return self.prv_bytes + self.sig_prv_bytes
@@ -501,7 +510,8 @@ class Identity:
                             ratchet_id_receiver.latest_ratchet_id = None
 
                 except Exception as e:
-                    log("Decryption failed: " + str(e), LOG_DEBUG)
+                    if sl(LOG_DEBUG):
+                        log("Decryption failed: " + str(e), LOG_DEBUG)
                     if ratchet_id_receiver:
                         ratchet_id_receiver.latest_ratchet_id = None
 
@@ -523,7 +533,8 @@ class Identity:
                 self.sig_pub.verify(signature, message)
                 return True
             except Exception as e:
-                log("Ed25519 verify failed: " + str(e), LOG_DEBUG)
+                if sl(LOG_DEBUG):
+                    log("Ed25519 verify failed: " + str(e), LOG_DEBUG)
                 return False
         else:
             raise KeyError("No public key for validation")

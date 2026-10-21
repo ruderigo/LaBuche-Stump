@@ -1,0 +1,101 @@
+[fservbot] active: prefix '!', 11 trigger(s), notice off
+[stumpid] active: mode=open
+[plugin] active: fservbot, stumpid
+>> 50 /nick alice -> [] None
+>> 51 /nick bob -> [] None
+>> 52 /nick carol -> [] None
+>> 50 /admin pw mode hybrid -> ['mode set to hybrid'] None
+>> 51 hello -> [] None
+>> 51 /join x -> [] x
+>> 51 /msg alice hi -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /me waves -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /topic -> ['#x topic: (none set)'] None
+>> 51 /topic t -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /rooms -> ['#main ·2  General. Be decent.', '#lora-mesh ·0  LoRa (radio) traffic lands here by default.', '#x ·1'] None
+>> 51 /names -> ['#x: bob'] None
+>> 51 /whoami -> ['not verified this session -- /auth to prove an identity'] None
+>> 51 /whoami x -> ['? /whoami — unknown command: /whoami  (try /help)'] None
+>> 51 /help -> ['/nick <name>      change your name', '/join <room>      join or create a room', '/part             leave, back to #main', '/rooms            list rooms', "/names            who's in this room", '/topic <text>     set the room topic', '/msg <who> <text> private message, only they see it', '/me <action>      speak in the third person', '/clear            clear your own view', '/help             this list', '!fserv !help     the fserv bot  (/fshelp to configure it)', '✓ joined · ✗ left · ✎ changed · → to · ⊖ no one by that name · ~ on the mesh · [DM] private message · = already there · ? unknown command · ⊘ refused · ♪ voice note · ⧗ slow down'] None
+>> 51 /fslist -> ['active: !about, !busca, !cherche, !files, !find, !fserv, !help, !info, !list, !rules, !search'] None
+>> 51 /fsset op prefix ? -> ["trigger prefix is now '?' -- try ?fserv  (no SD card -- this lasts until reboot)"] None
+>> 51 /fsset op prefix ! -> ["trigger prefix is now '!' -- try !fserv  (no SD card -- this lasts until reboot)"] None
+>> 51 !list -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /invite alice -> ['only a verified identity can invite someone -- /auth first'] None
+>> 51 /nick bobby -> [] None
+>> 51 /nick bob -> [] None
+>> 50 /admin pw mode mandatory -> ['mode set to mandatory'] None
+>> 51 hello -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /join x -> ['⊘ #x mandatory — that room requires a verified identity -- send /auth first'] None
+>> 51 /msg alice hi -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /me waves -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /topic -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /topic t -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /rooms -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /names -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /whoami -> ['not verified this session -- /auth to prove an identity'] None
+>> 51 /whoami x -> ['? /whoami — unknown command: /whoami  (try /help)'] None
+>> 51 /help -> ['/nick <name>      change your name', '/join <room>      join or create a room', '/part             leave, back to #main', '/rooms            list rooms', "/names            who's in this room", '/topic <text>     set the room topic', '/msg <who> <text> private message, only they see it', '/me <action>      speak in the third person', '/clear            clear your own view', '/help             this list', '!fserv !help     the fserv bot  (/fshelp to configure it)', '✓ joined · ✗ left · ✎ changed · → to · ⊖ no one by that name · ~ on the mesh · [DM] private message · = already there · ? unknown command · ⊘ refused · ♪ voice note · ⧗ slow down'] None
+>> 51 /fslist -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /fsset op prefix ? -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /fsset op prefix ! -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 !list -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /invite alice -> ['only a verified identity can invite someone -- /auth first'] None
+>> 51 /nick bobby -> ['auth required for that -- send /auth to verify your identity'] None
+>> 51 /nick bob -> ['auth required for that -- send /auth to verify your identity'] None
+>> 50 /admin pw mode open -> ['mode set to open'] None
+>> 50 /admin pw room vip minted -> ['#vip is now minted'] None
+>> 50 /admin pw room club hybrid -> ['#club is now hybrid'] None
+>> 51 /rooms -> ['#main ·3  General. Be decent.', '#club ·0  [hybrid]', '#lora-mesh ·0  LoRa (radio) traffic lands here by default.', '#vip ·0  [minted]', '#x ·0'] None
+>> 51 /join vip -> ['⊘ #vip minted — that room requires a verified identity -- send /auth first'] None
+>> 51 /join club -> ['⊘ #club hybrid — that room is invite-only for unverified visitors -- ask someone already inside to /invite you'] None
+>> 52 /auth -> ['AUTH-CHALLENGE <nonce>'] None
+>> 52 /auth 8f40c5adb68f25624ae5b214ea767a6ec94d829d3d7b5e1ad1ba6f3e2138285f29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7 <sig> -> ['AUTH-OK aca31af0441d81dbec71e82da0b4b5f5'] None
+>> 52 /whoami -> ['verified as aca31af0441d81dbec71e82da0b4b5f5  nick=(no nick set)'] None
+>> 52 /nick carla -> [] None
+>> 52 /whoami -> ['verified as aca31af0441d81dbec71e82da0b4b5f5  nick=carla'] None
+>> 52 /join club -> [] club
+>> 52 /invite bob -> ['invited bob into #club'] None
+>> 51 /join club -> [] club
+>> 51 /join vip -> ['⊘ #vip minted — that room requires a verified identity -- send /auth first'] None
+>> 52 /join vip -> [] vip
+>> 50 /admin pw mode mandatory -> ['mode set to mandatory'] None
+>> 52 verified post -> [] None
+>> 52 /fslist -> ['active: !about, !busca, !cherche, !files, !find, !fserv, !help, !info, !list, !rules, !search'] None
+>> 51 /auth -> ['AUTH-CHALLENGE <nonce>'] None
+>> 51 /admin pw meshroom -> ['#lora-mesh is always available, mesh peers land there by default -- currently open to everyone (default). Change the tier with /admin <password> room lora-mesh <open|minted|hybrid>.'] None
+>> 50 /admin pw revoke aca31af0441d81dbec71e82da0b4b5f5 -> ['revoked'] None
+>> 52 /whoami -> ['not verified this session -- /auth to prove an identity'] None
+>> 50 /adminx -> ['auth required for that -- send /auth to verify your identity'] None
+>> 50 /admin pw -> ['not authorised -- or no admin password is configured yet, in which case /admin is off until a technician sets one.'] None
+>> 50 /admin pw bogus -> ['unknown admin command -- try mode, meshroom, revoke, room, or reset-access'] None
+>> 50 /admin pw mode open -> ['mode set to open'] None
+>> 53 /nick dan -> [] None
+>> 53 /join x -> [] x
+>> 53 in x -> [] None
+>> 50 /admin pw mode hybrid -> ['mode set to hybrid'] None
+dan now in x
+>> 53 hello main -> ['auth required for that -- send /auth to verify your identity'] None
+>> 53 /join wifi-mesh -> [] wifi-mesh
+>> 53 hello chain -> ['auth required for that -- send /auth to verify your identity'] None
+>> 53 /join lora-mesh -> [] lora-mesh
+>> 53 /join x -> [] x
+>> 53 /join main -> [] main
+>> 53 /msg alice hi -> ['auth required for that -- send /auth to verify your identity'] None
+>> ab /join lora-mesh -> [] lora-mesh
+>> ab over the air -> [] None
+>> ab /msg alice hi -> ['[DM] <firefly>: hi'] None
+>> 53 /auth -> ['AUTH-CHALLENGE <nonce>'] None
+>> 53 /auth 8f40c5adb68f25624ae5b214ea767a6ec94d829d3d7b5e1ad1ba6f3e2138285f29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7 <sig> -> ['AUTH-OK aca31af0441d81dbec71e82da0b4b5f5'] None
+>> 53 /join x -> [] x
+>> 53 verified in x -> [] None
+>> 54 /nick eve -> [] None
+>> 54 /join x -> [] x
+hybrid: eve may read True / dan True / firefly True
+>> 50 /admin pw mode mandatory -> ['mode set to mandatory'] None
+eve now in main / dan in x
+mandatory: eve may read False / dan True / firefly True
+>> 54 hello -> ['auth required for that -- send /auth to verify your identity'] None
+>> 54 /join x -> ['⊘ #x mandatory — that room requires a verified identity -- send /auth first'] None
+>> ab over the air, closed -> [] None
+>> 50 /admin pw mode open -> ['mode set to open'] None
+open: eve may read True

@@ -4,7 +4,7 @@
 import struct
 import time
 from . import const
-from .log import log, LOG_DEBUG, LOG_ERROR, LOG_EXTREME
+from .log import log, LOG_DEBUG, LOG_ERROR, LOG_EXTREME, sl
 
 
 class Packet:
@@ -144,7 +144,12 @@ class Packet:
                 and self.packet_type in (const.PKT_DATA, const.PKT_LINKREQUEST)):
             from .transport import Transport
             _entry = Transport.path_table.get(self.destination_hash)
-            if _entry is not None and _entry[const.IDX_PT_HOPS] > 1:
+            # A packet tied to one interface (the radio, for #lora-mesh
+            # between Stumps) goes straight to the destination there, not
+            # "via" a next hop learned on another interface (the chain).
+            if (_entry is not None and _entry[const.IDX_PT_HOPS] > 1
+                    and (self.attached_interface is None
+                         or _entry[const.IDX_PT_RECV_IF] is self.attached_interface)):
                 self.header_type = const.HDR_2
                 self.transport_type = const.TRANSPORT_TRANSPORT
                 self.transport_id = _entry[const.IDX_PT_NEXT_HOP]
@@ -226,7 +231,8 @@ class Packet:
             return True
 
         except Exception as e:
-            log("Malformed packet: " + str(e), LOG_EXTREME)
+            if sl(LOG_EXTREME):
+                log("Malformed packet: " + str(e), LOG_EXTREME)
             return False
 
     def send(self):
@@ -268,12 +274,12 @@ class Packet:
         return Identity.truncated_hash(self.get_hashable_part())
 
     def get_hashable_part(self):
-        hashable_part = bytes([self.raw[0] & 0b00001111])
+        # One allocation, not two: the memoryview avoids copying the body
+        # out of raw before joining it (each ~480-byte copy is ~0.3 ms on a
+        # CAM, whose heap is in PSRAM).
         if self.header_type == const.HDR_2:
-            hashable_part += self.raw[(const.TRUNCATED_HASHLENGTH // 8) + 2:]
-        else:
-            hashable_part += self.raw[2:]
-        return hashable_part
+            return bytes((self.raw[0] & 0b00001111,)) + memoryview(self.raw)[(const.TRUNCATED_HASHLENGTH // 8) + 2:]
+        return bytes((self.raw[0] & 0b00001111,)) + memoryview(self.raw)[2:]
 
     def prove(self, destination=None):
         """Send a proof (delivery receipt) back to the sender"""
@@ -296,7 +302,8 @@ class Packet:
             except:
                 pass
             proof.send()
-            log("Proof sent for " + self.packet_hash.hex()[:8], LOG_DEBUG)
+            if sl(LOG_DEBUG):
+                log("Proof sent for " + self.packet_hash.hex()[:8], LOG_DEBUG)
         else:
             log("Cannot prove packet: no signing identity", LOG_DEBUG)
 

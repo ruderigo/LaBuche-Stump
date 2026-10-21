@@ -16,12 +16,14 @@ How it fits together:
     with the Stump's address, so https://stump.example.app reaches the
     Stump, and the certificate is valid for that name -- no warning,
     even with no internet (phones already trust the issuing CA).
-  - Visitors who open a page over plain HTTP on the Stump's Wi-Fi get a
-    tiny page that asks their browser to fetch https://<hostname>/tls-ok;
-    only if that succeeds (certificate valid by the PHONE's clock) does it
-    move to HTTPS. Expired certificate, wrong clock, no answer: they stay
-    on HTTP, with no warning. Visitors on the router's LAN never try:
-    there the hostname resolves to the public internet, not this node.
+  - Only the voice recorder (/rrc/rec, a small window the chat opens)
+    and /admin use HTTPS; the chat and the other pages stay on plain HTTP,
+    where its 2-second polls cost no handshake. Before either, the
+    visitor's browser fetches https://<hostname>/tls-ok; only if that
+    succeeds (certificate valid by the PHONE's clock) is HTTPS used.
+    Expired certificate, wrong clock, no answer: plain HTTP and the
+    phone's recorder app, with no warning. Visitors on the router's LAN
+    never try: there the hostname resolves to the public internet.
 
 With no certificate installed, or a MicroPython without TLS server
 support, nothing changes: the node serves plain HTTP as before.
@@ -33,9 +35,22 @@ TLS_DIR = "/tls"
 CERT_FILE = TLS_DIR + "/fullchain.pem"
 KEY_FILE = TLS_DIR + "/privkey.pem"
 INFO_FILE = TLS_DIR + "/info.json"      # {"host", "not_after"} written at install
-AP_PREFIX = "192.168.4."                # the Stump's own Wi-Fi
+AP_PREFIX = "192.168.4."                # the Stump's own Wi-Fi (chain.py may move it)
 
-_state = {"active": False, "reason": "no certificate installed", "host": None, "not_after": None}
+
+def _ap_prefix():
+    try:
+        import chain
+        if chain.settings():
+            return chain.ap_prefix()
+    except Exception:
+        pass
+    return AP_PREFIX
+
+# "code" names the reason for /admin, which says it in the reader's
+# language (i18n admin_tls_why_<code>); "detail" is the technical part.
+_state = {"active": False, "reason": "no certificate installed", "code": "no_cert", "detail": "",
+          "host": None, "not_after": None}
 
 
 def _read(path):
@@ -49,7 +64,7 @@ def context():
         info = json.loads(_read(INFO_FILE))
         cert, key = _read(CERT_FILE), _read(KEY_FILE)
     except (OSError, ValueError):
-        _state.update(active=False, reason="no certificate installed")
+        _state.update(active=False, reason="no certificate installed", code="no_cert", detail="")
         return None
     _state.update(host=info.get("host"), not_after=info.get("not_after"))
     try:
@@ -57,17 +72,17 @@ def context():
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(cert, key)
     except (ImportError, AttributeError) as e:
-        _state.update(active=False, reason="this MicroPython can't serve TLS (%s)" % e)
+        _state.update(active=False, reason="this MicroPython can't serve TLS (%s)" % e, code="no_tls", detail=str(e))
         return None
     except Exception as e:
-        _state.update(active=False, reason="certificate or key rejected: %s" % e)
+        _state.update(active=False, reason="certificate or key rejected: %s" % e, code="rejected", detail=str(e))
         return None
-    _state.update(active=True, reason="")
+    _state.update(active=True, reason="", code="", detail="")
     return ctx
 
 
-def mark_failed(reason):
-    _state.update(active=False, reason=reason)
+def mark_failed(reason, code="failed", detail=""):
+    _state.update(active=False, reason=reason, code=code, detail=detail or reason)
 
 
 def status():
@@ -79,7 +94,7 @@ def https_redirect(peer_ip, path):
     visitors on the Stump's own Wi-Fi, where the hostname resolves here."""
     if not _state["active"] or not _state["host"]:
         return None
-    if not (peer_ip or "").startswith(AP_PREFIX):
+    if not (peer_ip or "").startswith(_ap_prefix()):
         return None
     return "https://" + _state["host"] + (path if path.startswith("/") else "/")
 

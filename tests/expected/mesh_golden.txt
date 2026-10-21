@@ -1,0 +1,20 @@
+[fservbot] active: prefix '!', 11 trigger(s), notice off
+[stumpid] active: mode=open
+[plugin] active: fservbot, stumpid
+>> web /admin pw room vip minted -> ['#vip is now minted'] None
+>> web /admin pw room lxmf hybrid -> ['#lora-mesh is now hybrid'] None
+peer main main
+>> mesh /help -> ['#<salle> <texte>  publier dans une salle précise', '/nick <nom>       changer de nom', '/join <salle>     rejoindre ou créer une salle', '/part             quitter, retour à #main', '/rooms            lister les salles', '/names            qui est dans cette salle', '/topic <texte>    changer le sujet de la salle', '/msg <qui> <texte> message privé, seul(e) cette personne le voit', '/me <action>      parler à la troisième personne', '/clear            effacer ta propre vue', '/help             cette liste', 'extras : /fshelp', '✓ arrivé · ✗ parti · ✎ changé · → vers · ⊖ personne de ce nom · ~ sur le maillage · [DM] message privé · = déjà là · ? commande inconnue · ⊘ refusé · ♪ note vocale · ⧗ ralentis'] None
+>> mesh /rooms -> ['#main ·1  Général. Reste correct.', '#lora-mesh ·0  Le trafic LoRa (radio) arrive ici par défaut.  [hybrid]', '#vip ·0  [minted]'] None
+>> mesh /join vip -> ["⊘ #vip minted — cette salle exige une identité vérifiée — envoie /auth d'abord"] None
+>> mesh #vip hi -> ["⊘ #vip minted — cette salle exige une identité vérifiée — envoie /auth d'abord"] None
+>> mesh hello -> [] None
+>> mesh /auth -> ['AUTH-CHALLENGE <n>'] None
+>> mesh /whoami -> ['not verified this session -- /auth to prove an identity'] None
+>> mesh /fslist -> ['active: !about, !busca, !cherche, !files, !find, !fserv, !help, !info, !list, !rules, !search'] None
+>> mesh !list -> [] None
+>> mesh /names -> ['#main: Rod, guest-xxxx'] None
+>> mesh /part -> ['= #main — tu es déjà dans #main'] None
+>> mesh /msg nobody x -> ['⊖ nobody'] None
+>> mesh /admin pw mode -> ['current mode: open'] None
+suffix '  [minted]' '⊘ #vip minted — that room requires a verified identity -- send /auth first'

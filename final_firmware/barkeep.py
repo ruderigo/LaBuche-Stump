@@ -19,9 +19,17 @@ import i18n
 import fserv
 import rrc
 import rrc_ui
+import plugins
 import theme
+import layout
 import features
 import radio
+import settings as stump_settings
+import profiles
+import guard     # ("settings" is a local name in places here)
+import conn      # the connections' deadlines and limits
+import ubinascii
+import keepalive  # a rescue start, the watchdog's last restart
 import propagation
 import stump_tls as tls  # not "tls": MicroPython has a built-in module by that name
 import flasher_ui
@@ -113,8 +121,142 @@ ul.files a{
   display:flex; align-items:center; gap:10px; flex:1; min-width:0;
   padding:14px 4px; text-decoration:none; min-height:44px;
 }
-ul.files a span{overflow-wrap:break-word; word-break:break-word;}
-ul.files small{flex-shrink:0; padding-left:8px; text-align:right;}
+ul.files a span{overflow-wrap:anywhere; min-width:0;}
+ul.files a svg{flex:none;}
+ul.files small{flex-shrink:0; padding-left:8px; text-align:right; max-width:40%;}
+/* Phones: the name gets the whole width, its details go under it. */
+@media (max-width:560px){
+  ul.files li{flex-wrap:wrap; gap:0;}
+  ul.files a{flex-basis:100%; padding-bottom:2px;}
+  ul.files small{max-width:none; text-align:left; padding:0 4px 12px 38px;}
+}
+/* BarKeep the librarian, and the sort / filter bar (/files, /billboard) */
+/* BarKeep the librarian: a firefly in the corner that opens into a chat */
+body.has-ff{padding-bottom:96px;}
+.ask{position:fixed; right:16px; bottom:16px; z-index:50; display:flex; flex-direction:column; align-items:flex-end; gap:10px;}
+.ff-btn{width:66px; height:66px; border-radius:50%; padding:0; border:1px solid var(--border); cursor:pointer;
+  background:radial-gradient(circle at 50% 50%, rgba(216,255,122,.22), transparent 62%), var(--panel);
+  box-shadow:0 6px 22px rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center;}
+.ff-btn:hover{border-color:var(--ember);}
+.ff-btn .bug{margin-top:10px;}
+.bug{display:inline-block; white-space:pre; line-height:.95; font:16px/0.95 ui-monospace,'SF Mono','Courier New',monospace;
+  color:var(--muted); text-align:center; animation:ffdrift 4.5s ease-in-out infinite;}
+.bug .c{color:#d8ff7a; text-shadow:0 0 5px #d8ff7a, 0 0 12px #9be33c, 0 0 22px #6fbf1f; animation:ffglow 2.6s ease-in-out infinite;}
+.bug .t{color:var(--dim); font-size:.8em; animation:fftrail 2.6s ease-in-out infinite;}
+.ask.busy .bug .c{animation-duration:.7s;}
+@keyframes ffglow{0%,100%{opacity:1}50%{opacity:.55}}
+@keyframes fftrail{0%,100%{opacity:.2}50%{opacity:.8}}
+@keyframes ffdrift{0%,100%{transform:translate(0,0)}25%{transform:translate(2px,-3px)}50%{transform:translate(0,-5px)}75%{transform:translate(-2px,-2px)}}
+@media (prefers-reduced-motion:reduce){.bug,.bug *{animation:none!important;}}
+.ff-panel{width:min(360px, calc(100vw - 32px)); max-height:min(560px, calc(100dvh - 120px)); display:flex; flex-direction:column;
+  background:var(--panel); border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 34px rgba(0,0,0,.5); overflow:hidden;}
+.ff-panel[hidden]{display:none;}
+.ff-head{display:flex; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid var(--line); background:var(--panel-2);}
+.ff-head .bug{font-size:12px;}
+.ff-head div{display:flex; flex-direction:column; min-width:0; line-height:1.2;}
+.ff-head small{color:var(--muted);}
+.ff-x{margin-left:auto; background:none; color:var(--muted); border:none; font-size:1.4rem; padding:0 6px; cursor:pointer;}
+.ff-log{flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px; min-height:120px;}
+.ff-log .m{max-width:92%; padding:8px 11px; border-radius:14px; overflow-wrap:anywhere; word-break:break-word; font-size:.93rem; line-height:1.4;}
+.ff-log .m p{margin:0 0 6px;} .ff-log .m p:last-child{margin:0;}
+.ff-log .bot{background:var(--panel-2); border:1px solid var(--line); border-bottom-left-radius:4px; align-self:flex-start;}
+.ff-log .you{background:var(--ember); color:var(--bg); border-bottom-right-radius:4px; align-self:flex-end;}
+.ff-log ul{list-style:none; padding:0; margin:4px 0 6px;}
+.ff-log li{padding:3px 0; border:none;}
+.ff-log li a{word-break:break-all;}
+.ff-log small{color:var(--muted); white-space:nowrap;}
+.ff-chips{display:flex; flex-wrap:wrap; gap:6px; padding:0 12px 8px;}
+.ff-chips button{padding:5px 10px; font-size:.82rem; font-weight:normal; background:var(--panel-2); color:var(--text);
+  border:1px solid var(--border); border-radius:999px;}
+.ff-in{display:flex; gap:6px; padding:10px 12px; border-top:1px solid var(--line);}
+.ff-in input{flex:1; min-width:0;}
+.ff-in button{padding:0 14px;}
+.finder{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0;}
+.finder input{flex:1; min-width:140px;}
+.finder select{font-family:inherit; font-size:1rem; padding:9px; border-radius:6px;
+  border:1px solid var(--border); background:var(--panel); color:var(--text);}
+/* Sort: one ⇅ in any language; the browser's own list (translated) opens on tap. */
+.sortbox{position:relative; flex:none; width:48px; height:44px;}
+.sortbox::before{content:'\\21C5'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:1.3rem; color:var(--text); pointer-events:none; border:1px solid var(--border); border-radius:6px; background:var(--panel);}
+.sortbox:focus-within::before{border-color:var(--ember);}
+.finder .sortbox select{position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; padding:0;}
+.pills{display:flex; flex-wrap:wrap; gap:6px; width:100%;}
+.pills button{padding:6px 12px; font-weight:normal; background:var(--panel); color:var(--text);
+  border:1px solid var(--border);}
+.pills button.on{background:var(--ember); color:var(--bg); border-color:var(--ember);}
+/* /admin */
+.admin-head{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+.admin-wide{max-width:640px; margin:0 auto;}
+.atiles{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:14px 0 6px;}
+@media (max-width:560px){.atiles{grid-template-columns:repeat(2,minmax(0,1fr));}}
+.atile{display:flex; flex-direction:column; align-items:flex-start; gap:2px; padding:12px 14px; background:var(--panel);
+  border:1px solid var(--border); border-radius:12px; color:var(--text); text-decoration:none; min-width:0;}
+a.atile:hover{border-color:var(--ember);}
+.atile .ti{font-size:1.3rem; line-height:1.2; height:1.6rem; display:flex; align-items:center;}
+.atile b{font-size:1.05rem; line-height:1.25; overflow-wrap:anywhere;}
+.atile small{color:var(--muted); font-size:.8rem; overflow-wrap:anywhere;}
+h2.grp{font-family:ui-monospace,'SF Mono','Courier New',monospace; font-size:.75rem; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--dim); margin:22px 0 8px; font-weight:normal;}
+details.card{background:var(--panel); border:1px solid var(--border); border-radius:12px; margin:0 0 8px; overflow:hidden;}
+details.card>summary{display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; list-style:none;}
+details.card>summary::-webkit-details-marker{display:none;}
+details.card>summary::after{content:'\u25b8'; color:var(--muted); margin-left:auto; transition:transform .15s;}
+details.card[open]>summary::after{transform:rotate(90deg);}
+details.card[open]>summary{border-bottom:1px solid var(--line);}
+details.card .ic{font-size:1.15rem; width:1.6rem; text-align:center; flex:none;}
+details.card .tx{display:flex; flex-direction:column; min-width:0; line-height:1.3;}
+details.card .ct{font-weight:bold; color:var(--text);}
+details.card>summary::after{flex:none;}
+details.card .pk{color:var(--muted); font-size:.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;}
+details.card .cb{padding:4px 14px 14px;}
+details.card .cb h2.sub{font-size:.95rem; margin:16px 0 6px;}
+details.inner{border:1px solid var(--line); border-radius:10px; margin:10px 0; background:var(--panel-2);}
+details.inner>summary{padding:10px 12px; cursor:pointer; font-weight:bold;}
+details.inner>summary .pk{font-weight:normal; color:var(--muted); font-size:.82rem;}
+details.inner>*:not(summary){margin-left:12px; margin-right:12px;}
+details.inner[open]{padding-bottom:10px;}
+.btrow{display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;}
+.seg{display:inline-flex; border:1px solid var(--border); border-radius:999px; overflow:hidden; margin:2px 0 6px;}
+.seg button{border:none; border-radius:0; background:var(--panel); color:var(--text); font-weight:normal; padding:8px 16px;}
+.seg button.on{background:var(--ember); color:var(--bg); font-weight:bold;}
+#btpin{margin:8px 0; padding:12px; border:1px dashed var(--ember); border-radius:10px; text-align:center;}
+#btpin small{display:block; color:var(--muted);}
+details.tips>summary{cursor:pointer; color:var(--muted); font-size:.88rem;}
+#btpin b{font:bold 2rem ui-monospace,'SF Mono','Courier New',monospace; letter-spacing:.18em; color:var(--ember-bright);}
+i.dot{display:inline-block; width:9px; height:9px; border-radius:50%; background:#f2efe8; margin-right:6px; vertical-align:middle;}
+i.dot.big{width:16px; height:16px; margin:0;}
+i.dot.online{background:#3fb950;} i.dot.connecting{background:#f0a030;} i.dot.error{background:#e5534b;}
+.admin-head h1{margin:0;}
+form.logout{margin:16px 0;}
+.admin-head form.logout{margin:0;}
+ul.plist li{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 14px;
+  align-items:center; padding:10px 0;}
+ul.plist .pname{font-weight:bold; word-break:normal; overflow-wrap:normal;}
+ul.plist .pstate{color:var(--muted); font-size:.9em;}
+ul.plist .pmeta, ul.plist .pcmds{display:block; font-size:.9em; color:var(--muted); margin-top:2px;}
+ul.plist .pcmds{color:var(--text); overflow-wrap:anywhere;}
+ul.plist .perr{display:block; color:var(--err); font-size:.9em; margin-top:2px;}
+ul.plist form{margin:0;}
+ul.plist button{white-space:nowrap;}
+ol.reorder{list-style:none; padding:0; margin:0;}
+ol.reorder li{display:flex; align-items:center; gap:10px; padding:6px 4px;
+  border-bottom:1px solid var(--border); cursor:grab; user-select:none; -webkit-user-select:none;}
+ol.reorder li:last-child{border-bottom:none;}
+ol.reorder li.dragging{opacity:.4;}
+ol.reorder li.off .rname{text-decoration:line-through; color:var(--muted);}
+ol.reorder li.off svg{opacity:.35;}
+ol.reorder button.vis{min-width:5.5em;}
+ol.reorder li.off button.vis{background:var(--panel-2); color:var(--text); border:1px solid var(--border);}
+ol.reorder li.over{border-top:2px solid var(--ember);}
+ol.reorder svg{width:22px; height:22px; flex-shrink:0;}
+ol.reorder .rname{flex:1; min-width:0;}
+ol.reorder .grip{color:var(--muted);}
+ol.reorder button{padding:6px 10px; font-size:.9rem;}
+@media (max-width:420px){ ul.plist li{grid-template-columns:1fr;} ul.plist form{justify-self:start;} }
+details.readme{margin-top:8px;}
+details.readme summary{cursor:pointer; color:var(--muted);}
+details.readme pre{white-space:pre-wrap; overflow-wrap:anywhere; font-size:.85em; margin:8px 0 0;}
 
 /* Two destination tiles. Grid so they stay equal width and stack
    sensibly on a narrow phone, which is the common case here. */
@@ -142,6 +284,14 @@ fieldset.opts{border:1px solid var(--border); border-radius:6px; padding:8px 12p
   display:flex; flex-direction:column; gap:6px;}
 fieldset.opts legend{color:var(--muted); padding:0 4px;}
 label.opt{display:flex; align-items:center; gap:8px; cursor:pointer;}
+form.setup details.inner{padding:0 12px;}
+form.setup details.inner[open]{padding-bottom:10px;}
+form.setup details.inner>summary{margin:0 -12px;}
+form.setup label:not(.opt){display:block; margin:10px 0;}
+form.setup input:not([type=radio]):not([type=checkbox]), form.setup textarea{width:100%; max-width:30rem; box-sizing:border-box;}
+form.setup .weights{display:grid; grid-template-columns:repeat(auto-fill,minmax(7rem,1fr)); gap:0 12px;}
+form.setup .weights p{grid-column:1/-1;}
+form.setup .weights label{margin:4px 0;}
 .home-layout.side .home-brand{margin:0;}
 @media (min-width:760px){
   .home-layout.side{display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:start;}
@@ -371,6 +521,14 @@ _ICON_BOARD = (
     "<path d='M6.5 11.5h5M6.5 14.5h8'/></svg>"
 )
 
+_ICON_PLUGIN = (
+    "<svg viewBox='0 0 24 24' width='30' height='30' fill='none' "
+    "stroke='currentColor' stroke-width='1.6' stroke-linecap='round' "
+    "stroke-linejoin='round'><path d='M10 4.5a2 2 0 1 1 4 0V6h4v4h-1.5a2 2 0 1 0 0 4H18v4h-4"
+    "v-1.5a2 2 0 1 0-4 0V18H6v-4h1.5a2 2 0 1 0 0-4H6V6h4z'/></svg>"
+)
+
+
 def _home_tiles(lang):
     """The three big tiles on the home page. Kept separate from _nav()
     (which builds the smaller nav-bar tiles used on every OTHER page)
@@ -383,31 +541,51 @@ def _home_tiles(lang):
     same thing -- no reason to translate one concept two different ways
     just because the original English text happened to say it twice."""
     # One card per row, icon on the left and the name and subtitle beside
-    # it: five cards squeezed into a grid were too compact to read.
-    return (
-        "<div class='tiles home'>"
-        + "".join(
-            "<a class='tile' href='" + href + "'>" + icon +
-            "<div class='tile-text'><span>" + i18n.t(label, lang) + "</span>"
-            "<small>" + i18n.t(sub, lang) + "</small></div></a>"
-            for feat, href, icon, label, sub in (
-                ("chat", "/rrc", _ICON_CHAT, "nav_chat", "tile_chat_sub"),
-                ("billboard", "/billboard", _ICON_BOARD, "nav_board", "tile_board_sub"),
-                ("files", "/files", _ICON_FILES, "nav_files", "tile_files_sub"),
-                (None, "/tools", _ICON_TOOLS, "nav_tools", "tile_tools_sub"),
-                ("about", "/about", _ICON_ABOUT, "nav_about", "tile_about_sub"),
-            )
-            if feat is None or features.enabled(feat)
-        ) +
-        "</div>"
-    )
+    # it: five cards squeezed into a grid were too compact to read. In
+    # the order an admin set in /admin (layout.py).
+    cards = home_tile_items(lang)
+    return ("<div class='tiles home'>"
+            + "".join(c[2] for c in cards) + "</div>")
+
+
+_HOME_TILES = (
+    ("chat", "chat", "/rrc", _ICON_CHAT, "nav_chat", "tile_chat_sub"),
+    ("board", "billboard", "/billboard", _ICON_BOARD, "nav_board", "tile_board_sub"),
+    ("files", "files", "/files", _ICON_FILES, "nav_files", "tile_files_sub"),
+    ("tools", None, "/tools", _ICON_TOOLS, "nav_tools", "tile_tools_sub"),
+    ("about", "about", "/about", _ICON_ABOUT, "nav_about", "tile_about_sub"),
+)
+
+
+def home_tile_items(lang, all=False):
+    """[(key, label, html)] for the home page's tiles, in layout order:
+    the built-in ones this node offers, then plugin cards (key "p:" +
+    their address). Tiles an admin hid only with all=True."""
+    items = {}
+    keys = []
+    for key, feat, href, icon, label, sub in _HOME_TILES:
+        if feat is not None and not features.enabled(feat):
+            continue
+        name = i18n.t(label, lang)
+        items[key] = (key, name, "<a class='tile' href='" + href + "'>" + icon +
+                      "<div class='tile-text'><span>" + name + "</span>"
+                      "<small>" + i18n.t(sub, lang) + "</small></div></a>")
+        keys.append(key)
+    for c in plugins.home_cards(lang):
+        # Cards plugins asked for (stump.page(..., nav="Polls")).
+        key = "p:" + c["href"]
+        items[key] = (key, c["label"], "<a class='tile' href='" + _attr_esc(c["href"]) + "'>" + _ICON_PLUGIN +
+                      "<div class='tile-text'><span>" + billboard._esc(c["label"]) + "</span>"
+                      "<small>" + billboard._esc(c["sub"]) + "</small></div></a>")
+        keys.append(key)
+    return [items[k] for k in layout.tiles(keys, all=all)]
 
 
 def _page(body):
     return ("<!DOCTYPE html>" + theme.html_open() + "<head><meta name='viewport' "
              "content='width=device-width, initial-scale=1'>"
              "<style>" + STYLE + "</style>"
-             "<script>" + theme.STARTUP_SCRIPT + "</script>"
+             "<script>" + theme.startup_script() + "</script>"
              "</head><body>" + body + "</body></html>")
 
 
@@ -466,6 +644,115 @@ def _clean_filename(name):
     return name.strip()
 
 
+def _librarian(text, lang):
+    """BarKeep as the librarian (librarian.py): (reply HTML, data) for a
+    question. Every name and text from the node is escaped, every link
+    percent-encoded as UTF-8."""
+    import librarian
+    files_on, board_on = features.enabled("files"), features.enabled("billboard")
+    r = librarian.search(text, files_on, board_on)
+    esc = billboard._esc
+    out = []
+    topic = esc(r["topic"])
+
+    def files_list(rows):
+        return "<ul>" + "".join(
+            "<li>&bull; <a href='/download?f=" + _url_encode(f["name"]) + "'>" + esc(f["name"])
+            + "</a> <small>(" + _human_size(f["size"]) + ")</small></li>" for f in rows) + "</ul>"
+
+    cats = [c for c in librarian.CATS if c in r["intents"]]
+    if not r["intents"] and not r["words"]:
+        return i18n.t("lib_hello", lang), r
+    if r["words"] or cats:                          # asked about files
+        if not files_on:
+            out.append("<p>" + i18n.t("lib_files_off", lang) + "</p>")
+        elif not r["sd"]:
+            out.append("<p>" + i18n.t("lib_no_card", lang) + "</p>")
+        elif r["files"]:
+            out.append("<p>" + i18n.t("lib_files_found", lang) + "</p>" + files_list(r["files"]))
+        elif r["others"]:
+            out.append("<p>" + i18n.t("lib_files_none_topic", lang, topic=topic) + " "
+                       + i18n.t("lib_files_others", lang, kind=i18n.t("kind_" + cats[0], lang)) + "</p>"
+                       + files_list(r["others"]))
+        elif cats:
+            have = ", ".join("%d %s" % (n, i18n.t("kind_" + c, lang)) for c, n in sorted(r["counts"].items()))
+            out.append("<p>" + i18n.t("lib_files_none_kind", lang, kind=i18n.t("kind_" + cats[0], lang)) + " "
+                       + (i18n.t("lib_shelf_has", lang, list=have) + " <a href='/files'>"
+                          + i18n.t("lib_files_open", lang) + "</a>" if have else i18n.t("lib_shelf_empty", lang))
+                       + "</p>")
+        elif r["posts"]:
+            out.append("<p>" + i18n.t("lib_files_none_topic", lang, topic=topic) + "</p>")
+        else:
+            out.append("<p>" + i18n.t("lib_nothing", lang, topic=topic) + "</p>")
+    if r["posts"]:
+        out.append("<p>" + i18n.t("lib_board_found", lang) + "</p><ul>" + "".join(
+            "<li>&bull; <b>" + esc(p["title"]) + "</b>"
+            + (" &mdash; <small>" + esc(p["snippet"]) + "</small>" if p["snippet"] else "") + "</li>"
+            for p in r["posts"]) + "</ul><p><a href='/billboard'>" + i18n.t("lib_board_open", lang) + "</a></p>")
+    elif "board" in r["intents"] and board_on:
+        out.append("<p>" + i18n.t("lib_board_none", lang) + "</p>")
+    if "apps" in r["intents"]:
+        if r["apps"]:
+            out.append("<p>" + i18n.t("lib_apps", lang) + "</p><ul>" + "".join(
+                "<li>&bull; <a href='/tool?f=" + _url_encode(a["file"]) + "'>" + esc(a["name"]) + "</a> <small>("
+                + _human_size(a["size"]) + ")</small></li>" for a in r["apps"]) + "</ul>")
+        else:
+            out.append("<p>" + i18n.t("lib_apps_none", lang) + " <a href='/tools'>/tools</a></p>")
+    return "".join(out) or i18n.t("lib_hello", lang), r
+
+
+_FIREFLY = ("<span class='bug' aria-hidden='true'><span class='c'>(\u25cf)</span>\n"
+            "<span class='t'>\u02d9 \u00b7</span></span>")
+
+
+def _ask_drawer(lang, open_=False):
+    """BarKeep the librarian, as a firefly in the corner (like a help chat):
+    tap it and it opens into a small chat that answers through POST /chat --
+    what's on this node: files, notices, apps. On /files, /billboard and
+    the home page -- unless /admin turned it off (Stump settings)."""
+    if not stump_settings.librarian_on():
+        return ""
+    name = _esc_name(BOT_NAME)
+    chips = "".join("<button type='button'>" + billboard._esc(c) + "</button>"
+                    for c in i18n.t("ask_chips", lang).split("|") if c)
+    return (
+        "<div class='ask' id='ask'>"
+        "<div class='ff-panel' id='ffp' role='dialog' aria-label='" + _attr_esc(i18n.t("ask_title", lang, bot=BOT_NAME)) + "'"
+        + ("" if open_ else " hidden") + ">"
+        "<div class='ff-head'>" + _FIREFLY + "<div><b>" + name + "</b><small>" + i18n.t("ask_role", lang)
+        + "</small></div><button type='button' class='ff-x' id='ffx' aria-label='\u00d7'>\u00d7</button></div>"
+        "<div class='ff-log' id='askout' aria-live='polite'><div class='m bot'>" + i18n.t("lib_hello", lang) + "</div></div>"
+        "<div class='ff-chips' id='ffc'>" + chips + "</div>"
+        "<div class='ff-in'><input id='askq' maxlength='200' autocomplete='off' placeholder='"
+        + billboard._esc(i18n.t("ask_short", lang)) + "'>"
+        "<button id='askgo' aria-label='" + _attr_esc(i18n.t("ask_button", lang)) + "'>\u2192</button></div></div>"
+        "<button type='button' class='ff-btn' id='ffb' aria-expanded='" + ("true" if open_ else "false")
+        + "' aria-controls='ffp' title='" + _attr_esc(i18n.t("ask_title", lang, bot=BOT_NAME)) + "'>" + _FIREFLY + "</button>"
+        "</div><script>" + _ASK_SCRIPT + "</script>"
+    )
+
+
+_ASK_SCRIPT = """(function(){
+var box=document.getElementById('ask'), p=document.getElementById('ffp'), b=document.getElementById('ffb'),
+    q=document.getElementById('askq'), out=document.getElementById('askout');
+document.body.classList.add('has-ff');
+function show(on){ p.hidden=!on; b.setAttribute('aria-expanded',on?'true':'false'); if(on){ q.focus(); out.scrollTop=out.scrollHeight; } }
+function say(cls,html,text){ var m=document.createElement('div'); m.className='m '+cls;
+  if(text!==undefined) m.textContent=text; else m.innerHTML=html; out.appendChild(m); out.scrollTop=out.scrollHeight; return m; }
+window.askBK=function(t){ t=(t||q.value||'').trim(); if(!t) return; show(true); q.value='';
+  say('you',null,t); var a=say('bot',null,'\u2026'); box.classList.add('busy');
+  fetch('/chat',{method:'POST',body:t}).then(function(r){return r.text();})
+    .then(function(h){ a.innerHTML=h; }, function(){ a.textContent='\u2014'; })
+    .then(function(){ box.classList.remove('busy'); out.scrollTop=out.scrollHeight; }); };
+b.onclick=function(){ show(p.hidden); };
+document.getElementById('ffx').onclick=function(){ show(false); b.focus(); };
+document.getElementById('askgo').onclick=function(){ askBK(); };
+q.addEventListener('keydown',function(e){ if(e.key==='Enter') askBK(); });
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&!p.hidden) show(false); });
+document.querySelectorAll('#ffc button').forEach(function(c){ c.onclick=function(){ askBK(c.textContent); }; });
+})();"""
+
+
 def _process_command(text, identifier, lang):
     cmd = text.strip()
     lower = cmd.lower()
@@ -493,8 +780,6 @@ def _process_command(text, identifier, lang):
     if lower in ("chat", "rrc", "irc", "talk"):
         return i18n.t("bot_chat_pointer", lang)
 
-    if lower == "billboard":
-        return i18n.t("bot_billboard_pointer", lang)
 
     if lower == "files":
         if not fserv.sd_ok:
@@ -532,7 +817,8 @@ def _process_command(text, identifier, lang):
         unit = i18n.t("bot_credit_singular", lang) if bal == 1 else i18n.t("bot_credit_plural", lang)
         return i18n.t("bot_balance_have", lang, n=str(bal), unit=unit)
 
-    return i18n.t("bot_unknown", lang)
+    # Anything else is a question for the librarian (librarian.py).
+    return _librarian(cmd, lang)[0]
 
 
 def _render_chat_page(lang):
@@ -585,12 +871,13 @@ def _render_concierge_page(lang):
     return (
         "<h1>" + _esc_name(BOT_NAME) + "</h1>"
         + _lang_switcher(lang, "/concierge") +
-        "<p class='sub'>" + i18n.t("barkeep_greeting", lang, bot_name=_esc_name(BOT_NAME)) + "</p>"
+        "<p class='sub'>" + i18n.t("barkeep_greeting", lang, bot_name=_esc_name(BOT_NAME)) + " "
+        + i18n.t("ask_hint", lang, bot=_esc_name(BOT_NAME)) + "</p>"
         "<div class='panel' id='log'>"
         "<p><b>" + _esc_name(BOT_NAME) + ":</b> " + i18n.t("barkeep_evening", lang) + "</p>"
         "</div>"
         "<div class='row'>"
-        "<input id='in' placeholder='" + i18n.t("home_say_something", lang) + "' autofocus>"
+        "<input id='in' placeholder='" + billboard._esc(i18n.t("ask_placeholder", lang, bot=BOT_NAME)) + "' autofocus>"
         "<button onclick='sendMsg()'>" + i18n.t("rrc_send", lang) + "</button>"
         "</div>"
         + _nav(lang, "home") +
@@ -643,12 +930,13 @@ _DESTINATIONS = {
 
 # Every page's navigation row is this list minus the page itself -- one
 # rule, one order, so no page can drift (four of them had: home, the
-# billboard, tools and about were each missing a destination).
-NAV_ORDER = ("chat", "board", "files", "tools", "about", "home")
+# billboard, tools and about were each missing a destination). The order
+# is the admin's, from /admin (layout.py); home first by default.
+NAV_ORDER = layout.NAV_DEFAULT
 
 
 def _nav_except(lang, current):
-    return _nav(lang, *[k for k in NAV_ORDER if k != current])
+    return _nav(lang, *[k for k in layout.nav() if k != current])
 
 
 # Nav keys that belong to a switchable feature (see features.py).
@@ -701,27 +989,300 @@ def _human_size(n):
         return "%d B" % n
     if n < 1024 * 1024:
         return "%.0f KB" % (n / 1024)
-    return "%.1f MB" % (n / (1024 * 1024))
+    if n < 1024 * 1024 * 1024:
+        return "%.1f MB" % (n / (1024 * 1024))
+    g = "%.1f" % (n / (1024 * 1024 * 1024))
+    return (g[:-2] if g.endswith(".0") else g) + " GB"
 
 
-def _check_admin_pw(pw):
+def _check_admin_pw(pw, who=None):
+    """True if pw unlocks admin actions -- unless `who` has tried too many
+    wrong passwords (guard.py): then False without trying."""
+    import guard
+    who = who or "web"
+    # The address, and the door itself across all addresses -- loosely
+    # (ADMIN_LOCK_AFTER wrong ones from anywhere), so guessing from many
+    # devices is slowed without one stranger easily locking the owner out.
+    # The computer the Stump runs on isn't counted at the door.
+    keys = [who] if conn._local(guard._k(who)) else [who, "door:admin"]
+    ok, wait = guard.password_many(lambda: _check_admin_pw_now(pw), keys, {"door:admin": ADMIN_LOCK_AFTER})
+    return ok
+
+
+ADMIN_LOCK_AFTER = 20
+
+
+async def _profile_pw(nick, pw, ip):
+    """(ok, wait_s) for a profile's password: the hashing doesn't hold up
+    the Stump; all checks together are budgeted (guard.pw_budget); wrong
+    ones lock the address AND the profile -- guesses from many devices
+    lock the account too."""
+    if not guard.pw_budget():
+        return False, 2
+    return await guard.password_async(lambda: profiles.check_async(nick, pw),
+                                      [ip, "nick:" + profiles.key(nick or "")])
+
+
+def _check_admin_pw_now(pw):
     """True if pw unlocks admin actions on this node -- the one real
     check, reused by every admin-gated route rather than each one
-    duplicating the same soft-import. Delegates entirely to
-    stumpid.core.check_admin_password (fail-closed, falls back to
-    fservbot's operator password -- see that function's own docstring).
-    Soft-imported the same way rrc_mesh.py already does for stumpid:
-    an admin route must still exist and correctly refuse on a node
-    where the plugin isn't installed at all, not crash with an
-    ImportError."""
+    duplicating it. Asks the "identity" service (stumpid, through
+    plugins.py: fail-closed, falls back to fservbot's operator password
+    -- see check_admin_password's own docstring). Without it, every
+    admin route still exists and refuses.""" 
+    ident = plugins.service_lookup("identity")
+    if ident is None:
+        if keepalive.mode() == "rescue":
+            # A rescue start loads no plugins: the same passwords, read
+            # where stumpid and fservbot read them (config.py), fail-closed.
+            try:
+                import config
+                want = getattr(config, "AUTH_ADMIN_PASSWORD", "") or getattr(config, "FSERVBOT_OP_PASSWORD", "")
+            except ImportError:
+                want = ""
+            return bool(want) and pw == want
+        return False
     try:
-        import stumpid.core as _stumpid
-        return _stumpid.check_admin_password(pw)
-    except ImportError:
+        return bool(ident.check_admin_password(pw))
+    except Exception as e:
+        print("[barkeep] admin password check failed, refusing:", e)
         return False
 
 
-def _render_admin_login_page(lang, error=False):
+# Admin sessions. Logging in with the password gives the browser a
+# random session token, in a cookie for /admin and in the page's forms
+# (instead of the password, which never comes back in a page). The login
+# answers with a redirect, so the browser's history holds a plain
+# GET /admin, never the form with the password: going Back after Log out
+# shows the password prompt, not the admin page, and can't resend the
+# password. Sessions end on Log out, after SESSION_IDLE_S without use,
+# and at restart (they're only in memory).
+try:
+    from config import BILLBOARD_POSTS_PER_MIN    # per visitor (guard.py)
+except ImportError:
+    BILLBOARD_POSTS_PER_MIN = 3
+POST_MAX, POST_PER_S = BILLBOARD_POSTS_PER_MIN, 60
+SESSION_IDLE_S = 1800
+SESSION_MAX = 8
+_sessions = {}          # token -> last used (time.time())
+ADMIN_COOKIE = "stump_admin"
+
+
+def _new_session():
+    import os, time, ubinascii
+    now = time.time()
+    for t in [t for t, seen in _sessions.items() if now - seen > SESSION_IDLE_S]:
+        del _sessions[t]
+    while len(_sessions) >= SESSION_MAX:
+        del _sessions[min(_sessions, key=lambda t: _sessions[t])]
+    tok = ubinascii.hexlify(os.urandom(16)).decode()
+    _sessions[tok] = now
+    return tok
+
+
+def _session_ok(tok):
+    import time
+    if not tok or tok not in _sessions:
+        return False
+    now = time.time()
+    if now - _sessions[tok] > SESSION_IDLE_S:
+        del _sessions[tok]
+        return False
+    _sessions[tok] = now
+    return True
+
+
+def _end_session(tok):
+    _sessions.pop(tok, None)
+
+
+def _admin_ok(pw, who=None):
+    """A form from an admin page: a live session token (what pages carry
+    now), or the password itself."""
+    return _session_ok(pw) or _check_admin_pw(pw, who)
+
+
+VISITOR_COOKIE = "stump_v"       # a browser's visitor ID (a year)
+PROFILE_COOKIE = "stump_p"       # a logged-in profile's session
+_seen_visitors = {}
+
+
+def _new_visitor_id():
+    return "v" + profiles._rand_hex(10)
+
+
+def _valid_visitor_id(v):
+    return len(v) == 21 and v[0] == "v" and all(c in "0123456789abcdef" for c in v[1:])
+
+
+def _visitor(writer, headers, ip, method, path=""):
+    """The ID a request is known by (see the request handler)."""
+    tok = _cookie(headers, PROFILE_COOKIE)
+    if tok:
+        nick = profiles.session_nick(tok)
+        if nick:
+            vid = "p:" + profiles.key(nick)
+            guard.net(vid, ip)
+            u = rrc._users.get(vid)
+            if u is None or u.get("nick") != nick:
+                rrc.touch_user(vid, nick=nick)
+            return vid
+    v = _cookie(headers, VISITOR_COOKIE)
+    if v and _valid_visitor_id(v):
+        guard.net(v, ip)
+        if v not in _seen_visitors:
+            _seen_visitors[v] = 1
+            if len(_seen_visitors) > 500:
+                _seen_visitors.clear()
+            _move_in(ip, v)
+        return v
+    if method == "GET" and not path.startswith(("/rrc/", "/hello", "/node.json", "/hw.json", "/stumps.json",
+                                                 "/files.json", "/billboard.json", "/tools.json")):
+        # Offered with the page; it counts from the browser's next request
+        # (a client that doesn't keep it stays known by its address). Not
+        # made for data requests -- an app polling every 2 s never keeps
+        # it, and only pages carry it.
+        writer._stump_set_cookie = (VISITOR_COOKIE + "=" + _new_visitor_id()
+                                    + "; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax")
+    return ip
+
+
+# The greeting (APP_HELLO in config.py, on by default): an app -- a client
+# that keeps no cookie, like FireFly -- must say who it is before it chats:
+# /auth (prove its identity, FireFly's one button), then /nick <its name>.
+# Until then it reads nothing, writes nothing, and isn't listed anywhere.
+# Why: known only by its Wi-Fi address, the same phone was one person on
+# LoRa, another on Wi-Fi, a third on the next Stump of the chain; proven,
+# it's one person everywhere (rrc_mesh.same_person), under the name it
+# chose. Browsers keep the Stump's cookie and are guests, as before.
+_HELLO_OK = ("/auth", "/nick", "/help", "/whoami")
+
+
+def _greeting(identifier, ip):
+    """None (not asked: a browser, the gate off, no identity plugin),
+    "done", or "required"."""
+    if identifier != ip:
+        return None
+    try:
+        import config
+        if not getattr(config, "APP_HELLO", True):
+            return None
+    except ImportError:
+        pass
+    sid = plugins.service_lookup("identity")
+    if sid is None:
+        return None
+    try:
+        verified = sid.is_verified(identifier)
+    except Exception:
+        verified = False
+    if verified and rrc.nick_chosen(identifier):
+        rrc.unhide(identifier)
+        return "done"
+    rrc.hide(identifier)
+    return "required"
+
+
+def _move_in(ip, vid):
+    """A browser's first request with its visitor ID: what this address
+    had (its nick, language, credits) moves to it, once -- unless the
+    address is a verified FireFly session (the app, which stays on it)."""
+    try:
+        sid = plugins.service_lookup("identity")
+        if sid is not None and sid.verified_identity_for(ip):
+            return
+    except Exception:
+        pass
+    old = rrc._users.get(ip)
+    if old is not None and vid not in rrc._users:
+        rrc.touch_user(vid, nick=None if old["nick"] == rrc.default_nick(ip) else old["nick"], room=old.get("room"))
+        rrc.drop_user(ip)
+    if ip in i18n._prefs and vid not in i18n._prefs:
+        i18n.set_lang(vid, i18n._prefs[ip])
+    fserv.move_credits(ip, vid)
+
+
+def _render_profile_page(lang, identifier, notice=""):
+    """/profile: a registered profile for a visitor without a FireFly --
+    log in, create one, or (logged in) its balance, a new password, log
+    out. Kept on this Stump and the Stumps of its chain."""
+    T = lambda k, **kw: i18n.t(k, lang, **kw)
+    esc = billboard._esc
+    note = ("<p class='sub'><b>" + esc(notice) + "</b></p>") if notice else ""
+    head = "<h1>" + T("profile_title") + "</h1>" + _lang_switcher(lang, "/profile") + note
+    if identifier.startswith("p:"):
+        rec = profiles.get(identifier[2:])
+        nick = rec["nick"] if rec else identifier[2:]
+        bal = ("<p class='sub'>" + T("profile_balance", n=fserv.credit_balance(identifier)) + "</p>"
+               if fserv.CREDITS_ENABLED else "")
+        body = ("<div class='panel'><p>" + T("profile_logged_in", nick="<b>" + esc(nick) + "</b>") + "</p>" + bal
+                + "<p class='sub'>" + T("profile_kept") + "</p>"
+                "<form method='POST' action='/profile/logout' class='post-form'>"
+                "<button type='submit'>" + T("profile_logout") + "</button></form></div>"
+                "<details class='inner'><summary>" + T("profile_change") + "</summary>"
+                "<form method='POST' action='/profile/password' class='post-form setup' autocomplete='off'>"
+                "<label>" + T("profile_current") + "<br><input type='password' name='old' required autocomplete='current-password'></label>"
+                "<label>" + T("profile_new") + "<br><input type='password' name='pw' required minlength='"
+                + str(profiles.PW_MIN) + "' autocomplete='new-password'></label>"
+                "<label>" + T("profile_again") + "<br><input type='password' name='pw2' required autocomplete='new-password'></label>"
+                "<button type='submit'>" + T("profile_change_go") + "</button></form></details>")
+    else:
+        cur = rrc.get_user(identifier)["nick"]
+        body = ("<p class='sub'>" + T("profile_intro") + "</p>"
+                "<div class='panel'><h2 class='sub'>" + T("profile_login") + "</h2>"
+                "<form method='POST' action='/profile/login' class='post-form setup' autocomplete='on'>"
+                "<label>" + T("rrc_profile_nick") + "<br><input name='nick' required maxlength='"
+                + str(profiles.NICK_MAX) + "' autocomplete='username'></label>"
+                "<label>" + T("profile_password") + "<br><input type='password' name='pw' required autocomplete='current-password'></label>"
+                "<button type='submit'>" + T("profile_login_go") + "</button></form></div>"
+                "<div class='panel'><h2 class='sub'>" + T("profile_create") + "</h2>"
+                "<form method='POST' action='/profile/register' class='post-form setup' autocomplete='off'>"
+                "<label>" + T("rrc_profile_nick") + "<br><input name='nick' required maxlength='"
+                + str(profiles.NICK_MAX) + "' value='" + esc("" if cur.startswith("guest-") else cur)
+                + "' autocomplete='username'></label>"
+                "<label>" + T("profile_password") + " " + T("profile_pw_rule", n=profiles.PW_MIN)
+                + "<br><input type='password' name='pw' required minlength='" + str(profiles.PW_MIN)
+                + "' autocomplete='new-password'></label>"
+                "<label>" + T("profile_again") + "<br><input type='password' name='pw2' required autocomplete='new-password'></label>"
+                "<p class='sub'><small>" + T("profile_no_email") + "</small></p>"
+                "<button type='submit'>" + T("profile_create_go") + "</button></form></div>"
+                "<p class='sub'><small>" + T("profile_firefly") + "</small></p>")
+    return head + body + _nav(lang, *layout.nav())
+
+
+def _profile_cookie(writer, tok):
+    writer._stump_set_cookie = (PROFILE_COOKIE + "=" + tok + "; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax"
+                                if tok else PROFILE_COOKIE + "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+
+
+def _log_in(writer, identifier, nick):
+    """This browser now is that profile: its chat nick, the room it was in."""
+    tok = profiles.start_session(nick)
+    _profile_cookie(writer, tok)
+    old = rrc._users.get(identifier)
+    pid = "p:" + profiles.key(nick)
+    rrc.touch_user(pid, nick=profiles.get(nick)["nick"], room=old.get("room") if old else None)
+    if old is not None and identifier != pid:
+        rrc.drop_user(identifier)
+    if identifier in i18n._prefs:
+        i18n.set_lang(pid, i18n._prefs[identifier])
+
+
+def _cookie(headers, name):
+    for part in headers.get("cookie", "").split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == name:
+            return v
+    return ""
+
+
+def _admin_logout_form(lang, tok):
+    return ("<form method='POST' action='/admin/logout' class='logout' autocomplete='off'>"
+            "<input type='hidden' name='admin_pass' value='" + billboard._esc(tok) + "'>"
+            "<button type='submit'>" + i18n.t("admin_logout", lang) + "</button></form>")
+
+
+def _render_admin_login_page(lang, error=False, wait=0):
     """The ONLY way to reach file deletion now -- no link, no nav tile,
     no button anywhere in the visible UI points here. Reachable only by
     typing the address directly, which is the point: the drawer this
@@ -730,7 +1291,8 @@ def _render_admin_login_page(lang, error=False):
     file. This page asks for the password exactly once regardless of
     how many files get selected next.
     """
-    err = "<p class='sub' style='color:var(--ember-bright);'>" + i18n.t("admin_wrong_password", lang) + "</p>" if error else ""
+    msg = i18n.t("admin_locked", lang, s=wait) if wait else i18n.t("admin_wrong_password", lang)
+    err = "<p class='sub' style='color:var(--ember-bright);'>" + msg + "</p>" if error else ""
     return (
         "<h1>" + i18n.t("admin_header", lang) + "</h1>"
         + err +
@@ -740,6 +1302,47 @@ def _render_admin_login_page(lang, error=False):
         "<button type='submit'>" + i18n.t("admin_login_button", lang) + "</button>"
         "</form>"
     )
+
+
+def _hw_brief(can_edit=False):
+    """The radio for the chat: {"state", "title", "settings", "edit"} --
+    the status dot, a line per radio, the settings in use, and whether
+    this visitor may change them (_radio_editor)."""
+    try:
+        h = radio.hw()
+        out = {"state": h["state"], "title": "\n".join(radio.hw_line(r) for r in h["radios"])}
+        cur = radio.current()
+        if cur and radio.chat_edit():
+            out["settings"] = cur
+            out["edit"] = bool(can_edit)
+        return out
+    except Exception as e:
+        return {"state": "error", "title": str(e)}
+
+
+_LOCAL = ("127.0.0.1", "::1", "localhost")
+
+
+def _radio_editor(identifier, headers):
+    """Who may change the radio from the chat: the person on the computer
+    the Stump runs on, or someone logged in to /admin (its session
+    cookie)."""
+    if not radio.chat_edit():
+        return False
+    return guard._k(identifier) in _LOCAL or _session_ok(_cookie(headers, ADMIN_COOKIE))
+
+
+def _release_line():
+    """"Stump Beta A · 1.0.0-beta.3": the release this node runs (set at
+    boot from example_node.py), so anyone can check it from a phone.
+    Empty before boot sets it (tests, a bare import)."""
+    info = rrc.NODE_INFO or {}
+    rel = info.get("release")
+    if not rel:
+        return ""
+    ver = info.get("version")
+    return ("<p class='sub release'>Stump " + billboard._esc((ver + " · ") if ver else "")
+            + billboard._esc(rel) + "</p>")
 
 
 def _render_admin_file_list_page(lang, names, pw):
@@ -776,18 +1379,315 @@ def _render_admin_file_list_page(lang, names, pw):
 
     # Sections for features this node doesn't offer are left out (their
     # delete routes answer 404 anyway); theme and logo settings always show.
-    files_part = ("<p class='sub'>" + i18n.t("admin_select_intro", lang) + "</p>" + file_section
+    files_part = ("<h2 class='sub'>" + i18n.t("admin_files_header", lang) + "</h2>"
+                  "<p class='sub'>" + i18n.t("admin_select_intro", lang) + "</p>" + file_section
                   if features.enabled("files") else "")
     board_part = _render_admin_billboard_section(lang, pw) if features.enabled("billboard") else ""
+    T = lambda k, **kw: i18n.t(k, lang, **kw)
+    radio_cur = radio.current()
+    hw = radio.hw()
+    import chain
+    ch = chain.status()
+    on_air = (
+        _card("radio", "\U0001f4fb", _render_admin_radio_section(lang, pw),
+              _radio_peek(hw, radio_cur, lang))
+        + _card("chain", "\U0001f517", _render_admin_chain_section(lang), _chain_peek(ch, lang))
+        + _card("pn", "\U0001f4ec", _render_admin_pn_section(lang, pw), ""))
+    content = (
+        _card("files", "\U0001f4c1", files_part, T("admin_peek_files", n=len(names)))
+        + _card("board", "\U0001f4cc", board_part, "")
+        + _card("home", "\U0001f3e0", _render_admin_home_section(lang, pw), "")
+        + _card("tools", "\U0001f9f0", _render_admin_tools_section(lang, pw), ""))
+    look = _card("look", "\U0001f3a8", _render_admin_site_theme_section(lang, pw)
+                 + _render_admin_layout_section(lang, pw) + _render_admin_settings_section(lang),
+                 _theme_label(theme.admin_choice(), lang) if theme.admin_choice() else "")
+    system = (
+        _card("setup", "\u2699\ufe0f", _render_admin_setup_section(lang, pw), _setup_peek(lang))
+        + _card("people", "\U0001f465", _render_admin_profiles_section(lang, pw),
+                T("admin_profiles_peek", n=len(profiles.all_profiles())))
+        + _card("plugins", "\U0001f9e9", _render_admin_plugins_section(lang, pw), _plugins_peek(lang))
+        + _card("https", "\U0001f512", _render_admin_tls_line(lang), "")
+        + _card("power", "\u23fb", _render_admin_power_section(lang, pw), ""))
     return (
-        "<h1>" + i18n.t("admin_header", lang) + "</h1>"
-        + files_part
-        + board_part
-        + _render_admin_tls_line(lang)
-        + _render_admin_home_section(lang, pw)
-        + _render_admin_radio_section(lang, pw)
-        + _render_admin_pn_section(lang, pw)
-        + _render_admin_settings_section(lang)
+        "<div class='admin-wide'>"
+        "<div class='admin-head'><h1>" + T("admin_header") + "</h1>"
+        + _admin_logout_form(lang, pw) + "</div>"
+        + _release_line()
+        + _render_admin_health(lang, pw)
+        + _admin_tiles(lang, hw, radio_cur, ch, len(names))
+        + _group(T("admin_group_air"), on_air)
+        + _group(T("admin_group_content"), content)
+        + _group(T("admin_group_look"), look)
+        + _group(T("admin_group_system"), system)
+        + _admin_logout_form(lang, pw)
+        + "</div><script>" + _ADMIN_CARDS_SCRIPT + "</script>"
+    )
+
+
+# ── /admin's layout: tiles at the top, then cards that open ──────────
+# Each section (its own renderer, unchanged) goes in a card: its first
+# heading becomes the card's title, a short line beside it says how it
+# stands, and the rest opens on a tap. The tiles at the top show the
+# Stump at a glance and open their card.
+
+def _card(cid, icon, body, peek="", open_=False):
+    if not body:
+        return ""
+    title = ""
+    if body.startswith("<h2 class='sub'>"):
+        end = body.find("</h2>")
+        title, body = body[16:end], body[end + 5:]
+    return ("<details class='card' id='c-" + cid + "'" + (" open" if open_ else "") + "><summary>"
+            "<span class='ic' aria-hidden='true'>" + icon + "</span><span class='tx'><span class='ct'>" + title + "</span>"
+            + ("<span class='pk'>" + peek + "</span>" if peek else "")
+            + "</span></summary><div class='cb'>" + body + "</div></details>")
+
+
+def _group(label, cards):
+    return ("<h2 class='grp'>" + label + "</h2>" + cards) if cards else ""
+
+
+def _radio_peek(hw, cur, lang):
+    if hw["state"] == "none":
+        return i18n.t("admin_peek_noradio", lang)
+    txt = i18n.t("rrc_hw_" + hw["state"], lang)
+    if cur:
+        txt += " · " + radio.hz_to_mhz(cur["frequency"]) + " MHz"
+    return "<i class='dot " + hw["state"] + "'></i>" + txt
+
+
+def _chain_peek(ch, lang):
+    if not ch.get("enabled"):
+        return ""
+    n = len(ch.get("below") or [])
+    role = i18n.t("admin_peek_root" if ch["role"] == "root" else "admin_peek_member", lang)
+    return role + " · " + i18n.t("admin_peek_below", lang, n=n)
+
+
+def _plugins_peek(lang):
+    try:
+        items = plugins.status()
+        on = sum(1 for p in items if p.get("state") == "on")
+        return i18n.t("admin_peek_plugins", lang, n=on, total=len(items))
+    except Exception:
+        return ""
+
+
+def _admin_tiles(lang, hw, cur, ch, nfiles):
+    """The Stump at a glance: radio, chain, people in the chat, files --
+    each opens its card below."""
+    T = lambda k, **kw: i18n.t(k, lang, **kw)
+    tiles = []
+    if hw["state"] != "none":
+        tiles.append(("radio", "<i class='dot big " + hw["state"] + "'></i>", T("rrc_hw_" + hw["state"]),
+                      (radio.hz_to_mhz(cur["frequency"]) + " MHz") if cur else T("admin_tile_radio")))
+    else:
+        tiles.append(("radio", "\U0001f4fb", T("admin_peek_noradio"), T("admin_tile_radio")))
+    if ch.get("enabled"):
+        tiles.append(("chain", "\U0001f517", T("admin_peek_root" if ch["role"] == "root" else "admin_peek_member"),
+                      T("admin_peek_below", n=len(ch.get("below") or []))))
+    try:
+        rrc._prune_users()
+        people = len(rrc._users)
+    except Exception:
+        people = 0
+    tiles.append(("", "\U0001f465", str(people), T("admin_tile_people")))
+    if features.enabled("files"):
+        tiles.append(("files", "\U0001f4c1", str(nfiles), T("admin_tile_files")))
+    out = []
+    for cid, icon, big, small in tiles:
+        inner = ("<span class='ti'>" + icon + "</span><b>" + big + "</b><small>" + small + "</small>")
+        out.append(("<a class='atile' href='#c-" + cid + "'>" + inner + "</a>") if cid
+                   else "<div class='atile'>" + inner + "</div>")
+    return "<div class='atiles'>" + "".join(out) + "</div>"
+
+
+# Opens the card a tile (or #c-...) points to, and remembers which cards
+# were open on this device (try/catch: storage may be off).
+_ADMIN_CARDS_SCRIPT = """(function(){
+function op(h){var d=h&&document.getElementById(h.slice(1));if(d&&d.tagName==='DETAILS'){d.open=true;d.scrollIntoView({block:'start'});}}
+var K='stumpAdminOpen',s=[];try{s=JSON.parse(localStorage.getItem(K)||'[]');}catch(e){}
+document.querySelectorAll('details.card').forEach(function(d){
+ if(s.indexOf(d.id)>=0)d.open=true;
+ d.addEventListener('toggle',function(){var o=[];document.querySelectorAll('details.card[open]').forEach(function(x){o.push(x.id);});
+  try{localStorage.setItem(K,JSON.stringify(o));}catch(e){}});});
+document.querySelectorAll('a.atile').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();op(a.getAttribute('href'));});});
+op(location.hash);})();"""
+
+
+def _theme_label(name, lang):
+    """A theme's name for people (plain text: escape it for HTML)."""
+    if name in theme.EXTRA:
+        return theme.label(name, lang)
+    return i18n.t("admin_theme_" + name, lang)
+
+
+def _render_admin_site_theme_section(lang, pw):
+    """The theme everyone gets, chosen here by an admin (theme.py saves it
+    on the board's own memory): every built-in and pack theme, and "as
+    set up", which goes back to config.py's THEME."""
+    current = theme.admin_choice()
+    opts = ["<label class='opt'><input type='radio' name='theme' value=''"
+            + (" checked" if current is None else "") + "> "
+            + billboard._esc(i18n.t("admin_site_theme_setup", lang,
+                                    name=_theme_label(theme.configured_theme(), lang)))
+            + "</label>"]
+    for n in theme.THEMES:
+        opts.append("<label class='opt'><input type='radio' name='theme' value='" + _attr_esc(n) + "'"
+                    + (" checked" if current == n else "") + "> " + billboard._esc(_theme_label(n, lang)) + "</label>")
+    return (
+        "<h2 class='sub'>" + i18n.t("admin_site_theme_header", lang) + "</h2>"
+        "<p class='sub'>" + i18n.t("admin_site_theme_intro", lang) + "</p>"
+        "<form method='POST' action='/admin/theme' class='post-form' autocomplete='off'>"
+        "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+        "<div class='panel'>" + "".join(opts) + "</div>"
+        "<button type='submit'>" + i18n.t("admin_site_theme_save", lang) + "</button>"
+        "</form>"
+    )
+
+
+def _nav_items(lang):
+    """[(key, label, icon)] for the navigation row, in layout order:
+    the destinations this node offers."""
+    out = []
+    for k in layout.nav(all=True):
+        if k not in _DESTINATIONS:
+            continue
+        feat = _NAV_FEATURE.get(k)
+        if feat is not None and not features.enabled(feat):
+            continue
+        href, icon, label = _DESTINATIONS[k]
+        out.append((k, i18n.t(label, lang), icon))
+    return out
+
+
+def _render_admin_layout_section(lang, pw):
+    """The order of the navigation buttons and of the home page's tiles:
+    drag them (or use the arrows, on a phone), then save. layout.py."""
+    hide, show = i18n.t("admin_layout_hide", lang), i18n.t("admin_layout_show", lang)
+
+    def lst(field, items):
+        off = layout.hidden(field)
+        return ("<ol class='reorder' data-field='" + field + "'>"
+                + "".join("<li draggable='true' data-key='" + _attr_esc(k) + "'"
+                          + (" class='off'" if k in off else "") + ">"
+                          "<span class='grip' aria-hidden='true'>⠿</span>" + icon
+                          + "<span class='rname'>" + billboard._esc(name) + "</span>"
+                          "<button type='button' class='vis'>" + (show if k in off else hide) + "</button>"
+                          "<button type='button' class='up' aria-label='↑'>▲</button>"
+                          "<button type='button' class='dn' aria-label='↓'>▼</button></li>"
+                          for k, name, icon in items)
+                + "</ol>")
+    tiles = []
+    icons = {k: icon for k, f, h, icon, l, sub in _HOME_TILES}
+    for k, name, html in home_tile_items(lang, all=True):
+        tiles.append((k, name, icons.get(k, _ICON_PLUGIN)))
+    return (
+        "<h2 class='sub'>" + i18n.t("admin_layout_header", lang) + "</h2>"
+        "<p class='sub'>" + i18n.t("admin_layout_intro", lang) + "</p>"
+        "<form method='POST' action='/admin/layout' autocomplete='off' id='layout-form'>"
+        "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+        "<input type='hidden' name='nav' value=''><input type='hidden' name='tiles' value=''>"
+        "<input type='hidden' name='nav_hidden' value=''><input type='hidden' name='tiles_hidden' value=''>"
+        "<div class='panel'><b>" + i18n.t("admin_layout_nav", lang) + "</b>" + lst("nav", _nav_items(lang)) + "</div>"
+        "<div class='panel'><b>" + i18n.t("admin_layout_tiles", lang) + "</b>" + lst("tiles", tiles) + "</div>"
+        "<div class='row'><button type='submit'>" + i18n.t("admin_layout_save", lang) + "</button>"
+        "<button type='submit' name='reset' value='1'>" + i18n.t("admin_layout_reset", lang) + "</button></div>"
+        "</form><script>" + _LAYOUT_SCRIPT.replace("I18N_HIDE", json.dumps(hide)).replace("I18N_SHOW", json.dumps(show))
+        + "</script>"
+    )
+
+
+# Drag and drop for the lists above, with arrows for touch screens
+# (HTML5 drag and drop doesn't work on most phones). On submit, each
+# list's order goes into its hidden field, comma-separated.
+_LAYOUT_SCRIPT = """
+(function(){
+  var f = document.getElementById('layout-form'); if (!f) return;
+  var drag = null;
+  f.querySelectorAll('ol.reorder').forEach(function(ol){
+    ol.addEventListener('dragstart', function(e){
+      drag = e.target.closest('li'); if (!drag) return;
+      drag.classList.add('dragging');
+      try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', drag.dataset.key); } catch (x) {}
+    });
+    ol.addEventListener('dragend', function(){
+      if (drag) drag.classList.remove('dragging'); drag = null;
+      ol.querySelectorAll('.over').forEach(function(x){ x.classList.remove('over'); });
+    });
+    ol.addEventListener('dragover', function(e){
+      if (!drag || drag.parentNode !== ol) return;
+      e.preventDefault();
+      var li = e.target.closest('li');
+      ol.querySelectorAll('.over').forEach(function(x){ x.classList.remove('over'); });
+      if (li && li !== drag) li.classList.add('over');
+    });
+    ol.addEventListener('drop', function(e){
+      if (!drag || drag.parentNode !== ol) return;
+      e.preventDefault();
+      var li = e.target.closest('li');
+      if (li && li !== drag) {
+        var r = li.getBoundingClientRect();
+        ol.insertBefore(drag, (e.clientY > r.top + r.height / 2) ? li.nextSibling : li);
+      }
+    });
+    ol.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if (!b) return;
+      var li = b.closest('li');
+      if (b.classList.contains('up') && li.previousElementSibling) ol.insertBefore(li, li.previousElementSibling);
+      if (b.classList.contains('dn') && li.nextElementSibling) ol.insertBefore(li.nextElementSibling, li);
+      if (b.classList.contains('vis')) {
+        li.classList.toggle('off');
+        b.textContent = li.classList.contains('off') ? I18N_SHOW : I18N_HIDE;
+      }
+    });
+  });
+  f.addEventListener('submit', function(){
+    f.querySelectorAll('ol.reorder').forEach(function(ol){
+      var keys = [], off = [];
+      ol.querySelectorAll('li').forEach(function(li){
+        keys.push(li.dataset.key);
+        if (li.classList.contains('off')) off.push(li.dataset.key);
+      });
+      f.elements[ol.dataset.field].value = keys.join(',');
+      f.elements[ol.dataset.field + '_hidden'].value = off.join(',');
+    });
+  });
+})();
+"""
+
+
+def _render_admin_tools_section(lang, pw):
+    """The Tools page's files, by section, each with a box to tick: a
+    whole section, or single files. Deleted from the SD card."""
+    if not fserv.sd_ok:
+        return ""
+    out = "<h2 class='sub'>" + i18n.t("admin_tools_header", lang) + "</h2>"
+    secs = fserv.tool_sections(lang)
+    if not secs:
+        return out + "<p class='sub'>" + i18n.t("admin_tools_none", lang) + "</p>"
+    rows = []
+    for sec in secs:
+        d = sec["dir"]
+        prefix = d + "/" if d else ""
+        if d:
+            rows.append("<li><label><input type='checkbox' name='d' value='" + _attr_esc(d) + "'> <b>"
+                        + billboard._esc(sec["title"]) + "</b> — "
+                        + i18n.t("admin_tools_whole", lang, n=len(sec["files"])) + "</label></li>")
+        else:
+            rows.append("<li><b>" + i18n.t("tools_other_h2", lang) + "</b></li>")
+        for n, size in sec["files"]:
+            rows.append("<li><label>&nbsp;&nbsp;&nbsp;<input type='checkbox' name='f' value='"
+                        + _attr_esc(prefix + n) + "'> " + billboard._esc(n)
+                        + "</label><small>" + _human_size(size) + "</small></li>")
+    return out + (
+        "<p class='sub'>" + i18n.t("admin_tools_intro", lang) + "</p>"
+        "<form method='POST' action='/admin/tools' autocomplete='off' onsubmit=\"return confirm("
+        + _attr_esc(json.dumps(i18n.t("admin_tools_confirm", lang))) + ")\">"
+        "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+        "<div class='panel'><ul class='files'>" + "".join(rows) + "</ul></div>"
+        "<button type='submit'>" + i18n.t("admin_delete_selected", lang) + "</button>"
+        "</form>"
     )
 
 
@@ -798,7 +1698,8 @@ def _render_admin_tls_line(lang):
     st = tls.status()
     head = "<h2 class='sub'>HTTPS</h2>"
     if not st["active"]:
-        return head + "<p class='sub'>" + i18n.t("admin_tls_off", lang, reason=billboard._esc(st["reason"])) + "</p>"
+        why = i18n.t("admin_tls_why_" + (st.get("code") or "failed"), lang, detail=st.get("detail") or st["reason"])
+        return head + "<p class='sub'>" + i18n.t("admin_tls_off", lang, reason=billboard._esc(why)) + "</p>"
     try:
         import propagation
         now = propagation.unix_now()
@@ -820,6 +1721,76 @@ def _render_admin_tls_line(lang):
     if days is not None and days < 21:
         line = "<b>" + line + " — " + i18n.t("admin_tls_renew", lang) + "</b>"
     return head + "<p class='sub'>" + line + "</p>"
+
+
+def _render_admin_chain_section(lang):
+    """A chain of Stumps over Wi-Fi (chain.py): this Stump's place in it.
+    Shown only on a Stump in a chain."""
+    import chain
+    st = chain.status()
+    if not st["enabled"]:
+        return ""
+    e = billboard._esc
+    lines = []
+    if st["role"] == "root":
+        lines.append(i18n.t("admin_chain_root", lang, ip=st["ap_ip"],
+                            channel=(" · Wi-Fi %d" % st["channel"]) if st["channel"] else ""))
+    else:
+        up = st["uplink"]
+        if up["ip"]:
+            heard = (i18n.t("admin_chain_heard", lang, s=up["parent_heard_s"])
+                     if up["parent_heard_s"] is not None else "")
+            lines.append(i18n.t("admin_chain_member", lang, ssid=e(up["ssid"]), ip=up["ip"],
+                                parent=up["parent"], heard=heard))
+        else:
+            lines.append(i18n.t("admin_chain_trying", lang, ssid=e(up["ssid"])))
+    lines.append(i18n.t("admin_chain_below", lang, list=", ".join(st["below"])) if st["below"]
+                 else i18n.t("admin_chain_none_below", lang))
+    if not st["secret"]:
+        lines.append("<b>" + i18n.t("admin_chain_nosecret", lang) + "</b>")
+    return ("<h2 class='sub'>" + i18n.t("admin_chain_header", lang) + "</h2>"
+            "<p class='sub'>" + "<br>".join(lines) + "</p>")
+
+
+def _render_admin_plugins_section(lang, pw):
+    """Plugins (plugins.py): what's installed, running or off, the RAM
+    each took to start, the last error, and an on/off switch saved
+    across restarts. Also says when the last boot went into safe mode."""
+    items = plugins.status()
+    out = "<h2 class='sub'>" + i18n.t("admin_plugins_header", lang) + "</h2>"
+    safe = plugins.safe_mode()
+    if safe["culprit"]:
+        out += "<p class='sub'><b>" + i18n.t("admin_plugins_culprit", lang, name=billboard._esc(safe["culprit"])) + "</b></p>"
+    elif safe["on"]:
+        out += "<p class='sub'><b>" + i18n.t("admin_plugins_safe", lang) + "</b></p>"
+    if not items:
+        return out + "<p class='sub'>" + i18n.t("plugin_none", lang) + "</p>"
+    hid = "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+    rows = []
+    for p in items:
+        on = p["state"] == "on"
+        meta = []
+        if p["version"]:
+            meta.append("v" + billboard._esc(str(p["version"])))
+        if p["mem"] is not None:
+            meta.append(_human_size(p["mem"]) + " RAM")
+        line = ("<div><span class='pname'>" + billboard._esc(p["name"]) + "</span> "
+                "<span class='pstate'>— " + i18n.t("admin_plugins_state_" + p["state"].replace("-", "_"), lang)
+                + "</span>"
+                + ("<span class='pmeta'>" + " · ".join(meta) + "</span>" if meta else "")
+                + ("<span class='pcmds'>" + " ".join("/" + c for c in p["commands"]) + "</span>"
+                   if p["commands"] else "")
+                + ("<span class='perr'>" + billboard._esc(p["error"]) + "</span>" if p["error"] else "")
+                + "</div>")
+        button = ""
+        if not (on and p["name"] in plugins.PROTECTED):
+            button = ("<form method='POST' action='/admin/plugins' autocomplete='off'>" + hid +
+                      "<input type='hidden' name='name' value='" + _attr_esc(p["name"]) + "'>"
+                      "<input type='hidden' name='action' value='" + ("off" if on else "on") + "'>"
+                      "<button type='submit'>" + i18n.t("admin_plugins_off" if on else "admin_plugins_on", lang)
+                      + "</button></form>")
+        rows.append("<li>" + line + button + "</li>")
+    return out + "<div class='panel'><ul class='plist'>" + "".join(rows) + "</ul></div>"
 
 
 def _render_admin_home_section(lang, pw):
@@ -881,6 +1852,318 @@ def _render_admin_pn_section(lang, pw):
     return head + body + toggle + mailbox + leave
 
 
+_HW_LIVE_SCRIPT = """<script>(function(){
+var L=HW_LABELS, box=document.getElementById('hwlive');
+function row(k,v){ return v===null||v===undefined||v===''?'':'<tr><th>'+k+'</th><td>'+v+'</td></tr>'; }
+function esc(t){ return String(t).replace(/[&<>"']/g,function(c){return '&#'+c.charCodeAt(0)+';';}); }
+function ago(t){ if(!t) return null; var s=Math.max(0,Math.round(Date.now()/1000-t)); return s+' s'; }
+function draw(h){
+  if(!h.radios.length){ box.innerHTML='<p class="sub">'+esc(L.none)+'</p>'; return; }
+  box.innerHTML=h.radios.map(function(r){
+    var set=r.settings||{}, echo=r.radio||{};
+    var mhz=function(hz){ return hz? (hz/1e6).toFixed(3)+' MHz':null; };
+    return '<table class="hwt"><caption><span class="hw-dot '+esc(r.state)+'"></span> '+esc(r.name)+' — '+esc(L[r.state]||r.state)+'</caption>'
+      +row(L.where, esc(r.where||'')+(r.device?' · '+esc(r.device):''))
+      +row('RNode', r.fw? esc(r.fw)+(r.platform?' · '+esc(r.platform):'') : null)
+      +row(L.error, r.state!=='online'&&r.error? esc(r.error):null)
+      +row(L.set, set.frequency? mhz(set.frequency)+' · '+(set.bandwidth/1000)+' kHz · SF'+set.sf+' · CR4/'+set.cr+' · '+set.txpower+' dBm':null)
+      +row(L.echo, echo.frequency? mhz(echo.frequency)+(echo.on===1?' · '+L.on:''):null)
+      +row('RSSI · SNR', r.rssi!==null? r.rssi+' dBm · '+r.snr+' dB':null)
+      +row(L.noise, r.noise!==null? r.noise+' dBm':null)
+      +row(L.load, r.channel_load!==null? r.channel_load+' % · '+L.airtime+' '+r.airtime+' %':null)
+      +row(L.battery, r.battery!==null? r.battery+' %':null)
+      +row(L.temp, r.temp!==null? r.temp+' °C':null)
+      +row(L.counts, r.rx!==null||r.tx!==null? (r.rx||0)+' / '+(r.tx||0):null)
+      +row(L.last, ago(r.last_rx))
+      +row(L.since, ago(r.since))
+      +'</table>';
+  }).join('');
+}
+function tick(){
+  fetch('/hw.json',{cache:'no-store'}).then(function(r){return r.json();}).then(draw)
+    .catch(function(){}).then(function(){ setTimeout(tick, 2000); });
+}
+tick();
+})();</script>"""
+
+
+def _render_admin_radio_live(lang, heading=True):
+    """The radio, live: whether the RNode answered, its firmware, the
+    settings it echoed back, signal of the last packet, noise floor,
+    channel load, battery -- refreshed every 2 s from /hw.json."""
+    if not radio.bridges():
+        return ""
+    labels = {k: i18n.t("admin_hw_" + k, lang) for k in (
+        "title", "none", "where", "error", "set", "echo", "on", "noise", "load", "airtime",
+        "battery", "temp", "counts", "last", "since")}
+    labels.update({k: i18n.t("rrc_hw_" + k, lang) for k in ("online", "connecting", "error")})
+    return (("<h2 class='sub'>" + labels["title"] + "</h2>" if heading else "")
+            + "<style>.hwt{border-collapse:collapse;margin:6px 0 14px;font-size:.85rem}"
+            ".hwt caption{text-align:left;font-weight:bold;padding:4px 0}"
+            ".hwt th{text-align:left;color:var(--muted);font-weight:normal;padding:2px 12px 2px 0;white-space:nowrap}"
+            ".hwt td{padding:2px 0}.hw-dot{display:inline-block;width:10px;height:10px;border-radius:50%;"
+            "background:#f2efe8;border:1px solid var(--border)}.hw-dot.online{background:#3fb950}"
+            ".hw-dot.connecting{background:#f0a030}.hw-dot.error{background:#e5534b}</style>"
+            "<div id='hwlive'><p class='sub'>…</p></div>"
+            + _HW_LIVE_SCRIPT.replace("HW_LABELS", json.dumps(labels)))
+
+
+def _host():
+    """The computer this Stump runs on (pc_compat's stump_host), or None on
+    a board."""
+    try:
+        import stump_host
+        return stump_host if getattr(stump_host, "IS_PC", False) else None
+    except ImportError:
+        return None
+
+
+def _render_admin_power_section(lang, pw):
+    """On a computer: turn this Stump off (it runs in the background, from
+    the login service). Started again from the Start file in its folder,
+    or at the next login."""
+    h = _host()
+    restart = ("<p class='sub'>" + i18n.t("admin_restart_intro", lang) + "</p>" + _render_admin_restart_form(lang, pw))
+    if h is None:
+        return "<h2 class='sub'>" + i18n.t("admin_power_header_cam", lang) + "</h2>" + restart
+    where = billboard._esc(getattr(h, "START_FILE", "Start Stump"))
+    return ("<h2 class='sub'>" + i18n.t("admin_power_header", lang) + "</h2>" + restart +
+            "<form method='POST' action='/admin/poweroff' class='post-form' onsubmit=\"return confirm("
+            + billboard._esc(json.dumps(i18n.t("admin_power_confirm", lang))) + ")\">"
+            "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+            "<p class='sub'>" + i18n.t("admin_power_intro", lang, start=where) + "</p>"
+            "<button type='submit'>" + i18n.t("admin_power_off", lang) + "</button></form>")
+
+
+def _setup_peek(lang):
+    s = stump_settings.current()
+    bits = [billboard._esc(s["NODE_NAME"]), i18n.t("admin_setup_" + stump_settings.economy(s), lang).split(" — ")[0]]
+    if stump_settings.has_access_modes():
+        bits.append(i18n.t("admin_setup_" + s["AUTH_MODE"], lang).split(" — ")[0])
+    return " · ".join(bits)
+
+
+_FEATURE_LABELS = {"chat": "nav_chat", "billboard": "nav_board", "files": "nav_files", "about": "nav_about"}
+
+
+def _render_admin_setup_section(lang, pw, notice=""):
+    """The Provisioner's answers, changed in place (settings.py): name and
+    bot, the file-sharing economy, who may enter, the features. Folded
+    groups, one Save; what waits for a restart says so, with the button."""
+    T = lambda k, **kw: i18n.t(k, lang, **kw)
+    S = stump_settings
+    s = S.current()
+    esc = billboard._esc
+    eco = S.economy(s)
+
+    def radio_row(name, value, checked, label):
+        return ("<label class='opt'><input type='radio' name='" + name + "' value='" + value + "'"
+                + (" checked" if checked else "") + "> " + label + "</label>")
+
+    names = ("<details class='inner'><summary>" + T("admin_setup_names") + " <span class='pk'>" + esc(s["NODE_NAME"])
+             + " · " + esc(s["BOT_NAME"]) + "</span></summary>"
+             "<label>" + T("admin_setup_node") + "<br><input name='node_name' maxlength='" + str(S.NAME_MAX)
+             + "' required value='" + esc(s["NODE_NAME"]) + "'></label>"
+             "<p class='sub'><small>" + T("admin_setup_node_note") + "</small></p>"
+             "<label>" + T("admin_setup_bot") + "<br><input name='bot_name' maxlength='" + str(S.BOT_MAX)
+             + "' required value='" + esc(s["BOT_NAME"]) + "'></label>"
+             "<label>" + T("admin_setup_greeting", n=S.GREETING_MAX) + "<br><textarea name='greeting' rows='3' maxlength='"
+             + str(S.GREETING_MAX) + "'>" + esc(s["MESH_GREETING"]) + "</textarea></label></details>")
+    w = s["CREDIT_WEIGHTS"]
+    files = ("<details class='inner'><summary>" + T("admin_setup_files") + " <span class='pk'>"
+             + T("admin_setup_" + eco).split(" — ")[0] + "</span></summary>"
+             + radio_row("economy", "free", eco == "free", T("admin_setup_free"))
+             + radio_row("economy", "standard", eco == "standard", T("admin_setup_standard"))
+             + radio_row("economy", "custom", eco == "custom", T("admin_setup_custom"))
+             + "<div class='weights' id='setupw'><p class='sub'><small>" + T("admin_setup_weights") + "</small></p>"
+             + "".join("<label>" + T("admin_setup_w_" + k) + "<br><input name='w_" + k + "' type='number' min='0' max='"
+                       + str(S.WEIGHT_MAX) + "' value='" + str(w.get(k, 1)) + "'></label>" for k in S.WEIGHT_CLASSES)
+             + "</div></details>")
+    access = ""
+    if S.has_access_modes():
+        access = ("<details class='inner'><summary>" + T("admin_setup_access") + " <span class='pk'>"
+                  + T("admin_setup_" + s["AUTH_MODE"]).split(" — ")[0] + "</span></summary>"
+                  + "".join(radio_row("auth_mode", m, s["AUTH_MODE"] == m, T("admin_setup_" + m)) for m in S.MODES)
+                  + "</details>")
+    on = s["FEATURES"]
+    feats = ("<details class='inner'><summary>" + T("admin_setup_features") + " <span class='pk'>"
+             + (" · ".join(T(_FEATURE_LABELS[f]) for f in on) or T("admin_setup_f_none")) + "</span></summary>"
+             + "".join("<label class='opt'><input type='checkbox' name='f_" + f + "' value='1'"
+                       + (" checked" if f in on else "") + "> " + T(_FEATURE_LABELS[f]) + "</label>" for f in S.FEATURES)
+             + "<label class='opt'><input type='checkbox' name='librarian' value='1'"
+             + (" checked" if s["LIBRARIAN"] else "") + "> " + T("admin_setup_librarian", bot=esc(s["BOT_NAME"])) + "</label>"
+             + "</details>")
+    store = ""
+    st = S.storage()
+    if st is not None:
+        # A computer's "card" (the sd/ folder): its size, what's in it, the disk.
+        share = int(st["mb"] * fserv.MAX_SD_RATIO) * S.MB
+        store = ("<details class='inner'><summary>" + T("admin_setup_storage") + " <span class='pk'>"
+                 + _human_size(st["mb"] * S.MB) + "</span></summary>"
+                 "<label>" + T("admin_setup_storage_mb") + "<br><input name='storage_mb' type='number' min='"
+                 + str(S.STORAGE_MIN_MB) + "' max='" + str(st["max_mb"]) + "' step='256' value='" + str(st["mb"]) + "'></label>"
+                 "<p class='sub'><small>" + T("admin_setup_storage_note", share=_human_size(share),
+                                              used=_human_size(st["used"]), free=_human_size(st["disk_free"]),
+                                              pct=int(fserv.MAX_SD_RATIO * 100)) + "</small></p>"
+                 "</details>")
+    return ("<h2 class='sub'>" + T("admin_setup_header") + "</h2>" + notice
+            + "<p class='sub'>" + T("admin_setup_intro") + "</p>"
+            "<form method='POST' action='/admin/setup' class='post-form setup' autocomplete='off'>"
+            "<input type='hidden' name='admin_pass' value='" + esc(pw) + "'>"
+            + names + files + store + access + feats
+            + "<button type='submit'>" + T("admin_setup_save") + "</button></form>"
+            "<script>(function(){var w=document.getElementById('setupw');function f(){"
+            "var c=document.querySelector(\"input[name=economy]:checked\");var on=c&&c.value==='custom';"
+            "w.style.opacity=on?'':'.5';w.querySelectorAll('input').forEach(function(i){i.disabled=!on;});}"
+            "document.querySelectorAll('input[name=economy]').forEach(function(r){r.onchange=f;});f();})();</script>")
+
+
+def _render_admin_profiles_section(lang, pw):
+    """The registered profiles (profiles.py), shared by the chain: each
+    one's balance; a new password (there's no email to reset it by), or
+    removing it (on every Stump of the chain)."""
+    T = lambda k, **kw: i18n.t(k, lang, **kw)
+    esc = billboard._esc
+    rows = []
+    for r in profiles.all_profiles():
+        n = r["nick"]
+        rows.append("<details class='inner'><summary>" + esc(n) + " <span class='pk'>"
+                    + T("profile_balance", n=profiles.balance(n)) + "</span></summary>"
+                    "<form method='POST' action='/admin/profiles' class='post-form setup' autocomplete='off'>"
+                    "<input type='hidden' name='admin_pass' value='" + esc(pw) + "'>"
+                    "<input type='hidden' name='nick' value='" + esc(n) + "'>"
+                    "<label>" + T("admin_profiles_newpw", n=profiles.PW_MIN) + "<br><input type='text' name='pw' minlength='"
+                    + str(profiles.PW_MIN) + "' autocomplete='off'></label>"
+                    "<button type='submit' name='action' value='reset'>" + T("admin_profiles_reset") + "</button> "
+                    "<button type='submit' name='action' value='delete' onclick=\"return confirm("
+                    + esc(json.dumps(T("admin_profiles_delete_confirm", nick=n))) + ")\">"
+                    + T("admin_profiles_delete") + "</button></form></details>")
+    return ("<h2 class='sub'>" + T("admin_profiles_header") + "</h2>"
+            "<p class='sub'>" + T("admin_profiles_intro") + "</p>"
+            + ("".join(rows) if rows else "<p class='sub'>" + T("admin_profiles_none") + "</p>"))
+
+
+def _render_admin_restart_form(lang, pw):
+    return ("<form method='POST' action='/admin/restart' class='post-form' onsubmit=\"return confirm("
+            + billboard._esc(json.dumps(i18n.t("admin_setup_restart_confirm", lang))) + ")\">"
+            "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+            "<button type='submit'>" + i18n.t("admin_setup_restart", lang) + "</button></form>")
+
+
+async def _restart_soon():
+    """After the answer has gone out: start the Stump again (from a rescue
+    start: a normal start, which is what restarting it is asked for)."""
+    import uasyncio as asyncio
+    await asyncio.sleep(1)
+    if keepalive.mode() == "rescue":
+        keepalive.try_normal()          # (restarts it)
+        return
+    stump_settings.restart()
+
+
+def _render_admin_health(lang, pw):
+    """At the top of /admin: a rescue start (what failed, when a normal
+    start is tried again, the button to try it now), or a note that the
+    watchdog restarted the Stump. Nothing when all is well."""
+    T = lambda k, **kw: i18n.t(k, lang, **kw)
+    st = keepalive.status()
+    esc = billboard._esc
+    if st["mode"] == "rescue":
+        return ("<div class='panel rescue'><h2 class='sub'>" + T("admin_rescue_header") + "</h2>"
+                "<p class='sub'>" + T("admin_rescue_text", n=st["failed_starts"],
+                                      why=esc(str(st["last_failure"] or "?")),
+                                      min=(st["retry_in_s"] or 0) // 60 + 1) + "</p>"
+                + _render_admin_restart_form(lang, pw).replace(
+                    T("admin_setup_restart") + "</button>", T("admin_rescue_try") + "</button>")
+                + "</div>")
+    if st["cause"] == "watchdog":
+        return "<p class='sub'><b>" + T("admin_watchdog_note") + "</b></p>"
+    return ""
+
+
+async def _power_off_soon():
+    """After the answer has gone out: turn the Stump off."""
+    import uasyncio as asyncio
+    await asyncio.sleep(1)
+    _host().power_off()
+
+
+def _render_admin_bt(lang, pw=""):
+    """How the Heltec is reached, folded ("Transport: USB"): the USB /
+    Bluetooth switch, "Reconnect the radio", and its Bluetooth from /admin,
+    no terminal: on, off, and pairing mode with the PIN shown here (polled
+    from /admin/bt.json, never in the public status)."""
+    T = lambda k: i18n.t(k, lang)
+    btn = lambda a, k: "<button type='button' data-bt='" + a + "'>" + T(k) + "</button>"
+    now = radio.link()
+    seg = ""
+    if now:
+        # A Heltec on this computer: USB or Bluetooth, switched live.
+        seg = ("<div class='seg' role='group' aria-label='" + T("admin_link_title") + "'>"
+               + "".join("<button type='button' data-link='" + k + "' aria-pressed='" + ("true" if now == k else "false")
+                         + "'" + (" class='on'" if now == k else "") + ">" + lbl + "</button>"
+                         for k, lbl in (("usb", "USB"), ("ble", "Bluetooth")))
+               + "</div><p class='sub'>" + T("admin_link_" + now) + "</p>")
+    how = {"usb": "USB", "ble": "Bluetooth"}.get(now) or "Wi-Fi"
+    retry = ("<form method='POST' action='/admin/radioretry' class='post-form inline'>"
+             "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+             "<p class='sub'>" + T("admin_radio_retry_intro") + "</p>"
+             "<button type='submit'>" + T("admin_radio_retry") + "</button></form>")
+    return ("<details class='inner' id='bt'" + (" open" if now == "ble" else "") + "><summary>" + T("admin_transport")
+            + " <span class='pk'>" + how + "</span></summary>"
+            + seg + retry +
+            "<p class='sub'>" + T("admin_bt_intro") + "</p>"
+            "<div class='btrow'>" + (btn("computer", "admin_bt_computer") if now == "usb" else "")
+            + (btn("pair", "admin_bt_pair") if now != "ble" else "") + btn("on", "admin_bt_on") + btn("off", "admin_bt_off")
+            + btn("unpair", "admin_bt_unpair")
+            + "</div>" + ("<p class='sub'>" + T("admin_bt_ble_note") + "</p>" if now == "ble" else "")
+            + "<p class='sub' id='btmsg' aria-live='polite'></p><div id='btpin' hidden></div>"
+            "<p class='sub' id='btprobe'></p>"
+            "<details class='tips'><summary>" + T("admin_bt_help") + "</summary><p class='sub'>" + T("admin_bt_tips")
+            + "</p><p class='sub'><small>" + T("admin_bt_heard") + " <code id='btheard'>\u2014</code></small></p></details></details>"
+            "<script>" + _BT_SCRIPT.replace("BT_LABELS", json.dumps({
+                "pairing": T("admin_bt_pairing"), "pin": T("admin_bt_pin"), "gone": T("admin_bt_gone"),
+                "switching": T("admin_link_switching"), "computer": T("admin_bt_computer_go"),
+                "searching": T("admin_bt_probe_searching"), "connected": T("admin_bt_probe_connected"),
+                "paired": T("admin_bt_probe_paired"), "left": T("admin_bt_left"),
+                "unpair": T("admin_bt_unpair_confirm")})) + "</script>")
+
+
+_BT_SCRIPT = """(function(){
+var L=BT_LABELS, msg=document.getElementById('btmsg'), pin=document.getElementById('btpin'),
+    probe=document.getElementById('btprobe'), heard=document.getElementById('btheard'), timer=null, switched=false;
+function link(k){ msg.textContent=L.switching;
+  return fetch('/admin/radiolink.json',{method:'POST',body:'link='+k}).then(function(r){return r.json();})
+   .then(function(d){ msg.textContent=d.message||''; if(d.ok) setTimeout(function(){ location.reload(); },2500); })
+   .catch(function(){ msg.textContent='\\u2014'; }); }
+function poll(t0, base){ var left=Math.max(0, 35-Math.round((Date.now()-t0)/1000));
+  fetch('/admin/bt.json').then(function(r){return r.json();}).then(function(d){
+  if(d.pin){ pin.hidden=false; pin.innerHTML='<small></small><b></b>'; pin.firstChild.textContent=L.pin; pin.lastChild.textContent=d.pin; }
+  var p = d.probe==='paired' ? L.paired : d.probe==='connected' ? L.connected : d.probe==='searching' ? L.searching : (d.probe||'');
+  probe.textContent=p;
+  if(d.heard&&d.heard.length) heard.textContent=d.heard.join(' ');
+  if(d.probe==='paired'&&!switched){ switched=true; clearInterval(timer); link('ble'); return; }
+  msg.textContent = left>0 ? base+' '+L.left.replace('{s}',left) : L.gone;
+  if(Date.now()-t0>60000){ clearInterval(timer); }
+ }).catch(function(){}); }
+function watch(base){ var t0=Date.now(); clearInterval(timer); timer=setInterval(function(){poll(t0, base);},1000); }
+document.querySelectorAll('#bt [data-link]').forEach(function(b){ b.onclick=function(){
+  if(!b.classList.contains('on')) link(b.getAttribute('data-link')); }; });
+document.querySelectorAll('#bt [data-bt]').forEach(function(b){ b.onclick=function(){
+  var a=b.getAttribute('data-bt'); if(a==='unpair'&&!confirm(L.unpair)) return;
+  msg.textContent='\\u2026'; pin.hidden=true; probe.textContent='';
+  fetch('/admin/bluetooth.json',{method:'POST',body:'action='+a}).then(function(r){return r.json();}).then(function(d){
+    msg.textContent=d.message||'';
+    if((a==='pair'||a==='computer')&&d.ok){ watch(a==='computer'?L.computer:L.pairing); }
+  }).catch(function(){ msg.textContent='\\u2014'; }); }; });
+})();"""
+
+
+def _admin_or_local(identifier, headers):
+    """The person on the computer the Stump runs on, or an /admin session."""
+    return guard._k(identifier) in _LOCAL or _session_ok(_cookie(headers, ADMIN_COOKIE))
+
+
 def _render_admin_radio_section(lang, pw):
     """The Heltec Bridge's radio settings (radio.py). Shows what the
     bridge is using right now; applying sends them to the Heltec at once
@@ -897,8 +2180,7 @@ def _render_admin_radio_section(lang, pw):
     def field(label_key, control):
         return "<label>" + i18n.t(label_key, lang) + "<br>" + control + "</label>"
 
-    return (
-        head +
+    settings = (
         "<p class='sub'>" + i18n.t("admin_radio_intro", lang) + "</p>"
         "<form method='POST' action='/admin/radio' class='post-form' autocomplete='off'>"
         "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
@@ -911,7 +2193,21 @@ def _render_admin_radio_section(lang, pw):
         + field("radio_cr", "<select name='cr'>" + opts(range(radio.CR_MIN, radio.CR_MAX + 1), cur["cr"],
                 lambda v: "4/%d" % v) + "</select>")
         + "<button type='submit'>" + i18n.t("admin_radio_save", lang) + "</button>"
-        "</form>"
+        "</form>")
+    return (
+        head
+        + _render_admin_radio_live(lang, heading=False) +
+        "<details class='inner'><summary>" + i18n.t("admin_radio_settings", lang) + " <span class='pk'>"
+        + radio.hz_to_mhz(cur["frequency"]) + " MHz · " + ("%g" % (cur["bandwidth"] / 1000)) + " kHz · SF"
+        + str(cur["sf"]) + " · CR4/" + str(cur["cr"]) + " · " + str(cur["txpower"]) + " dBm</span></summary>"
+        + settings + "</details>"
+        + _render_admin_bt(lang, pw) +
+        "<form method='POST' action='/admin/radiochat' class='post-form'>"
+        "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+        "<input type='hidden' name='on' value='" + ("0" if radio.chat_edit() else "1") + "'>"
+        "<p class='sub'>" + i18n.t("admin_radio_chat_on" if radio.chat_edit() else "admin_radio_chat_off", lang) + "</p>"
+        "<button type='submit'>" + i18n.t("admin_radio_chat_turn_off" if radio.chat_edit() else "admin_radio_chat_turn_on", lang)
+        + "</button></form>"
     )
 
 
@@ -986,14 +2282,18 @@ def _render_admin_settings_section(lang):
     """
     return (
         "<h2 class='sub'>" + i18n.t("admin_theme_header", lang) + "</h2>"
+        "<p class='sub'>" + i18n.t("admin_theme_browser_intro", lang) + "</p>"
         "<div class='panel'>"
         "<div class='row'>"
         "<button type='button' onclick=\"stumpSetTheme('site')\">" + i18n.t("admin_theme_site", lang)
-        + " (" + i18n.t("admin_theme_" + theme.site_theme(), lang) + ")</button>"
+        + " (" + (billboard._esc(theme.label(theme.site_theme(), lang)) if theme.site_theme() in theme.EXTRA
+                  else i18n.t("admin_theme_" + theme.site_theme(), lang)) + ")</button>"
         "<button type='button' onclick=\"stumpSetTheme('amber')\">" + i18n.t("admin_theme_amber", lang) + "</button>"
         "<button type='button' onclick=\"stumpSetTheme('phosphor')\">" + i18n.t("admin_theme_phosphor", lang) + "</button>"
         "<button type='button' onclick=\"stumpSetTheme('oled')\">" + i18n.t("admin_theme_oled", lang) + "</button>"
         "<button type='button' onclick=\"stumpSetTheme('paper')\">" + i18n.t("admin_theme_paper", lang) + "</button>"
+        + "".join("<button type='button' onclick=\"stumpSetTheme('" + n + "')\">"
+                  + billboard._esc(theme.label(n, lang)) + "</button>" for n in sorted(theme.EXTRA)) +
         "</div>"
         "<p class='sub'>" + i18n.t("admin_theme_custom_intro", lang) + "</p>"
         "<div class='row'>"
@@ -1023,7 +2323,8 @@ def _render_admin_settings_section(lang):
         "<script>" + _ADMIN_SETTINGS_SCRIPT.replace(
             "I18N_LOGO_RESET_NOTICE",
             json.dumps(i18n.t("admin_logo_reset_notice", lang)).replace("</", "<\\/")
-        ).replace("STUMP_SITE_THEME", json.dumps(theme.site_theme())) + "</script>"
+        ).replace("STUMP_SITE_THEME", json.dumps(theme.site_theme())
+        ).replace("STUMP_SITE_STAMP", json.dumps(theme.site_stamp())) + "</script>"
     )
 
 
@@ -1053,6 +2354,7 @@ function stumpSetTheme(t){
       document.documentElement.setAttribute('data-theme', STUMP_SITE_THEME);
     } else {
       localStorage.setItem('stump_theme', t);
+      localStorage.setItem('stump_theme_stamp', STUMP_SITE_STAMP);
       document.documentElement.setAttribute('data-theme', t);
     }
   } catch (e) {}
@@ -1085,6 +2387,7 @@ function stumpSaveCustomPalette(){
     colors['--ember-bright'] = colors['--ember'];
     localStorage.setItem('stump_custom_colors', JSON.stringify(colors));
     localStorage.setItem('stump_theme', 'custom');
+    localStorage.setItem('stump_theme_stamp', STUMP_SITE_STAMP);
     document.documentElement.removeAttribute('data-theme');
     for (var k in colors) document.documentElement.style.setProperty(k, colors[k]);
   } catch (e) {}
@@ -1149,26 +2452,28 @@ def _render_files_page(lang):
     if not fserv.sd_ok:
         rows = "<p class='sub'>" + i18n.t("files_no_card", lang) + "</p>"
     else:
-        names = fserv._list_files()
-        if not names:
+        shelf = fserv.query_files(None, None, "newest", 0)
+        if not shelf:
             rows = "<p class='sub'>" + i18n.t("files_none_yet", lang) + "</p>"
         else:
             items = []
-            for n in names:
+            for f in shelf:
+                n = f["name"]
                 cls = fserv.guess_class(n)
-                try:
-                    size = _human_size(os.stat(fserv.SHARED_DIR + "/" + n)[6])
-                except Exception:
-                    size = ""
+                size = _human_size(f["size"]) if f["size"] else ""
                 meta = cls + (", " + size if size else "")
                 if fserv.CREDITS_ENABLED:
                     meta += " &middot; %d %s" % (fserv.credit_cost(n), i18n.t("files_credit_suffix", lang))
+                # data-*: the sort and filter bar works on these, in the browser.
                 items.append(
-                    "<li><a href='/download?f=" + _url_encode(n) + "'>"
+                    "<li data-name='" + billboard._esc(n) + "' data-size='%d' data-mtime='%d' data-cat='%s'>"
+                    % (f["size"], f["mtime"], f["cat"])
+                    + "<a href='/download?f=" + _url_encode(n) + "'>"
                     + _ICON_DOWNLOAD + "<span>" + billboard._esc(n) + "</span>"
                     "</a><small>" + meta + "</small></li>"
                 )
-            rows = "<ul class='files'>" + "".join(items) + "</ul>"
+            rows = ("<ul class='files'>" + "".join(items) + "</ul>"
+                    "<p id='fnone' class='sub' style='display:none'>" + i18n.t("filter_none", lang) + "</p>")
 
     # Upload lives here, next to the shelf it adds to (it used to sit on
     # the home page). Shown only with a card mounted -- without one,
@@ -1190,14 +2495,77 @@ def _render_files_page(lang):
                 .replace("I18N_UPLOAD_ERROR", json.dumps(i18n.t("home_upload_error", lang)).replace("</", "<\\/"))
         )
 
+    finder = ""
+    if fserv.sd_ok:
+        sorts = "".join("<option value='%s'>%s</option>" % (k, i18n.t("sort_" + k, lang))
+                        for k in ("newest", "oldest", "name", "small", "large"))
+        pills = "".join("<button type='button' data-cat='%s'%s>%s</button>"
+                        % (c, " class='on'" if not c else "", i18n.t("cat_" + (c or "all"), lang))
+                        for c in ("", "video", "music", "document", "image", "other"))
+        finder = (
+            "<div class='finder'><input id='flt' type='search' placeholder='"
+            + billboard._esc(i18n.t("filter_placeholder", lang, bot=BOT_NAME)) + "' aria-label='"
+            + billboard._esc(i18n.t("filter_placeholder", lang, bot=BOT_NAME)) + "'>"
+            "<span class='sortbox' title='" + billboard._esc(i18n.t("sort_label", lang)) + "'>"
+            "<select id='srt' aria-label='" + billboard._esc(i18n.t("sort_label", lang)) + "'>" + sorts + "</select></span>"
+            "<div class='pills'>" + pills + "</div></div>"
+        )
     return (
         "<h1>" + i18n.t("nav_files", lang) + "</h1>"
         + _lang_switcher(lang, "/files") +
+        (_ask_drawer(lang) if features.enabled("files") else "") +
         "<p class='sub'>" + i18n.t("files_tap_to_download", lang) + "</p>"
+        "<p class='sub'><a href='/profile'>\U0001f464 " + i18n.t("profile_link", lang) + "</a></p>"
+        + finder +
         "<div class='panel' id='file-list'>" + rows + "</div>"
+        + (_FILES_FINDER_SCRIPT if finder else "")
         + upload
         + _nav_except(lang, "files")
     )
+
+
+# The Files page's sort and filter bar: in the browser, on the rows'
+# data-* attributes -- no request to the node. Enter in the filter box
+# asks BarKeep instead (a whole question, not a filter).
+_FILES_FINDER_SCRIPT = """<script>
+(function(){
+  var list=document.getElementById('file-list'), flt=document.getElementById('flt'),
+      srt=document.getElementById('srt'), cat='';
+  function norm(t){ t=String(t||'').toLowerCase(); return t.normalize ? t.normalize('NFD').replace(/[\u0300-\u036f]/g,'') : t; }
+  function apply(){
+    var ul=list.querySelector('ul.files'), none=document.getElementById('fnone');
+    if(!ul) return;
+    var q=norm(flt.value).trim(), how=srt.value, shown=0, items=[].slice.call(ul.children);
+    items.sort(function(a,b){
+      var A=a.dataset, B=b.dataset;
+      if(how==='name') return norm(A.name).localeCompare(norm(B.name));
+      if(how==='small') return A.size-B.size;
+      if(how==='large') return B.size-A.size;
+      if(how==='oldest') return A.mtime-B.mtime;
+      return B.mtime-A.mtime;
+    });
+    items.forEach(function(li){
+      ul.appendChild(li);
+      var ok=(!cat || li.dataset.cat===cat) && (!q || norm(li.dataset.name).indexOf(q)>=0);
+      li.style.display=ok ? '' : 'none';
+      if(ok) shown++;
+    });
+    if(none) none.style.display=shown ? 'none' : '';
+  }
+  window.applyFinder=apply;
+  flt.addEventListener('input', apply);
+  flt.addEventListener('keydown', function(e){ if(e.key==='Enter' && flt.value.trim() && window.askBK) askBK(flt.value); });
+  srt.onchange=apply;
+  [].forEach.call(document.querySelectorAll('.pills button'), function(b){
+    b.onclick=function(){
+      cat=b.getAttribute('data-cat');
+      [].forEach.call(document.querySelectorAll('.pills button'), function(o){ o.className = o===b ? 'on' : ''; });
+      apply();
+    };
+  });
+  apply();
+})();
+</script>"""
 
 
 # The upload button's script. Three real, reported gaps fixed earlier
@@ -1220,7 +2588,11 @@ function doUpload(){
   btn.disabled=true;
   say(I18N_SENDING);
   var ok=false;
-  fetch('/upload',{method:'POST',headers:{'X-Filename':file.name,'X-Hash':hash},body:file})
+  // The name goes percent-encoded: a header carries only Latin-1, so a raw
+  // "thé.jpg" reached the node as one undecodable byte, and a name outside
+  // Latin-1 ("日本.jpg", emoji) made the browser refuse to send at all.
+  fetch('/upload',{method:'POST',headers:{'X-Filename':encodeURIComponent(file.name),
+    'X-Filename-Encoding':'url','X-Hash':hash},body:file})
     .then(function(r){ok=r.ok; return r.text();})
     .then(function(t){
       say(t);
@@ -1237,6 +2609,7 @@ function refreshList(){
   fetch('/files').then(function(r){return r.text();}).then(function(h){
     var fresh=new DOMParser().parseFromString(h,'text/html').getElementById('file-list');
     if(fresh) document.getElementById('file-list').innerHTML=fresh.innerHTML;
+    if(window.applyFinder) applyFinder();
   }).catch(function(){});
 }
 </script>"""
@@ -1267,30 +2640,40 @@ def _render_tools_page(lang):
         if a:
             app_items.append(
                 "<li><a href='/tool?f=" + _url_encode(a["file"]) + "'>"
-                + _ICON_DOWNLOAD + "<span>" + billboard._esc(a["file"]) + "</span></a>"
+                + _ICON_DOWNLOAD + "<span>" + billboard._esc(a["name"]) + "</span></a>"
                 "<small>" + _human_size(a["size"]) + " · " + i18n.t(title, lang) + "</small></li>"
             )
-    tools = [t for t in fserv.list_tools() if not fserv.is_app_file(t)]
-    items = []
-    for t in tools:
-        try:
-            size = _human_size(os.stat(fserv.TOOLS_DIR + "/" + t)[6])
-        except Exception:
-            size = ""
-        items.append(
-            "<li><a href='/tool?f=" + _url_encode(t) + "'>"
-            + _ICON_DOWNLOAD + "<span>" + billboard._esc(t) + "</span>"
-            "</a><small>" + size + "</small></li>"
-        )
-    if items:
-        listing = "<div class='panel'><ul class='files'>" + "".join(items) + "</ul></div>"
+    # One section per folder of tools/ (fserv.tool_sections): its title
+    # and summary from its README.md, its files, and the README itself
+    # folded underneath. The FireFly apps are listed above instead.
+    sections = []
+    for sec in fserv.tool_sections(lang):
+        files = [(n, size) for n, size in sec["files"] if not fserv.is_app_file(n)]
+        if not files:
+            continue
+        prefix = sec["dir"] + "/" if sec["dir"] else ""
+        items = "".join(
+            "<li><a href='/tool?f=" + _url_encode(prefix + n) + "'>"
+            + _ICON_DOWNLOAD + "<span>" + billboard._esc(n) + "</span>"
+            "</a><small>" + _human_size(size) + "</small></li>"
+            for n, size in files)
+        head = billboard._esc(sec["title"]) if sec["dir"] else i18n.t("tools_other_h2", lang)
+        readme = ""
+        if sec["readme"]:
+            readme = ("<details class='readme'><summary>" + i18n.t("tools_readme", lang)
+                      + "</summary><pre>" + billboard._esc(sec["readme"]) + "</pre></details>")
+        sections.append(
+            "<h2>" + head + "</h2>"
+            + ("<p class='sub'>" + billboard._esc(sec["summary"]) + "</p>" if sec["summary"] else "")
+            + "<div class='panel'><ul class='files'>" + items + "</ul>" + readme + "</div>")
+    if sections:
+        listing = "".join(sections)
     else:
         listing = "<div class='panel'><p class='sub'>" + i18n.t("tools_none_installed", lang) + "</p></div>"
 
     apps_listing = (
         "<h2>" + i18n.t("tools_apps_h2", lang) + "</h2>"
         "<div class='panel'><ul class='files'>" + "".join(app_items) + "</ul></div>"
-        "<h2>" + i18n.t("tools_tech_h2", lang) + "</h2>"
     ) if app_items else ""
     return (
         "<h1>" + i18n.t("tools_header", lang) + "</h1>"
@@ -1407,6 +2790,28 @@ def _render_about_page(lang):
         "<p style='margin-bottom:0'>" + i18n.t("about_what_p2", lang) + "</p>"
         "</div>"
 
+        "<h2>" + i18n.t("about_setups_h2", lang) + "</h2>"
+        "<p>" + i18n.t("about_setups_intro", lang) + "</p>"
+        "<div class='info-tiles'>"
+        "<div class='info-tile'><span>ESP32-S3-CAM + Heltec V3</span>"
+        "<small>" + i18n.t("about_setup1_desc", lang) + "</small></div>"
+        "<div class='info-tile'><span>macOS / Windows / Linux + Heltec V3</span>"
+        "<small>" + i18n.t("about_setup2_desc", lang) + "</small></div>"
+        "<div class='info-tile'><span>macOS / Windows / Linux</span>"
+        "<small>" + i18n.t("about_setup3_desc", lang) + "</small></div>"
+        "</div>"
+        "<div class='panel'><p style='margin-bottom:0'>" + i18n.t("about_setups_chain", lang) + "</p></div>"
+
+        "<h2>" + i18n.t("about_clients_h2", lang) + "</h2>"
+        "<div class='info-tiles'>"
+        "<div class='info-tile'><span>Android</span>"
+        "<small>" + i18n.t("about_client_android", lang) + "</small></div>"
+        "<div class='info-tile'><span>" + i18n.t("about_client_handheld_title", lang) + "</span>"
+        "<small>" + i18n.t("about_client_handheld", lang) + "</small></div>"
+        "<div class='info-tile'><span>" + i18n.t("about_client_browser_title", lang) + "</span>"
+        "<small>" + i18n.t("about_client_browser", lang) + "</small></div>"
+        "</div>"
+
         "<h2>" + i18n.t("about_fireflies_h2", lang) + "</h2>"
         "<p>" + i18n.t("about_fireflies_intro", lang) + "</p>"
         "<div class='info-tiles'>"
@@ -1500,12 +2905,62 @@ def _render_about_page(lang):
         "<div class='view-pane' id='pane-connect'>" + connect_pane + "</div>"
         "<div class='view-pane' id='pane-apps'>" + apps_pane + "</div>"
         + _nav_except(lang, "about")
+        + _release_line()
         + script
     )
 
 
 def _render_billboard_page(lang):
-    return billboard._render_page(lang) + _nav_except(lang, "board")
+    sorts = "".join("<option value='%s'>%s</option>" % (k, i18n.t("sort_" + k, lang))
+                    for k in ("newest", "oldest", "title"))
+    tools = (
+        _ask_drawer(lang) +
+        "<div class='finder'><input id='bsearch' type='search' placeholder='"
+        + billboard._esc(i18n.t("search_placeholder", lang)) + "' aria-label='"
+        + billboard._esc(i18n.t("search_placeholder", lang)) + "'>"
+        "<span class='sortbox' title='" + billboard._esc(i18n.t("sort_label", lang)) + "'>"
+        "<select id='bsort' aria-label='" + billboard._esc(i18n.t("sort_label", lang)) + "'>" + sorts + "</select></span></div>"
+    )
+    return (billboard._render_page(lang, tools,
+                                   "<p id='bnone' class='sub' style='display:none'>" + i18n.t("filter_none", lang) + "</p>")
+            + _BOARD_FINDER_SCRIPT + _nav_except(lang, "board"))
+
+
+# The billboard's search and sort, in the browser. A word found only in a
+# collapsed body opens that post, so the match shows; clearing the search
+# closes again what it opened.
+_BOARD_FINDER_SCRIPT = """<script>
+(function(){
+  var ul=document.querySelector('ul.board'), q=document.getElementById('bsearch'), srt=document.getElementById('bsort');
+  if(!ul) return;
+  function norm(t){ t=String(t||'').toLowerCase(); return t.normalize ? t.normalize('NFD').replace(/[\u0300-\u036f]/g,'') : t; }
+  function apply(){
+    var w=norm(q.value).trim(), how=srt.value, shown=0, items=[].slice.call(ul.querySelectorAll('li[data-ts]'));
+    items.sort(function(a,b){
+      if(how==='title') return norm(a.dataset.title).localeCompare(norm(b.dataset.title));
+      var d=parseFloat(a.dataset.ts||0)-parseFloat(b.dataset.ts||0);
+      return how==='oldest' ? d : -d;
+    });
+    items.forEach(function(li){
+      ul.appendChild(li);
+      var det=li.querySelector('details'), body=li.querySelector('.post-body');
+      var inTitle=!w || norm(li.dataset.title).indexOf(w)>=0,
+          inBody=!!w && !!body && norm(body.textContent).indexOf(w)>=0;
+      var ok=inTitle || inBody;
+      li.style.display=ok ? '' : 'none';
+      if(ok) shown++;
+      if(det){
+        if(w && inBody && !inTitle){ if(!det.open){ det.open=true; det.setAttribute('data-auto','1'); } }
+        else if(det.getAttribute('data-auto')){ det.open=false; det.removeAttribute('data-auto'); }
+      }
+    });
+    var none=document.getElementById('bnone'); if(none) none.style.display=shown||!items.length ? 'none' : '';
+  }
+  q.addEventListener('input', apply);
+  q.addEventListener('keydown', function(e){ if(e.key==='Enter' && q.value.trim() && window.askBK) askBK(q.value); });
+  srt.onchange=apply;
+})();
+</script>"""
 
 
 async def _send(writer, status, body, content_type="text/html"):
@@ -1535,13 +2990,22 @@ async def _send(writer, status, body, content_type="text/html"):
         body = body.encode()
     if "charset" not in content_type:
         content_type = content_type + "; charset=utf-8"
+    # Pages carry the theme (and live state): a browser must ask again
+    # rather than show a copy from before the admin changed it.
+    no_cache = content_type.startswith("text/html")
+    # Admin pages: not kept at all, so Back can't show one from memory.
+    no_store = getattr(writer, "_stump_no_store", False)
     # Connection: close matters here. The server closes after every
     # response, but HTTP/1.1 defaults to keep-alive -- so without this
     # the browser holds the socket open expecting to reuse it, then has
     # to discover it's dead and re-issue the request on a new one. That
     # shows up as pages that feel sluggish or hang on the first click.
+    cookie = getattr(writer, "_stump_set_cookie", None) if no_cache else None
     resp = ("HTTP/1.1 " + status + "\r\nContent-Type: " + content_type +
+             ("\r\nSet-Cookie: " + cookie if cookie else "") +
              "\r\nContent-Length: " + str(len(body)) +
+             ("\r\nCache-Control: no-store" if no_store else
+              "\r\nCache-Control: no-cache" if no_cache else "") +
              "\r\nConnection: close\r\n\r\n")
     await writer.awrite(resp)
     await writer.awrite(body)
@@ -1641,18 +3105,28 @@ async def _send_file(writer, fpath, size, filename, chunk=16384, inline=False):
             await writer.awrite(buf)
 
 
+def _may_read(identifier):
+    """Mandatory mode: reading the chat takes a verified identity too
+    (stumpid's can_read). Without the plugin, or in open/hybrid: yes."""
+    sid = plugins.service_lookup("identity")
+    try:
+        return sid is None or sid.can_read(identifier)
+    except Exception:
+        return True
+
+
 def _voice_gate(identifier, to):
     """The refusal a /msg to `to` would get from stumpid's access mode, or
     None -- a voice note obeys the same rule as the text it replaces."""
+    sid = plugins.service_lookup("identity")
+    if sid is None:
+        return None
     try:
-        import stumpid.install as sid_install
-        if sid_install._original is None:
-            return None
-        from stumpid import core as sid
         if sid.requires_verification(identifier, "/msg " + (to or "x") + " x"):
             return i18n.t("auth_required_generic", i18n.get_lang(identifier))
-    except ImportError:
-        pass
+    except Exception as e:
+        print("[barkeep] voice access check failed, refusing:", e)
+        return i18n.t("auth_required_generic", i18n.get_lang(identifier))
     return None
 
 
@@ -1710,7 +3184,16 @@ async def _read_small_body(reader, length, chunk=1024, cap=None):
 # these would break a page still open over HTTP, since the browser
 # refuses a cross-origin redirect for them.
 _NO_REDIRECT = ("/home-file", "/tls-ok", "/rrc/poll", "/rrc/voice", "/rrc/send", "/download", "/codec2", "/opus.", "/billboard.json",
-                "/files.json", "/fw", "/tool?", "/lang", "/upload", "/post", "/chat")
+                "/files.json", "/plugins.json", "/chain.json", "/stumps.json", "/hw.json", "/admin/radio.json", "/admin/poweroff", "/admin/bluetooth.json", "/admin/bt.json", "/admin/radiolink.json", "/fw", "/tool?", "/lang", "/upload", "/post", "/chat")
+
+
+def _own_ap_ip():
+    """This Stump's address on its own Wi-Fi."""
+    try:
+        import chain
+        return chain.ap_ip()
+    except Exception:
+        return "192.168.4.1"
 
 
 def _https_upgrade_page(target, path):
@@ -1732,11 +3215,73 @@ def _https_upgrade_page(target, path):
             "</body></html>")
 
 
+def _header_text(b):
+    """A request or header line as text: UTF-8, or Latin-1 when it isn't
+    valid UTF-8. Browsers and Python's urllib send a header like
+    X-Filename: thé.txt with é as ONE Latin-1 byte (0xE9); a plain
+    .decode() raised on it and the connection closed with no reply at
+    all (reported by the Android team, reproduced). Every byte maps to a
+    character in Latin-1, so this can't fail."""
+    try:
+        return b.decode()
+    except UnicodeError:
+        return "".join(chr(c) for c in b)
+
+
+def _wants_json(headers):
+    """An app asking for JSON (Accept: application/json) gets the result of
+    a write -- a post, an upload -- as data; a browser form keeps getting
+    the page or sentence it always did."""
+    return "application/json" in headers.get("accept", "")
+
+
+async def _result(writer, as_json, status, code, message, extra=None):
+    """One write's outcome: JSON for apps ({"ok", "error", "message", ...}),
+    the plain sentence for everyone else. `code` is a stable token apps
+    can act on; None on success."""
+    if as_json:
+        out = {"ok": status.startswith("2"), "message": message}
+        if code:
+            out["error"] = code
+        if extra:
+            out.update(extra)
+        await _send(writer, status, json.dumps(out), "application/json")
+    else:
+        await _send(writer, status, message, "text/plain")
+
+
 async def _handle_tls(reader, writer):
     await _handle(reader, writer, secure=True)
 
 
 async def _handle(reader, writer, secure=False):
+    """One connection: taken in or refused (conn.py: how many at once, per
+    address), then served with deadlines on every read and write."""
+    try:
+        ip = billboard._extract_ip(writer.get_extra_info("peername"))
+    except Exception:
+        ip = "?"
+    why = conn.admit(ip)
+    if why:
+        await conn.refuse(reader, writer, why)
+        return
+    task = conn._current()
+    conn.watch(task)
+    try:
+        await _serve(conn.Reader(reader, task), conn.Writer(writer, task), secure)
+    except asyncio.CancelledError:
+        # The reaper: too slow or silent (conn.py). Let go, quietly.
+        conn.note(conn.why_ended(task) or "idle")
+        try:
+            await writer.aclose()
+        except BaseException:
+            pass
+    finally:
+        conn.unwatch(task)
+        conn.leave(ip)
+
+
+async def _serve(reader, writer, secure=False):
     try:
         request_line = await reader.readline()
         # Parse defensively: a phone's captive-portal probe, a port
@@ -1747,11 +3292,16 @@ async def _handle(reader, writer, secure=False):
         # A silent close is the wrong answer here specifically because
         # captive-portal detection depends on the phone getting a real
         # HTTP response to its probe.
-        parts = request_line.decode().split()
+        parts = _header_text(request_line).split()
         if len(parts) < 2:
             await _send(writer, "400 Bad Request", "Malformed request.", "text/plain")
             return
         method, path = parts[0], parts[1]
+        if path.startswith("/admin"):
+            try:
+                writer._stump_no_store = True      # see _send
+            except AttributeError:
+                pass
 
         headers = {}
         header_count = 0
@@ -1765,8 +3315,9 @@ async def _handle(reader, writer, secure=False):
                 # dict indefinitely on a memory-constrained board.
                 await _send(writer, "400 Bad Request", "Too many headers.", "text/plain")
                 return
-            k, _, v = line.decode().partition(":")
+            k, _, v = _header_text(line).partition(":")
             headers[k.strip().lower()] = v.strip()
+        reader.start_body()
 
         # Content-Length has to survive garbage too -- "abc" used to
         # throw here and close the socket silently, so an upload with a
@@ -1781,22 +3332,34 @@ async def _handle(reader, writer, secure=False):
         headers["content-length"] = str(content_length)
 
         peer = writer.get_extra_info("peername")
-        identifier = billboard._extract_ip(peer)
+        ip = billboard._extract_ip(peer)
+        # Who this is: a logged-in profile ("p:<nick>"), else the browser's
+        # visitor cookie, else -- a client that keeps no cookies, like the
+        # FireFly app (its one-button /auth included) -- its address, as
+        # before. Limits (guard.py) still count per address.
+        identifier = _visitor(writer, headers, ip, method, path)
 
-        # With HTTPS set up (stump_tls.py), a page opened over plain HTTP on
-        # the Stump's own Wi-Fi moves to https://<hostname>/ -- a secure
-        # page, which is what lets browsers open the microphone -- but only
-        # if the BROWSER finds the certificate valid. A server-side redirect
-        # used to send visitors into a full-page warning once a certificate
-        # lapsed (or on a phone with a wrong clock). Now the phone checks,
-        # against its own clock, and stays on HTTP silently if anything is
-        # off. No redirect also leaves captive-portal detection as it was.
-        if not secure and method == "GET" and "plain=1" not in path \
-                and not any(path.startswith(p) for p in _NO_REDIRECT):
-            target = tls.https_redirect(identifier, path)
+        # HTTPS (stump_tls.py) is used for two things only: /admin, where a
+        # password is typed, and the voice recorder (/rrc/rec), because
+        # browsers only open the microphone on a secure page. Everything
+        # else stays on plain HTTP: the chat polls every 2 s, and on HTTPS
+        # each poll was a new secure handshake for the CAM -- a few people
+        # chatting kept it busy doing nothing else (review H-01).
+        # /admin over plain HTTP gets a tiny page that tries HTTPS first:
+        # only if the BROWSER finds the certificate valid (by the phone's own
+        # clock) does it move; otherwise it stays on HTTP, with no warning.
+        if not secure and method == "GET" and "plain=1" not in path and path.startswith("/admin"):
+            target = tls.https_redirect(ip, path)
             if target:
                 await _send(writer, "200 OK", _https_upgrade_page(target, path))
                 return
+        if secure and method == "GET" and (path == "/rrc" or path.startswith("/rrc?")):
+            # The chat itself, opened over HTTPS (an old bookmark, a link):
+            # back to plain HTTP, where its polls cost nothing.
+            host = headers.get("host", "").split(":")[0] or tls.status().get("host") or ""
+            await writer.awrite("HTTP/1.1 302 Found\r\nLocation: http://" + host + "/rrc\r\n"
+                                "Content-Length: 0\r\nConnection: close\r\n\r\n")
+            return
 
         if method == "GET" and path.startswith("/tls-ok"):
             # What the upgrade page fetches over HTTPS: reaching it at all
@@ -1819,8 +3382,14 @@ async def _handle(reader, writer, secure=False):
         if method == "POST" and path.startswith("/chat"):
             length = int(headers.get("content-length", "0"))
             body = await _read_small_body(reader, length)
-            reply = _process_command(body.decode(), identifier, i18n.get_lang(identifier))
-            await _send(writer, "200 OK", reply, "text/plain")
+            lang = i18n.get_lang(identifier)
+            if _wants_json(headers):
+                # Apps: the librarian's findings as data, with the reply too.
+                reply, found = _librarian(body.decode()[:200], lang)
+                await _send(writer, "200 OK", json.dumps({"reply": reply, "found": found}), "application/json")
+            else:
+                reply = _process_command(body.decode()[:200], identifier, lang)
+                await _send(writer, "200 OK", reply, "text/plain")
 
         elif method == "POST" and path.startswith("/post"):
             length = int(headers.get("content-length", "0"))
@@ -1831,20 +3400,77 @@ async def _handle(reader, writer, secure=False):
             # sheet documents it) keep working unchanged.
             title = ""
             post_body = ""
-            for kv in body.decode().split("&"):
-                if kv.startswith("title="):
-                    title = billboard._url_decode(kv[6:])
-                elif kv.startswith("body="):
-                    post_body = billboard._url_decode(kv[5:])
-                elif kv.startswith("entry=") and not title:
-                    title = billboard._url_decode(kv[6:])
-            billboard._append_entry(title, post_body, identifier)
-            await writer.awrite("HTTP/1.1 303 See Other\r\nLocation: /billboard\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            if "application/json" in headers.get("content-type", ""):
+                # An app may send {"title": ..., "body": ...} instead of a form.
+                try:
+                    data = json.loads(body.decode())
+                    title = str(data.get("title", "") or "")
+                    post_body = str(data.get("body", "") or "")
+                except (ValueError, AttributeError):
+                    pass
+            else:
+                for kv in body.decode().split("&"):
+                    if kv.startswith("title="):
+                        title = billboard._url_decode(kv[6:])
+                    elif kv.startswith("body="):
+                        post_body = billboard._url_decode(kv[5:])
+                    elif kv.startswith("entry=") and not title:
+                        title = billboard._url_decode(kv[6:])
+            if not guard.window("post", identifier, POST_MAX, POST_PER_S):
+                # A few posts a minute per visitor: each one rewrites the
+                # billboard file on the card.
+                lang = i18n.get_lang(identifier)
+                if _wants_json(headers):
+                    await _result(writer, True, "429 Too Many Requests", "rate_limited", i18n.t("post_rate", lang))
+                else:
+                    await _send(writer, "429 Too Many Requests", _page(
+                        "<p>" + billboard._esc(rrc.tok_rate(i18n.t("post_rate", lang))) + "</p>"
+                        "<p><a href='/billboard'>&larr; " + i18n.t("nav_board", lang) + "</a></p>"))
+                return
+            ok, info = billboard._append_entry(title, post_body, identifier)
+            if _wants_json(headers):
+                if ok:
+                    await _result(writer, True, "201 Created", None, "posted", {"id": info})
+                elif info == "title_required":
+                    await _result(writer, True, "400 Bad Request", "title_required", "a title is required")
+                else:
+                    await _result(writer, True, "507 Insufficient Storage", "storage", "the post couldn't be saved")
+            else:
+                await writer.awrite("HTTP/1.1 303 See Other\r\nLocation: /billboard\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+
+        elif method == "POST" and path.startswith("/admin/radiolink.json"):
+            # USB or Bluetooth for the Heltec on this computer, switched live.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            lang = i18n.get_lang(identifier)
+            if not _admin_or_local(identifier, headers):
+                await _send(writer, "403 Forbidden", json.dumps({"ok": False, "message": i18n.t("admin_bt_denied", lang)}),
+                            "application/json")
+            else:
+                kind = body.decode().split("link=", 1)[-1].split("&")[0] if b"link=" in body else ""
+                r = radio.switch_link(kind)
+                await _send(writer, "200 OK", json.dumps({"ok": r in ("done", "same"), "message": i18n.t(
+                    "admin_link_r_" + r, lang)}), "application/json")
+
+        elif method == "GET" and path.startswith("/admin/bt.json"):
+            # The pairing PIN, while it's fresh: an /admin session only.
+            if not _admin_or_local(identifier, headers):
+                await _send(writer, "403 Forbidden", "{}", "application/json")
+            else:
+                await _send(writer, "200 OK", json.dumps({"pin": radio.bt_pin(), "probe": radio.probe_state(),
+                                                          "heard": radio.bt_heard()}), "application/json")
 
         elif method == "GET" and path.startswith("/admin"):
             # No link anywhere points here on purpose -- see
-            # _render_admin_login_page's own docstring.
-            await _send(writer, "200 OK", _page(_render_admin_login_page(i18n.get_lang(identifier))))
+            # _render_admin_login_page's own docstring. With a live
+            # session (the cookie set at login), the admin page itself.
+            lang = i18n.get_lang(identifier)
+            tok = _cookie(headers, ADMIN_COOKIE)
+            if _session_ok(tok):
+                names = fserv._list_files() if fserv.sd_ok else []
+                await _send(writer, "200 OK", _page(_render_admin_file_list_page(lang, names, tok)))
+            else:
+                await _send(writer, "200 OK", _page(_render_admin_login_page(lang)))
 
         elif method == "POST" and path.startswith("/admin/home"):
             # Before the generic POST /admin (login) branch, like the others.
@@ -1856,7 +3482,7 @@ async def _handle(reader, writer, secure=False):
                 if len(parts) == 2:
                     fields[parts[0]] = billboard._url_decode(parts[1])
             pw = fields.get("admin_pass", "")
-            if not _check_admin_pw(pw):
+            if not _admin_ok(pw, identifier):
                 await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
             else:
                 lang = i18n.get_lang(identifier)
@@ -1881,7 +3507,7 @@ async def _handle(reader, writer, secure=False):
                 if len(parts) == 2:
                     fields[parts[0]] = billboard._url_decode(parts[1])
             pw = fields.get("admin_pass", "")
-            if not _check_admin_pw(pw):
+            if not _admin_ok(pw, identifier):
                 await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
             else:
                 lang = i18n.get_lang(identifier)
@@ -1907,6 +3533,194 @@ async def _handle(reader, writer, secure=False):
                 notice = "<p class='sub'>" + billboard._esc(msg) + "</p>" if msg else ""
                 await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
 
+        elif method == "POST" and path.startswith("/admin/profiles"):
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields = {}
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) == 2:
+                    fields[parts[0]] = billboard._url_decode(parts[1])
+            pw = fields.get("admin_pass", "")
+            lang = i18n.get_lang(identifier)
+            if not _admin_ok(pw, identifier):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                n = fields.get("nick", "")
+                if fields.get("action") == "delete":
+                    msg = i18n.t("admin_profiles_deleted" if profiles.delete(n) else "admin_profiles_missing", lang, nick=n)
+                elif profiles.valid_password(fields.get("pw", "")) and profiles.set_password(
+                        n, fields.get("pw", ""), digested=await profiles.prepare(fields.get("pw", ""))):
+                    msg = i18n.t("admin_profiles_was_reset", lang, nick=n)
+                else:
+                    msg = i18n.t("profile_err_password", lang, n=profiles.PW_MIN)
+                names = fserv._list_files() if fserv.sd_ok else []
+                await _send(writer, "200 OK", _page("<p class='sub'><b>" + billboard._esc(msg) + "</b></p>"
+                                                    + _render_admin_file_list_page(lang, names, pw)))
+
+        elif method == "POST" and (path.startswith("/admin/setup") or path.startswith("/admin/restart")):
+            # The Provisioner's answers changed from /admin (settings.py),
+            # and the restart that applies the rest.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields = {}
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) == 2:
+                    fields[parts[0]] = billboard._url_decode(parts[1])
+            pw = fields.get("admin_pass", "")
+            lang = i18n.get_lang(identifier)
+            if not _admin_ok(pw, identifier):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            elif path.startswith("/admin/restart"):
+                await _send(writer, "200 OK", _page(
+                    "<h1>" + i18n.t("admin_setup_restart", lang) + "</h1><p class='sub'>"
+                    + i18n.t("admin_setup_restarting", lang) + "</p>"
+                    "<script>setTimeout(function(){location.href='/admin';},20000);</script>"))
+                import uasyncio as asyncio
+                asyncio.create_task(_restart_soon())
+            else:
+                changes, bad = stump_settings.parse_form(fields)
+                later = []
+                if bad:
+                    label = {"node_name": "admin_setup_node", "bot_name": "admin_setup_bot",
+                             "greeting": "admin_setup_names", "economy": "admin_setup_files",
+                             "auth_mode": "admin_setup_access",
+                             "storage_mb": "admin_setup_storage"}.get(bad) or "admin_setup_w_" + bad[2:]
+                    msg = i18n.t("admin_setup_invalid", lang, field=i18n.t(label, lang).split(" (")[0])
+                else:
+                    before = stump_settings.current()
+                    saved, later = stump_settings.apply(changes)
+                    if not saved:
+                        msg = i18n.t("admin_setup_not_saved", lang)
+                    elif all(before.get(k) == v for k, v in changes.items()):
+                        msg = i18n.t("admin_setup_unchanged", lang)
+                    elif later:
+                        msg = None
+                    else:
+                        msg = i18n.t("admin_setup_saved", lang)
+                labels = {"NODE_NAME": "admin_setup_node", "BOT_NAME": "admin_setup_bot",
+                          "MESH_GREETING": "admin_setup_names", "FEATURES": "admin_setup_features",
+                          "CREDIT_WEIGHTS": "admin_setup_files", "AUTH_MODE": "admin_setup_access",
+                          "PC_STORAGE_MB": "admin_setup_storage"}
+                what = ", ".join(i18n.t(labels.get(k, k), lang).split(" (")[0] for k in later)
+                notice = "<p class='sub'><b>" + billboard._esc(msg or i18n.t("admin_setup_later", lang, what=what)) + "</b></p>"
+                names = fserv._list_files() if fserv.sd_ok else []
+                await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
+
+        elif method == "POST" and path.startswith("/admin/poweroff"):
+            # Turn this Stump off (a computer): /admin's button with the
+            # password, or the Stop file on the computer itself (local).
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields = {}
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) == 2:
+                    fields[parts[0]] = billboard._url_decode(parts[1])
+            h = _host()
+            lang = i18n.get_lang(identifier)
+            if h is None:
+                await _send(writer, "404 Not Found", "Not a computer Stump", "text/plain")
+            elif not (ip in _LOCAL or _admin_ok(fields.get("admin_pass", ""), identifier)):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                folder = billboard._esc(str(getattr(h, "ROOT", "") or ""))
+                await _send(writer, "200 OK", _page(
+                    "<h1>" + i18n.t("admin_power_bye_title", lang) + "</h1><p class='sub'>"
+                    + i18n.t("admin_power_bye", lang, start=billboard._esc(h.START_FILE), folder=folder) + "</p>"))
+                import uasyncio as asyncio
+                asyncio.create_task(_power_off_soon())
+
+        elif method == "POST" and path.startswith("/admin/radioretry"):
+            # /admin's "Reconnect the radio": the handshake again, now.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields = {}
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) == 2:
+                    fields[parts[0]] = billboard._url_decode(parts[1])
+            pw = fields.get("admin_pass", "")
+            if not _admin_ok(pw, identifier):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                lang = i18n.get_lang(identifier)
+                msg = i18n.t("admin_radio_retrying" if radio.retry() else "admin_radio_none", lang)
+                names = fserv._list_files() if fserv.sd_ok else []
+                notice = "<p class='sub'>" + billboard._esc(msg) + "</p>"
+                await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
+
+        elif method == "POST" and path.startswith("/admin/radiochat"):
+            # /admin's switch for the radio settings in the chat's pop-up.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields = {}
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) == 2:
+                    fields[parts[0]] = billboard._url_decode(parts[1])
+            pw = fields.get("admin_pass", "")
+            if not _admin_ok(pw, identifier):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                lang = i18n.get_lang(identifier)
+                on = fields.get("on") == "1"
+                ok = radio.set_chat_edit(on)
+                msg = i18n.t(("admin_radio_chat_on" if on else "admin_radio_chat_off") if ok else "admin_radio_not_saved", lang)
+                names = fserv._list_files() if fserv.sd_ok else []
+                notice = "<p class='sub'>" + billboard._esc(msg) + "</p>"
+                await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
+
+        elif method == "POST" and path.startswith("/admin/bluetooth.json"):
+            # The Heltec's Bluetooth from /admin: on, off, pairing mode.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            lang = i18n.get_lang(identifier)
+            if not _admin_or_local(identifier, headers):
+                await _send(writer, "403 Forbidden", json.dumps({"ok": False, "message": i18n.t("admin_bt_denied", lang)}),
+                            "application/json")
+            else:
+                action = billboard._url_decode(body.decode().split("action=", 1)[-1].split("&")[0]) if b"action=" in body else ""
+                if action == "computer":
+                    r = radio.pair_computer()
+                    ok, key = r == "done", {"done": "admin_bt_computer_go", "usb": "admin_bt_computer_usb",
+                                            "bleak": "admin_link_r_bleak"}.get(r, "admin_bt_offline")
+                else:
+                    ok = action in ("on", "off", "pair", "unpair") and radio.bluetooth(action) > 0
+                    key = {"on": "admin_bt_done_on", "off": "admin_bt_done_off", "pair": "admin_bt_pairing",
+                           "unpair": "admin_bt_done_unpair"}.get(action)
+                    key = key if ok else "admin_bt_offline"
+                await _send(writer, "200 OK", json.dumps({"ok": ok, "message": i18n.t(key, lang)}), "application/json")
+
+        elif method == "POST" and path.startswith("/admin/radio.json"):
+            # The radio's settings from the chat's pop-up (rrc_ui): the
+            # person on the computer, or an /admin session. JSON answer.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            lang = i18n.get_lang(identifier)
+            if not _radio_editor(identifier, headers):
+                await _send(writer, "403 Forbidden", json.dumps({"ok": False, "message": i18n.t(
+                    "rrc_radio_owner_only" if radio.chat_edit() else "admin_radio_chat_off", lang)}),
+                            "application/json")
+            else:
+                fields = {}
+                for kv in body.decode().split("&"):
+                    parts = kv.split("=", 1)
+                    if len(parts) == 2:
+                        fields[parts[0]] = billboard._url_decode(parts[1])
+                settings, bad = radio.parse_form(fields)
+                if bad:
+                    label = {"frequency": "radio_freq", "bandwidth": "radio_bw", "txpower": "radio_txp",
+                             "sf": "radio_sf", "cr": "radio_cr"}[bad]
+                    ok, msg = False, i18n.t("admin_radio_invalid", lang, field=i18n.t(label, lang))
+                else:
+                    result = radio.apply(settings)
+                    ok = radio.save(settings)
+                    msg = i18n.t("admin_radio_not_saved" if not ok else {"sent": "admin_radio_sent",
+                                 "pending": "admin_radio_pending"}.get(result, "admin_radio_none"), lang)
+                await _send(writer, "200 OK", json.dumps({"ok": ok, "message": msg}), "application/json")
+
         elif method == "POST" and path.startswith("/admin/radio"):
             # Must come before the generic POST /admin (login) branch
             # below, which catches every other /admin POST.
@@ -1918,7 +3732,7 @@ async def _handle(reader, writer, secure=False):
                 if len(parts) == 2:
                     fields[parts[0]] = billboard._url_decode(parts[1])
             pw = fields.get("admin_pass", "")
-            if not _check_admin_pw(pw):
+            if not _admin_ok(pw, identifier):
                 await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
             else:
                 lang = i18n.get_lang(identifier)
@@ -1942,7 +3756,127 @@ async def _handle(reader, writer, secure=False):
                 notice = "<p class='sub'>" + billboard._esc(msg) + "</p>"
                 await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
 
+        elif method == "POST" and path.startswith("/admin/layout"):
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields = {}
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) == 2:
+                    fields[parts[0]] = billboard._url_decode(parts[1])
+            pw = fields.get("admin_pass", "")
+            if not _admin_ok(pw, identifier):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                lang = i18n.get_lang(identifier)
+                if fields.get("reset"):
+                    ok = layout.save_many({k: None for k in layout.KINDS})
+                else:
+                    nav_ok = set(_DESTINATIONS)
+                    tile_ok = set(k for k, n, h in home_tile_items(lang, all=True))
+
+                    def keys(name, allowed):
+                        return [k for k in fields.get(name, "").split(",") if k in allowed]
+                    changes = {"nav_hidden": keys("nav_hidden", nav_ok),
+                               "tiles_hidden": keys("tiles_hidden", tile_ok)}
+                    if keys("nav", nav_ok):
+                        changes["nav"] = keys("nav", nav_ok)
+                    if keys("tiles", tile_ok):
+                        changes["tiles"] = keys("tiles", tile_ok)
+                    ok = layout.save_many(changes)
+                msg = i18n.t("admin_layout_saved" if ok else "admin_layout_not_saved", lang)
+                names = fserv._list_files() if fserv.sd_ok else []
+                await _send(writer, "200 OK", _page("<p class='sub'>" + billboard._esc(msg) + "</p>"
+                                                    + _render_admin_file_list_page(lang, names, pw)))
+
+        elif method == "POST" and (path.startswith("/admin/theme") or path.startswith("/admin/tools")):
+            # The theme for everyone, and deleting tools: like the other
+            # /admin forms, the password comes back as a hidden field and
+            # is checked again here.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields, ticked, sections = {}, [], []
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) != 2:
+                    continue
+                val = billboard._url_decode(parts[1])
+                if parts[0] == "f":
+                    ticked.append(val)
+                elif parts[0] == "d":
+                    sections.append(val)
+                else:
+                    fields[parts[0]] = val
+            pw = fields.get("admin_pass", "")
+            if not _admin_ok(pw, identifier):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                lang = i18n.get_lang(identifier)
+                extra = ""
+                if path.startswith("/admin/theme"):
+                    choice = fields.get("theme", "").strip().lower() or None
+                    if choice is not None and choice not in theme.THEMES:
+                        msg = i18n.t("admin_site_theme_not_saved", lang)
+                    elif theme.set_site_theme(choice):
+                        msg = i18n.t("admin_site_theme_saved", lang,
+                                     name=_theme_label(theme.site_theme(), lang))
+                        # This browser may have its own theme from the
+                        # buttons below, which would hide the change:
+                        # drop it, and show the new one now.
+                        extra = ("<script>try{localStorage.removeItem('stump_theme');}catch(e){}"
+                                 "document.documentElement.removeAttribute('style');"
+                                 "document.documentElement.setAttribute('data-theme',"
+                                 + json.dumps(theme.site_theme()) + ");</script>")
+                    else:
+                        msg = i18n.t("admin_site_theme_not_saved", lang)
+                else:
+                    gone = 0
+                    for d in sections:
+                        gone += fserv.delete_tool_section(d)
+                    for rel in ticked:
+                        if rel.split("/", 1)[0] in sections:
+                            continue           # went with its section
+                        if fserv.delete_tool(rel):
+                            gone += 1
+                    msg = i18n.t("admin_deleted_notice", lang, n=gone)
+                names = fserv._list_files() if fserv.sd_ok else []
+                notice = "<p class='sub'>" + billboard._esc(msg) + "</p>" + extra
+                await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
+
+        elif method == "POST" and path.startswith("/admin/plugins"):
+            # Before the generic POST /admin (login) branch, like the others.
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            fields = {}
+            for kv in body.decode().split("&"):
+                parts = kv.split("=", 1)
+                if len(parts) == 2:
+                    fields[parts[0]] = billboard._url_decode(parts[1])
+            pw = fields.get("admin_pass", "")
+            if not _admin_ok(pw, identifier):
+                await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+            else:
+                lang = i18n.get_lang(identifier)
+                msg = plugins.admin_chat([fields.get("action", ""), fields.get("name", "")], lang)[0]
+                names = fserv._list_files() if fserv.sd_ok else []
+                notice = "<p class='sub'>" + billboard._esc(msg) + "</p>"
+                await _send(writer, "200 OK", _page(notice + _render_admin_file_list_page(lang, names, pw)))
+
+        elif method == "POST" and path.startswith("/admin/logout"):
+            length = int(headers.get("content-length", "0"))
+            body = await _read_small_body(reader, length)
+            for kv in body.decode().split("&"):
+                if kv.startswith("admin_pass="):
+                    _end_session(billboard._url_decode(kv[11:]))
+            _end_session(_cookie(headers, ADMIN_COOKIE))
+            await writer.awrite("HTTP/1.1 303 See Other\r\nLocation: /admin\r\n"
+                                "Set-Cookie: " + ADMIN_COOKIE + "=; Path=/admin; Max-Age=0; HttpOnly; SameSite=Strict\r\n"
+                                "Cache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+
         elif method == "POST" and path.startswith("/admin") and not path.startswith("/admin/delete"):
+            # The login. A right password starts a session and redirects
+            # to GET /admin (see SESSION_IDLE_S above), so this POST --
+            # with the password in it -- never sits in the history.
             length = int(headers.get("content-length", "0"))
             body = await _read_small_body(reader, length)
             pw = ""
@@ -1950,11 +3884,15 @@ async def _handle(reader, writer, secure=False):
                 if kv.startswith("admin_pass="):
                     pw = billboard._url_decode(kv[11:])
             lang = i18n.get_lang(identifier)
-            if not _check_admin_pw(pw):
-                await _send(writer, "403 Forbidden", _page(_render_admin_login_page(lang, error=True)))
+            if not _check_admin_pw(pw, identifier):
+                await _send(writer, "403 Forbidden", _page(_render_admin_login_page(
+                    lang, error=True, wait=guard.locked(identifier))))
             else:
-                names = fserv._list_files() if fserv.sd_ok else []
-                await _send(writer, "200 OK", _page(_render_admin_file_list_page(lang, names, pw)))
+                tok = _new_session()
+                await writer.awrite("HTTP/1.1 303 See Other\r\nLocation: /admin\r\n"
+                                    "Set-Cookie: " + ADMIN_COOKIE + "=" + tok
+                                    + "; Path=/admin; HttpOnly; SameSite=Strict\r\n"
+                                    "Cache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
 
         elif method == "POST" and path.startswith("/admin/delete_post"):
             # Must come BEFORE the /admin/delete branch below --
@@ -1983,7 +3921,7 @@ async def _handle(reader, writer, secure=False):
                     timestamps.append(billboard._url_decode(kv[3:]))
                 elif kv.startswith("admin_pass="):
                     pw = billboard._url_decode(kv[11:])
-            if not _check_admin_pw(pw):
+            if not _admin_ok(pw, identifier):
                 await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
             else:
                 deleted_titles = []
@@ -2022,7 +3960,7 @@ async def _handle(reader, writer, secure=False):
                     fnames.append(_clean_filename(billboard._url_decode(kv[2:])))
                 elif kv.startswith("admin_pass="):
                     pw = billboard._url_decode(kv[11:])
-            if not _check_admin_pw(pw):
+            if not _admin_ok(pw, identifier):
                 await _send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
             else:
                 deleted_count = 0
@@ -2054,13 +3992,22 @@ async def _handle(reader, writer, secure=False):
                 since_id = int(_query(path, "since") or "0")
             except ValueError:
                 since_id = 0
+            hello = _greeting(identifier, ip)
+            if hello == "required":
+                u = rrc.touch_user(identifier)
+                await _send(writer, "200 OK", json.dumps({
+                    "room": rrc.DEFAULT_ROOM, "nick": u["nick"], "rooms": [], "messages": [], "dms": [],
+                    "users": [], "stumps": [], "node": rrc.NODE, "registered": False, "renamed": {},
+                    "hello": "required",
+                    "topic": i18n.t("hello_required", i18n.get_lang(identifier))}), "application/json")
+                return
             user = rrc.touch_user(identifier)
             # The server's idea of which room this client is in wins --
             # /join from another tab, or a room that has since vanished,
             # both need to be reflected back rather than silently
             # leaving the client polling a room it isn't in.
             actual = user["room"]
-            if not rrc.room_exists(actual):
+            if not rrc.room_exists(actual) or not rrc.room_allows(identifier, actual):
                 actual = rrc.DEFAULT_ROOM
                 rrc.touch_user(identifier, room=actual)
             if actual != q_room:
@@ -2095,10 +4042,24 @@ async def _handle(reader, writer, secure=False):
                 # Which of those are other Stump nodes (from their
                 # stump.node beacons), so the UI can label them.
                 "stumps": rrc.stump_nicks(),
+                "hw": _hw_brief(_radio_editor(identifier, headers)),
                 # Which node this is -- a client reaching it over Wi-Fi
                 # and LoRa matches the two by this LXMF address.
                 "node": rrc.NODE,
+                # Logged into a registered profile (profiles.py)?
+                "registered": identifier.startswith("p:"),
+                # People known by a new name lately (old -> new): a thread
+                # under the old one belongs to the new one.
+                "renamed": rrc.renames(),
             }
+            if hello:
+                payload["hello"] = hello
+            if not _may_read(identifier):
+                # Mandatory: nothing to read before /auth -- the room's
+                # name and the rooms list stay, so the client still works,
+                # and the topic says why it's empty.
+                payload.update(messages=[], dms=[], users=[],
+                               topic=i18n.t("rrc_auth_to_read", i18n.get_lang(identifier)))
             await _send(writer, "200 OK", json.dumps(payload), "application/json")
 
         elif method == "POST" and path.startswith("/rrc/voice"):
@@ -2118,6 +4079,8 @@ async def _handle(reader, writer, secure=False):
             except ValueError:
                 mode = 0
             refused = _voice_gate(identifier, to)
+            if not refused and _greeting(identifier, ip) == "required":
+                refused = i18n.t("hello_required", i18n.get_lang(identifier))
             replies = [refused] if refused else rrc.send_voice(identifier, to, mode, audio)
             await _send(writer, "200 OK", json.dumps({"replies": replies, "room": None}), "application/json")
 
@@ -2127,6 +4090,8 @@ async def _handle(reader, writer, secure=False):
             try:
                 m = rrc.find_dm(identifier, int(_query(path, "id") or "-1"))
             except ValueError:
+                m = None
+            if not _may_read(identifier) or _greeting(identifier, ip) == "required":
                 m = None
             if m is None or "audio" not in m:
                 await _send(writer, "404 Not Found", "no such voice note", "text/plain")
@@ -2161,6 +4126,13 @@ async def _handle(reader, writer, secure=False):
                              "application/json")
                 return
             body = await _read_small_body(reader, length)
+            text = body.decode()
+            if _greeting(identifier, ip) == "required" and not any(
+                    text.strip().lower() == c or text.strip().lower().startswith(c + " ") for c in _HELLO_OK):
+                await _send(writer, "200 OK", json.dumps({
+                    "replies": [i18n.t("hello_required", i18n.get_lang(identifier))], "room": None,
+                    "error": "hello_required"}), "application/json")
+                return
             user = rrc.touch_user(identifier)
             # The SERVER decides which room this client is in, not the
             # client. X-Room is deliberately ignored: the client only
@@ -2170,14 +4142,27 @@ async def _handle(reader, writer, secure=False):
             # silently pulling them out of the room they were actually
             # in, and letting anyone post into a room they never joined.
             room = user["room"] if rrc.room_exists(user["room"]) else rrc.DEFAULT_ROOM
-            replies, new_room = rrc.handle_input(identifier, room, body.decode())
-            await _send(writer, "200 OK",
-                         json.dumps({"replies": replies, "room": new_room}),
-                         "application/json")
+            replies, new_room = rrc.handle_input(identifier, room, text)
+            out = {"replies": replies, "room": new_room}
+            hello = _greeting(identifier, ip)
+            if hello:
+                out["hello"] = hello              # "done" once /auth and /nick are in
+            await _send(writer, "200 OK", json.dumps(out), "application/json")
+
+        elif method == "GET" and path.startswith("/rrc/rec"):
+            # The voice recorder, opened by the chat in a small window over
+            # HTTPS (the only way a browser opens the microphone). It
+            # records and hands the audio back to the chat, which encodes
+            # and sends it as before.
+            origins = ["http://" + h for h in (tls.status().get("host"), _own_ap_ip(),
+                                                headers.get("host", "").split(":")[0]) if h]
+            await _send(writer, "200 OK", rrc_ui.render_recorder(i18n.get_lang(identifier), origins))
 
         elif method == "GET" and path.startswith("/rrc"):
             user = rrc.touch_user(identifier)
-            await _send(writer, "200 OK", rrc_ui.render_page(user["room"], user["nick"], i18n.get_lang(identifier)))
+            rec = None if secure else tls.https_redirect(ip, "/rrc/rec")
+            await _send(writer, "200 OK", rrc_ui.render_page(user["room"], user["nick"],
+                                                             i18n.get_lang(identifier), rec_url=rec))
 
         elif method == "GET" and path.startswith("/flash"):
             # Pass the address the client actually used, so the Chrome
@@ -2215,6 +4200,142 @@ async def _handle(reader, writer, secure=False):
         elif method == "GET" and path.startswith("/about"):
             await _send(writer, "200 OK", _page(_render_about_page(i18n.get_lang(identifier))))
 
+        elif method == "GET" and path.startswith("/tools.json"):
+            # The tools page as data: the FireFly apps (newest of each, by
+            # name -- fserv.find_apps) and the technician's files. Before
+            # this, /tools.json matched "/tools" and returned the HTML page
+            # with a 200, which an app would have taken for an answer.
+            apps = fserv.find_apps()
+            app_list = [{"app": k, "file": a["name"], "version": a["version"], "size": a["size"],
+                         "url": "/tool?f=" + _url_encode(a["file"])}
+                        for k, a in sorted(apps.items())]
+            # "files": every other file, flat, as before ("section" says
+            # which folder); "sections": the same grouped as on the page.
+            files, sections = [], []
+            for sec in fserv.tool_sections(i18n.get_lang(identifier)):
+                prefix = sec["dir"] + "/" if sec["dir"] else ""
+                sfiles = [{"name": n, "size": size, "section": sec["dir"],
+                           "url": "/tool?f=" + _url_encode(prefix + n)}
+                          for n, size in sec["files"] if not fserv.is_app_file(n)]
+                files.extend(sfiles)
+                if sec["dir"] and sfiles:
+                    sections.append({"dir": sec["dir"], "title": sec["title"], "summary": sec["summary"],
+                                     "readme": ("/tool?f=" + _url_encode(prefix + sec["readme_file"]))
+                                     if sec["readme"] else None,
+                                     "files": sfiles})
+                elif sfiles:
+                    sections.append({"dir": "", "title": None, "summary": "", "readme": None,
+                                     "files": sfiles})
+            await _send(writer, "200 OK", json.dumps({"sd": fserv.sd_ok, "apps": app_list, "files": files,
+                                                      "sections": sections}),
+                        "application/json")
+
+        elif path == "/hello" or path.startswith("/hello?"):
+            # The greeting as one exchange, made by the app inside its own
+            # connect handshake -- invisible to the person (CLIENT_QUICKSTART,
+            # "The greeting"). Both sides prove who they are:
+            #   GET  -> this Stump's identity, a one-time code, and this
+            #           Stump's signature over code + its LXMF address;
+            #   POST {"pub", "sig" (over the code), "name", "prefer"}
+            #        -> "hello": "done", one person from then on.
+            sid = plugins.service_lookup("identity")
+            if sid is None:
+                await _send(writer, "503 Service Unavailable", json.dumps({"hello": "off"}), "application/json")
+            elif not guard.allow("hello", ip, every=2, burst=6):
+                # Each one is a signature (the Stump's, or checking the
+                # phone's): a few at once, then one every 2 s per address,
+                # so nobody keeps the CAM busy signing.
+                await _send(writer, "429 Too Many Requests", json.dumps({"hello": "wait", "retry_after": 2}),
+                            "application/json")
+            elif method == "GET":
+                nonce = sid.start_challenge(identifier)
+                me = rrc.NODE_IDENTITY[0]
+                lx = (rrc.NODE or {}).get("lxmf") or ""
+                out = {"stump": (rrc.NODE or {}).get("name"), "lxmf": lx, "nonce": nonce,
+                       "hello": _greeting(identifier, ip) or "done"}
+                if me is not None:
+                    out["pub"] = ubinascii.hexlify(me.get_public_key()).decode()
+                    out["sig"] = ubinascii.hexlify(me.sign((nonce + lx).encode())).decode()
+                await _send(writer, "200 OK", json.dumps(out), "application/json")
+            else:
+                body = await _read_small_body(reader, int(headers.get("content-length", "0")))
+                try:
+                    d = json.loads(body.decode())
+                    pub, sig = str(d["pub"]), str(d["sig"])
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    await _send(writer, "400 Bad Request", json.dumps({"hello": "required", "error": "bad_request"}),
+                                "application/json")
+                    return
+                user = rrc.touch_user(identifier)
+                room = user["room"] if rrc.room_exists(user["room"]) else rrc.DEFAULT_ROOM
+                replies, _ = rrc.handle_input(identifier, room, "/auth " + pub + " " + sig)
+                if not any(str(r).startswith("AUTH-OK") for r in replies):
+                    await _send(writer, "403 Forbidden", json.dumps({
+                        "hello": "required", "error": "auth", "message": " ".join(str(r) for r in replies)}),
+                        "application/json")
+                    return
+                out = {}
+                name = rrc.clean_nick(str(d.get("name") or ""))
+                if name and name != rrc.get_user(identifier)["nick"]:
+                    r2, _ = rrc.handle_input(identifier, room, "/nick " + name)
+                    if r2:
+                        out["error"], out["message"] = "name", " ".join(str(r) for r in r2)
+                lx = rrc.lxmf_of(identifier)
+                if not lx:
+                    try:
+                        import rrc_mesh
+                        lx = rrc_mesh.lxmf_address(sid.verified_identity_for(identifier))
+                    except Exception:
+                        lx = None
+                if d.get("prefer") in ("wifi", "lora") and lx:
+                    rrc.set_prefer(lx, d["prefer"])
+                out.update({"hello": _greeting(identifier, ip) or "done", "nick": rrc.get_user(identifier)["nick"],
+                            "lxmf": lx, "prefer": rrc.prefer_of(lx) if lx else "wifi"})
+                await _send(writer, "200 OK", json.dumps(out), "application/json")
+
+        elif method == "GET" and path.startswith("/node.json"):
+            # Who this node is, for discovery: answers without touching
+            # the chat (polling /rrc/poll joins you to a room).
+            import chain
+            info = {"name": rrc.NODE.get("name"), "lxmf": rrc.NODE.get("lxmf")}
+            info.update(rrc.NODE_INFO)
+            info["ap_ip"] = chain.ap_ip()
+            st = chain.status()
+            info["chain"] = st if st.get("enabled") else None
+            info["features"] = [f for f in features.ALL if features.enabled(f)]
+            # "rescue": a rescue start after failed ones (keepalive.py) --
+            # no radio, no chain, no plugins for now.
+            info["mode"] = keepalive.mode()
+            # The radio settings, when this Stump has a radio: every node of
+            # a mesh needs the same ones (the Provisioner copies them).
+            cur = radio.current()
+            if cur:
+                info["radio"] = {k: cur[k] for k in ("frequency", "bandwidth", "sf", "cr")}
+            await _send(writer, "200 OK", json.dumps(info), "application/json")
+
+        elif method == "GET" and path.startswith("/hw.json"):
+            # The radio(s): connected, connecting, or why not; the RNode's
+            # firmware and live statistics (radio.hw). For the chat's
+            # status dot and /admin.
+            await _send(writer, "200 OK", json.dumps(radio.hw()), "application/json")
+
+        elif method == "GET" and path.startswith("/stumps.json"):
+            # This Stump and the others it heard, each with its addresses
+            # (discovery.py): reach one Stump, find them all.
+            import discovery
+            await _send(writer, "200 OK", json.dumps(discovery.directory()), "application/json")
+
+        elif method == "GET" and path.startswith("/chain.json"):
+            # This Stump's place in a chain over Wi-Fi (chain.py): role,
+            # addresses, the Stump above it and who's linked below.
+            import chain
+            await _send(writer, "200 OK", json.dumps(chain.status()), "application/json")
+
+        elif method == "GET" and path.startswith("/plugins.json"):
+            # What the plugins add, for clients: their commands (to offer
+            # as suggestions), the trigger prefix, and their pages.
+            await _send(writer, "200 OK", json.dumps(plugins.public_info()), "application/json")
+
         elif method == "GET" and path.startswith("/tools"):
             await _send(writer, "200 OK", _page(_render_tools_page(i18n.get_lang(identifier))))
 
@@ -2230,9 +4351,14 @@ async def _handle(reader, writer, secure=False):
                 await _send(writer, "404 Not Found", "no such file", "text/plain")
 
         elif method == "GET" and path.startswith("/tool"):
+            # f= is a file in tools/ or one folder down ("rnfs/x.whl"):
+            # each part goes through the same name guard, and
+            # fserv.tool_path refuses anything deeper or with "..".
             raw_f = path.split("f=", 1)[-1] if "f=" in path else ""
-            tname = _clean_filename(billboard._url_decode(raw_f))
-            tpath = fserv.TOOLS_DIR + "/" + tname
+            parts = billboard._url_decode(raw_f).split("/")
+            tname = _clean_filename(parts[-1])
+            rel = "/".join([_clean_filename(p) for p in parts[:-1]] + [tname])
+            tpath = fserv.tool_path(rel) or ""
             try:
                 # Deliberately NOT the /download route: tools carry no
                 # credit cost and must not be charged for, and keeping
@@ -2247,22 +4373,111 @@ async def _handle(reader, writer, secure=False):
             # The billboard as data: newest first, as the page shows it.
             # "id" is the post id (null for a post written before ids
             # existed, until the next rewrite gives it one).
+            # ?q= searches titles and bodies (accents and case ignored);
+            # ?sort=oldest|title|newest.
+            q = _query(path, "q") or ""
+            sort = _query(path, "sort") or "newest"
+            entries = [(sig, title, body, ts, pid) for sig, title, body, ts, pid in billboard._read_entries()
+                       if billboard._live(ts)]
+            if q:
+                import librarian
+                keep = set(p["id"] for p in billboard.search_entries(librarian.parse(q)[1] or [librarian.fold(q).strip()], 1000))
+                entries = [e for e in entries if e[4] in keep]
+            if sort == "title":
+                entries.sort(key=lambda e: e[1].lower())
+            elif sort != "oldest":
+                entries.reverse()
             posts = [{"id": pid, "title": title, "body": body, "sig": sig}
-                     for sig, title, body, ts, pid in reversed(billboard._read_entries())]
+                     for sig, title, body, ts, pid in entries]
             await _send(writer, "200 OK", json.dumps({"posts": posts}), "application/json")
+
+        elif path == "/profile" or path.startswith("/profile?") or path.startswith("/profile/"):
+            # Registered profiles (profiles.py).
+            lang = i18n.get_lang(identifier)
+            T = lambda k, **kw: i18n.t(k, lang, **kw)
+            fields = {}
+            if method == "POST":
+                length = int(headers.get("content-length", "0"))
+                body = await _read_small_body(reader, length)
+                for kv in body.decode().split("&"):
+                    parts = kv.split("=", 1)
+                    if len(parts) == 2:
+                        fields[parts[0]] = billboard._url_decode(parts[1])
+            notice = ""
+            nick = (fields.get("nick") or "").strip()
+            if method != "POST":
+                pass
+            elif path.startswith("/profile/register"):
+                if fields.get("pw") != fields.get("pw2"):
+                    notice = T("profile_mismatch")
+                elif rrc.nick_taken(nick, identifier) and not profiles.is_registered(nick):
+                    notice = T("profile_taken", nick=nick)
+                elif not guard.pw_budget():
+                    notice = T("profile_wait", s=2)
+                else:
+                    pw_new = fields.get("pw", "")
+                    rec, why = profiles.register(nick, pw_new, digested=(await profiles.prepare(pw_new)
+                                                                         if profiles.valid_password(pw_new) else None))
+                    if rec is None:
+                        notice = T("profile_err_" + why, nick=nick, n=profiles.PW_MIN)
+                    else:
+                        moved = fserv.move_credits(identifier, "p:" + profiles.key(nick))
+                        _log_in(writer, identifier, nick)
+                        identifier = "p:" + profiles.key(nick)
+                        notice = T("profile_created" if moved else "profile_created_empty", nick=rec["nick"])
+            elif path.startswith("/profile/login"):
+                ok, wait = await _profile_pw(nick, fields.get("pw", ""), ip)
+                if wait:
+                    notice = T("profile_wait", s=wait)
+                elif not ok:
+                    notice = T("profile_wrong")
+                else:
+                    _log_in(writer, identifier, nick)
+                    identifier = "p:" + profiles.key(nick)
+                    notice = T("profile_welcome", nick=profiles.get(nick)["nick"])
+            elif path.startswith("/profile/logout"):
+                profiles.end_session(_cookie(headers, PROFILE_COOKIE))
+                _profile_cookie(writer, None)
+                rrc.drop_user(identifier)
+                identifier = ip
+                notice = T("profile_bye")
+            elif path.startswith("/profile/password") and identifier.startswith("p:"):
+                pn = identifier[2:]
+                ok, wait = await _profile_pw(pn, fields.get("old", ""), ip)
+                if wait:
+                    notice = T("profile_wait", s=wait)
+                elif not ok:
+                    notice = T("profile_wrong")
+                elif fields.get("pw") != fields.get("pw2"):
+                    notice = T("profile_mismatch")
+                elif not profiles.valid_password(fields.get("pw", "")):
+                    notice = T("profile_err_password", n=profiles.PW_MIN)
+                elif not guard.pw_budget():
+                    notice = T("profile_wait", s=2)
+                elif not profiles.set_password(pn, fields.get("pw", ""),
+                                               digested=await profiles.prepare(fields.get("pw", ""))):
+                    notice = T("profile_err_password", n=profiles.PW_MIN)
+                else:
+                    # A new password ends every session, this one too: back in.
+                    _profile_cookie(writer, profiles.start_session(pn))
+                    notice = T("profile_changed")
+            await _send(writer, "200 OK", _page(_render_profile_page(lang, identifier, notice)))
 
         elif method == "GET" and path.startswith("/files.json"):
             # The shelf as data. Download with /download?f=<name>, the
             # name percent-encoded as UTF-8.
+            # ?q= words in the name, ?cat=video|music|document|image|other,
+            # ?sort=newest|oldest|name|small|large (default: by name, as before).
             files = []
             if fserv.sd_ok:
-                for n in fserv._list_files():
-                    try:
-                        size = os.stat(fserv.SHARED_DIR + "/" + n)[6]
-                    except OSError:
-                        size = None
-                    files.append({"name": n, "size": size, "class": fserv.guess_class(n),
-                                  "cost": fserv.credit_cost(n) if fserv.CREDITS_ENABLED else 0})
+                import librarian
+                q = _query(path, "q") or ""
+                words = (librarian.parse(q)[1] or [librarian.fold(q).strip()]) if q.strip() else None
+                for f in fserv.query_files(words, _query(path, "cat") or None,
+                                           _query(path, "sort") or "name", 0):
+                    files.append({"name": f["name"], "size": f["size"], "class": fserv.guess_class(f["name"]),
+                                  "cat": f["cat"], "mtime": f["mtime"],
+                                  "cost": fserv.credit_cost(f["name"]) if fserv.CREDITS_ENABLED else 0})
             await _send(writer, "200 OK", json.dumps({"sd": fserv.sd_ok, "credits": fserv.CREDITS_ENABLED,
                                                       "files": files}), "application/json")
 
@@ -2273,9 +4488,16 @@ async def _handle(reader, writer, secure=False):
             await _send(writer, "200 OK", _page(_render_billboard_page(i18n.get_lang(identifier))))
 
         elif method == "POST" and path.startswith("/upload"):
-            fname = _clean_filename(headers.get("x-filename", "upload.bin"))
+            raw_name = headers.get("x-filename", "upload.bin")
+            if headers.get("x-filename-encoding", "").lower() == "url":
+                # Percent-encoded UTF-8 (encodeURIComponent): plain ASCII on
+                # the wire, so any name survives -- accents, other scripts,
+                # emoji. What the Files page sends; a raw name still works.
+                raw_name = billboard._url_decode(raw_name)
+            fname = _clean_filename(raw_name)
             hash_hex = headers.get("x-hash", "").strip()
             length = int(headers.get("content-length", "0"))
+            as_json = _wants_json(headers)
 
             # Validate and pick the destination BEFORE reading a single
             # byte of the body. The old order read the whole upload into
@@ -2285,12 +4507,18 @@ async def _handle(reader, writer, secure=False):
             # Rejections drain instead of buffering.
             if not fname:
                 await fserv.drain(reader, length)
-                await _send(writer, "400 Bad Request", "No filename given.", "text/plain")
+                await _result(writer, as_json, "400 Bad Request", "no_filename", "No filename given.")
             elif not fserv.sd_ok:
                 await fserv.drain(reader, length)
-                await _send(writer, "503 Service Unavailable", "No card in the slot right now.", "text/plain")
+                await _result(writer, as_json, "503 Service Unavailable", "no_card", "No card in the slot right now.")
             elif length <= 0:
-                await _send(writer, "400 Bad Request", "Empty upload.", "text/plain")
+                await _result(writer, as_json, "400 Bad Request", "empty", "Empty upload.")
+            elif fserv.upload_gate(guard._k(identifier), length):
+                # One visitor's share (fserv: one at a time, files an
+                # hour, room a day): told why, nothing read.
+                st, code, key, params = fserv.upload_gate(guard._k(identifier), length)
+                await fserv.drain(reader, length)
+                await _result(writer, as_json, st, code, i18n.t(key, i18n.get_lang(identifier), **params))
             elif not fserv.make_room_fifo(length):
                 # Checked (and, if needed, evicted the oldest shared
                 # files to make room) BEFORE reading a single byte of
@@ -2303,23 +4531,32 @@ async def _handle(reader, writer, secure=False):
                 # shared file -- that's a real "no room" answer, not a
                 # bug.
                 await fserv.drain(reader, length)
-                await _send(writer, "507 Insufficient Storage",
-                            "Card capacity exceeded (75% threshold limit).", "text/plain")
+                await _result(writer, as_json, "507 Insufficient Storage", "full",
+                              "Card capacity exceeded (75% threshold limit).")
             else:
                 table = fserv._awaiting()
                 is_slot = bool(hash_hex) and hash_hex in table and not table[hash_hex]["fulfilled"]
                 if is_slot:
                     dest = fserv.SD_MOUNT + "/slot_" + hash_hex + "_" + fname
                 else:
+                    # A name already shared: "name (2).ext", never a
+                    # replacement of someone else's file.
+                    fname = fserv.free_name(fserv.SHARED_DIR, fname)
                     dest = fserv.SHARED_DIR + "/" + fname
 
-                ok, written = await fserv.stream_to_file(reader, dest, length)
+                who = guard._k(identifier)
+                fserv.upload_start(who)
+                written = 0
+                try:
+                    ok, written = await fserv.stream_to_file(reader, dest, length)
+                finally:
+                    fserv.upload_end(who, written if written >= length else 0)
 
                 if not ok:
-                    await _send(writer, "500 Internal Server Error",
-                                 "Upload interrupted (" + str(written) + " of " +
-                                 str(length) + " bytes) — nothing was kept. Try again.",
-                                 "text/plain")
+                    await _result(writer, as_json, "500 Internal Server Error", "interrupted",
+                                  "Upload interrupted (" + str(written) + " of " +
+                                  str(length) + " bytes) — nothing was kept. Try again.",
+                                  {"received": written, "expected": length})
                 else:
                     # The file itself is already safely on disk at this
                     # point -- stream_to_file succeeded. Everything from
@@ -2339,6 +4576,7 @@ async def _handle(reader, writer, secure=False):
                     # browser's fetch() just hangs -- no success, no
                     # error, nothing, indistinguishable from the upload
                     # having failed outright.
+                    extra = {"name": fname, "size": written, "slot": is_slot, "balance": None}
                     try:
                         if is_slot:
                             # Only mark the slot fulfilled once the bytes
@@ -2352,12 +4590,14 @@ async def _handle(reader, writer, secure=False):
                             credited = fserv.credit_add(identifier, fserv.credit_cost(fname))
                             if fserv.CREDITS_ENABLED:
                                 msg = "Uploaded. Your balance: " + str(credited)
+                                extra["balance"] = credited
                             else:
                                 msg = "Uploaded. Thanks for bringing something."
                     except Exception as e:
                         print("[barkeep] upload bookkeeping failed (file already saved):", e)
                         msg = "Uploaded, but couldn't update your balance/slot record."
-                    await _send(writer, "200 OK", msg, "text/plain")
+                        extra["warning"] = "bookkeeping"
+                    await _result(writer, as_json, "200 OK", None, msg, extra)
 
         elif method == "GET" and path.startswith("/download"):
             raw_f = path.split("f=", 1)[-1] if "f=" in path else ""
@@ -2374,9 +4614,34 @@ async def _handle(reader, writer, secure=False):
             except OSError:
                 await _send(writer, "404 Not Found", "not found", "text/plain")
 
-        else:
-            await _send(writer, "200 OK", _page(_render_chat_page(i18n.get_lang(identifier))))
+        elif path.startswith(plugins.PAGE_PREFIX) and plugins.page_target(path) is not None:
+            # A plugin's page. Only under /p/<plugin>/, so it can never
+            # shadow a core address. HTML is framed like every other page
+            # (theme, language, nav) unless the plugin asked for raw=True.
+            lang = i18n.get_lang(identifier)
+            body = b""
+            if method == "POST":
+                body = await _read_small_body(reader, int(headers.get("content-length", "0")),
+                                              cap=plugins.PAGE_BODY_MAX)
+            status, out, ctype, raw = await plugins.handle_page(method, path, headers, body, identifier, lang)
+            if status.startswith("303"):
+                loc = out if isinstance(out, str) and out.startswith("/") and "\r" not in out \
+                    and "\n" not in out else "/"
+                await writer.awrite("HTTP/1.1 303 See Other\r\nLocation: " + loc +
+                                    "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            elif raw:
+                await _send(writer, status, out, ctype)
+            else:
+                await _send(writer, status, _page(_lang_switcher(lang, path.split("?", 1)[0]) + out
+                                                  + _nav_except(lang, None)))
 
+        else:
+            lang = i18n.get_lang(identifier)
+            await _send(writer, "200 OK", _page(_render_chat_page(lang) + (
+                _ask_drawer(lang) if features.enabled("files") or features.enabled("billboard") else "")))
+
+    except conn.Dropped as e:
+        conn.note(e.args[0] if e.args else "head")   # too slow or silent: let go, quietly
     except Exception as e:
         print("[barkeep] request error:", e)
     finally:
@@ -2391,11 +4656,28 @@ async def run_barkeep_server(port=80):
     mesh announced, AP broadcasting -- while serving nothing at all, and
     nothing in the boot log would say why."""
     try:
+        import stump_host                       # a Stump on a computer (docs/PC.md)
+        port = int(stump_host.setting("PC_HTTP_PORT", port))
+    except ImportError:
+        stump_host = None
+    try:
         await asyncio.start_server(_handle, "0.0.0.0", port)
     except Exception as e:
-        print("[web] FAILED to bind port %d: %s" % (port, e))
-        print("[web] the billboard, chat and file pages are NOT available.")
-        raise
+        bound = False
+        if stump_host is not None and port != 8080:
+            # Port 80 taken on the computer (another web server): 8080.
+            print("[web] port %d unavailable (%s): using 8080" % (port, e))
+            port = 8080
+            try:
+                await asyncio.start_server(_handle, "0.0.0.0", port)
+                print("[web] visitors: http://%s:8080/" % stump_host.hotspot_ip())
+                bound = True
+            except Exception as e2:
+                e = e2
+        if not bound:
+            print("[web] FAILED to bind port %d: %s" % (port, e))
+            print("[web] the billboard, chat and file pages are NOT available.")
+            raise
     # HTTPS on 443, when a certificate is installed (tls.py). Failing here
     # never takes plain HTTP down with it.
     ctx = tls.context()
@@ -2404,8 +4686,13 @@ async def run_barkeep_server(port=80):
             await asyncio.start_server(_handle_tls, "0.0.0.0", 443, ssl=ctx)
             print("[web] HTTPS on 443 for", tls.status()["host"])
         except Exception as e:
-            tls.mark_failed("couldn't open port 443: %s" % e)
+            tls.mark_failed("couldn't open port 443: %s" % e, "port", str(e))
             print("[web] HTTPS not started:", e)
     else:
         print("[web] HTTPS off:", tls.status()["reason"])
     print("[web] serving on port", port)
+    try:
+        import discovery
+        discovery.WEB_PORT = port          # what "who's a Stump here?" and the beacon say
+    except ImportError:
+        pass
