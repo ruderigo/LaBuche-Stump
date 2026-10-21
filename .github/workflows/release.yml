@@ -1,100 +1,136 @@
 name: Release
 
-# Push a tag to zip the provisioner and its firmware and publish them as a GitHub Release:
-#   beta-a  ->  Stump_Beta_A.zip  (pre-release: tags with alpha/beta/rc)
-#   v1.0.0  ->  Stump_v1.0.0.zip
-# The zip unpacks to one folder holding provisioner.py, final_firmware/ (with
-# third_party/), README.md, CLIENT_QUICKSTART.md and LICENSE: the provisioner
-# looks for final_firmware/ next to itself, and its file hashes only match the
-# firmware of the same commit, so the two always travel together. Built from the
-# tagged source, never from a file kept in the repo, so it can't carry a local
-# config.py or drift from the code.
-# "Run workflow" by hand builds the same zip as a downloadable artifact, no release.
+# Push a tag like v1.0.0-beta.1 (matching STUMP_RELEASE in
+# final_firmware/example_node.py) to test, build and publish a release:
+#
+#   Stump-<version>.zip     provisioner.py + final_firmware/ + packs/, one folder
+#   provisioner.py          on its own
+#   <pack>-pack-<v>.zip     each pack
+#   MANIFEST.json           size and SHA-256 of every file inside every zip
+#   SHA256SUMS              SHA-256 of each release file
+#   SHA256SUMS.rnsig        Ed25519 signature by the release's Reticulum
+#                           identity (when the STUMP_RELEASE_IDENTITY secret
+#                           is set; see docs/RELEASE.md)
+#
+# Every file also gets a signed build-provenance attestation (Sigstore,
+# keyless): `gh attestation verify <file> --repo <this repo>` proves it was
+# built here, by this workflow, from the tagged commit.
+# A tag with a "-" (1.0.0-beta.1) is published as a pre-release. The release
+# notes are that version's CHANGELOG.md section. "Run workflow" by hand
+# builds the same files as an artifact, no release.
 
 on:
   push:
     tags:
       - 'v*'
-      - 'beta-*'
   workflow_dispatch:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
-      - name: Name the zip after the tag
-        id: n
+      - name: Read the version
+        id: v
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          if [[ "$TAG" =~ ^beta-([a-z0-9]+)$ ]]; then
-            NAME="Stump_Beta_${BASH_REMATCH[1]^^}"; TITLE="Project Stump Beta ${BASH_REMATCH[1]^^}"
-          else
-            NAME="Stump_${TAG//\//-}"; TITLE="Project Stump ${TAG}"
+          VERSION=$(sed -n 's/^STUMP_RELEASE = "\(.*\)"/\1/p' final_firmware/example_node.py)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/* && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match STUMP_RELEASE $VERSION in final_firmware/example_node.py"
+            exit 1
           fi
-          PRE=false; [[ "$TAG" =~ (alpha|beta|rc) ]] && PRE=true
-          echo "zip=$NAME.zip" >> "$GITHUB_OUTPUT"
-          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
-          echo "pre=$PRE" >> "$GITHUB_OUTPUT"
+          if ! grep -qx "## $VERSION" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $VERSION' section"
+            exit 1
+          fi
+          if [[ "$VERSION" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.12'
 
-      # The provisioner refuses a folder whose files don't match its hashes;
-      # never publish a set it would refuse.
-      - name: Check the provisioner's file hashes match final_firmware/
+      - name: MicroPython (cached)
+        id: mp-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/micropython-f32
+          key: micropython-f32-${{ hashFiles('scripts/build_micropython.sh') }}
+
+      - name: Build MicroPython, single-precision floats
+        if: steps.mp-cache.outputs.cache-hit != 'true'
+        run: sh scripts/build_micropython.sh ~/micropython-f32
+
+      - name: Test suite (a release is never built from a failing tree)
         run: |
-          pip install -q pytest
-          python -m pytest -q tests/test_firmware.py -k manifest
+          export MICROPYTHON=$HOME/micropython-f32/micropython
+          python3 tests/run.py
 
-      - name: Build ${{ steps.n.outputs.zip }}
+      - name: Build the release files (reproducible)
+        run: python3 scripts/build_release.py "${{ steps.v.outputs.version }}" dist
+
+      - name: Sign SHA256SUMS with the release identity
+        id: sign
+        env:
+          IDENTITY_B64: ${{ secrets.STUMP_RELEASE_IDENTITY }}
         run: |
-          python3 - "${{ steps.n.outputs.zip }}" <<'EOF'
-          import sys, zipfile
-          from pathlib import Path
-          out = Path(sys.argv[1])
-          top = Path(out.stem)                       # Stump_Beta_A/
-          files = [Path(p) for p in ("provisioner.py", "README.md", "CLIENT_QUICKSTART.md", "LICENSE")]
-          files += [f for f in sorted(Path("final_firmware").rglob("*"))
-                    if f.is_file() and "__pycache__" not in f.parts]
-          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
-              for f in files:
-                  zf.write(f, arcname=str(top / f))
-          EOF
-          unzip -l "${{ steps.n.outputs.zip }}" | tail -n 1
+          if [ -z "$IDENTITY_B64" ]; then
+            echo "::warning::No STUMP_RELEASE_IDENTITY secret: SHA256SUMS is not Reticulum-signed (the Sigstore attestations still are). See docs/RELEASE.md."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          pip install --quiet rns==1.5.7
+          echo "$IDENTITY_B64" | base64 --decode > "$RUNNER_TEMP/release.identity"
+          python3 scripts/sign_release.py sign "$RUNNER_TEMP/release.identity" dist/SHA256SUMS
+          rm -f "$RUNNER_TEMP/release.identity"
+          if [ -f RELEASE_SIGNING_KEY.txt ]; then
+            python3 scripts/sign_release.py verify dist/SHA256SUMS dist/SHA256SUMS.rnsig RELEASE_SIGNING_KEY.txt
+          else
+            echo "::warning::RELEASE_SIGNING_KEY.txt isn't committed: users can't check the signature against a published key yet."
+          fi
+          echo "signed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Release notes
+      - name: Check every hash
+        run: cd dist && sha256sum -c SHA256SUMS
+
+      - name: Attest build provenance (Sigstore)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/*'
+
+      - name: Release notes from CHANGELOG.md
         run: |
-          TOP="${{ steps.n.outputs.zip }}"; TOP="${TOP%.zip}"
-          cat > notes.md <<EOF
-          **To provision a node:** download \`${TOP}.zip\` below, unzip it, and from the \`${TOP}\` folder run
-
-          \`\`\`
-          python3 provisioner.py
-          \`\`\`
-
-          The provisioner and \`final_firmware/\` in this zip belong together: use them as a pair, not with files from another release or from \`main\`. See README.md for the full guide.
-          EOF
-          sed -i 's/^          //' notes.md
+          V="${{ steps.v.outputs.version }}"
+          awk -v v="## $V" '$0==v{on=1;next} /^## /{on=0} on' CHANGELOG.md > notes.md
+          {
+            printf '\n---\n\n**Install:** download `Stump-%s.zip`, unzip it, and run `python3 provisioner.py` inside the folder (see the README).\n\n' "$V"
+            printf '**Verify:**\n\n```\nsha256sum -c SHA256SUMS\ngh attestation verify Stump-%s.zip --repo %s\n' "$V" "$GITHUB_REPOSITORY"
+            if [ "${{ steps.sign.outputs.signed }}" = "true" ]; then
+              printf 'python3 scripts/sign_release.py verify SHA256SUMS SHA256SUMS.rnsig RELEASE_SIGNING_KEY.txt\n'
+            fi
+            printf '```\n\nBuilt from %s by [this run](%s/%s/actions/runs/%s). Rebuilding the same commit with `scripts/build_release.py` gives byte-identical files.\n\n' \
+              "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf '```\n'; cat dist/SHA256SUMS; printf '```\n'
+          } >> notes.md
           cat notes.md
 
-      - name: Keep the zip as a build artifact
+      - name: Keep the files as a build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.n.outputs.zip }}
-          path: ${{ steps.n.outputs.zip }}
+          name: Stump-${{ steps.v.outputs.version }}
+          path: dist/
 
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: ${{ steps.n.outputs.title }}
-          prerelease: ${{ steps.n.outputs.pre }}
+          name: Stump ${{ steps.v.outputs.version }}
           body_path: notes.md
-          generate_release_notes: true
-          files: ${{ steps.n.outputs.zip }}
+          prerelease: ${{ steps.v.outputs.prerelease }}
+          files: dist/*

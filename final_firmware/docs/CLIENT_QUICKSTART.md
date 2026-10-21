@@ -3,10 +3,75 @@
 One page. Read it before writing any client code, especially before
 you hit `AUTH-CHALLENGE` cold and start reverse-engineering source.
 
-**Source and released builds**: https://github.com/ruderigo/LaBuche-Stump
+**Source and released builds**: https://github.com/ruderigo/LaBuche-Stump (stable; beta testing: https://github.com/ruderigo/SandBox_Stump_On)
 — this is the reference point for what's actually current. If something
 you're looking at (a forwarded zip, an older doc, a snippet someone
 pasted into chat) disagrees with what's there, the repo wins.
+
+**This page matches firmware 1.0.0-beta.21.** What changed for clients
+since 1.0.0-beta.4:
+
+- **`#lora-mesh` is shared by the Stumps.** Lines from another Stump's
+  people arrive in your Stump's `#lora-mesh` as `nick@thatstump`, as in
+  `#wifi-mesh`, and `/names` there lists the other Stumps' people too
+  (`nick@stump`). Between Stumps they travel over the radio first (one
+  packet each), even when Wi-Fi joins them; `#wifi-mesh` stays on Wi-Fi;
+  `#main` never leaves its Stump.
+- **Don't title your own LXMF messages `#lora-mesh` or `#wifi-mesh`.** A
+  Stump now recognises another Stump not only by its `stump.node`
+  beacon but also by a batch titled with one of those rooms, or a line
+  starting `[DM>` — sent by a client, it would be taken for a Stump.
+  Untitled messages, and any other title, are a person's.
+- **More beacons, sometimes:** a Stump announces itself (beacon and LXMF
+  announce) when its radio connects (at most every 10 minutes) and when
+  it hears a Stump for the first time (at most once a minute). Read the
+  beacon as before.
+- **`#lora-mesh` follows the access mode, like every room.** Only if its
+  owner set `LORA_MESH_LOCKED = True` is it the radio's room on a
+  computer with its own Heltec: people on LoRa are always in; on the
+  web, the computer's owner and whom they invite (`/lora invite <nick>`).
+  Others then get `⊘ #lora-mesh LoRa — …` (`/rooms` marks it `[LoRa]`).
+- `/rrc/poll` carries `hw` (the radio's state for a status light, see
+  below); `GET /hw.json` gives the radios in full (`kind`: `usb`,
+  `ble` or `wifi`); `/node.json` has `radio` (frequency, bandwidth, SF,
+  CR); `/chain.json` gains `chain`, `path` and `fallback`.
+
+What changed since 1.0.0-beta.3 (in beta.4):
+
+- **Rooms renamed.** `#lxmf` is now `#lora-mesh` (LoRa phones and
+  handhelds land there). The old name still works — `/join lxmf`,
+  `#lxmf text`, `?room=lxmf` — but replies say `lora-mesh`: compare
+  against that.
+- **`#wifi-mesh`, on a Stump in a chain**: the other Stumps of the
+  chain and their people. Lines from another Stump's people show as
+  `nick@thatstump`; only chat lines cross, not joins and parts. Anyone
+  reached over the chain lands there, not in `#lora-mesh`. People on
+  other Stumps are DM contacts as `nick@thatstump` (see *The two rooms
+  that always exist*).
+- `/chain.json` gains `lan_ip`: the first Stump, with a chain secret,
+  also takes chain links on the Wi-Fi it joined itself.
+- The About page and `/admin` show the release (`Stump Beta A ·
+  1.0.0-beta.4`), as `GET /node.json` already did.
+
+What changed since 1.0.0-beta.2 (in beta.3) — additions, plus two
+limits: Stumps on a computer and `GET /node.json`; `/tools.json`
+`sections`; `/files.json` and `/billboard.json` search and sort
+(`?q=`, `?cat=`, `?sort=`) and `POST /chat` as JSON; chat lines faster
+than 3 at once, then one every 2 s, get `⧗ — …`, and more than 3
+billboard posts a minute per visitor get `429`; HTTPS only for
+`/admin` and `/rrc/rec` (`GET /rrc` over HTTPS answers `302`); LXMF
+messages with a bad signature are dropped.
+
+Since 1.0.0-beta.1: chained Stumps (a Stump's Wi-Fi may be
+`192.168.5.1`, `192.168.6.1`… — use the phone's gateway address;
+`GET /chain.json`); large relayed transfers onto LoRa stop after 48 KB
+per link every 10 minutes; the `stump.node` beacon: read its first four
+elements and ignore any more.
+
+Already in beta.1, if you're coming from an older build: plugins
+(`!word` commands, `/p/<plugin>/` pages, `GET /plugins.json`), voice
+notes, the propagation node, HTTPS, and JSON answers for billboard
+posts, uploads and `/tools.json`.
 
 ---
 
@@ -113,13 +178,14 @@ almost certainly why.
 the same way. Verified end to end over the mesh bridge with a real
 signature.
 
-**Nothing is automatic.** A mesh sender is known to the node only by its
-LXMF address, and the node does not turn that into a verified identity
-by itself. It couldn't safely today either: whether it checks the
-signature on an incoming LXMF message depends on the board having
-native Ed25519 (`verify_signatures = ed25519.have_native()` in the
-node's `urns/lxmf.py`), and without it the check is skipped — and
-unchecked messages are delivered all the same. So `/auth` is the proof.
+**Over LoRa, in `hybrid`, your signature is enough.** The node checks the
+signature on every incoming LXMF message (always, with or without native
+Ed25519), and a node that isn't `open` only takes signed messages from a
+sender whose announce it has heard. So in `hybrid` a FireFly over LoRa
+counts as verified for writing beyond `#main` (reading every room is
+open to all in `hybrid`), with no `/auth`. In `mandatory`, and for your credits and nick to follow you
+as a person, `/auth` is still the proof. Over Wi-Fi (HTTP), `/auth` is
+always what verifies you.
 
 **Do you need it?** Only if the node's access mode is `hybrid` or
 `mandatory`, or you want to enter a `minted` or `hybrid` room. The
@@ -162,18 +228,40 @@ until you've done the handshake above once.
 
 ## The two rooms that always exist
 
-`#main` and `#lxmf` are both present the moment a node boots — nothing
+**Renamed in 1.0.0-beta.4:** `#lxmf` is now `#lora-mesh`. The old name
+still works everywhere (`/join lxmf`, `#lxmf text`, `?room=lxmf`), but
+the node answers with `lora-mesh`: compare against that.
+
+`#main` and `#lora-mesh` are both present the moment a node boots — nothing
 to request, nothing to configure. If you're building a mesh-first
-client, **`#lxmf` is where your users land by default**; expect it, and
+client, **`#lora-mesh` is where your users land by default**; expect it, and
 don't be surprised it exists even on a freshly provisioned node you've
-never touched. `#main` is the general room walk-up WiFi visitors share.
+never touched. `#main` is the general room walk-up WiFi visitors share,
+and it never leaves its Stump. `#lora-mesh` is shared by the Stumps: a
+line said in one Stump's `#lora-mesh` shows in the others' as
+`nick@thatstump`, carried over the radio first.
 
 **`/part` depends on the transport.** Over WiFi/HTTP it always returns
 you to `#main`. Over the mesh it returns you to wherever you actually
-landed: `#lxmf` normally, or `#main` if a tiered `#lxmf` redirected you
+landed: `#lora-mesh` normally, or `#main` if a tiered `#lora-mesh` redirected you
 there instead (see `COMMANDS.md` for the tier system). Don't hardcode
 `#main` as the universal "go home" target in a mesh client — track the
 room the peer actually landed in first, or read the server's reply.
+
+**`#wifi-mesh`, on a Stump in a chain** (`/chain.json` has `"enabled":
+true`). The other Stumps of the chain are in it, taken in as soon as
+their beacon is heard over the chain, and so are the people on every
+Stump who join it. Lines from another Stump's people show as
+`nick@thatstump` (`"nick": "rod@Laptop"` in `/rrc/poll`); only chat
+lines cross between Stumps, not joins and parts. Anyone reached over
+the chain lands there, not in `#lora-mesh`. People seen on another Stump are
+DM contacts as `nick@thatstump` (in `users`); `/msg rod@LaBuche text`
+reaches rod privately, and rod's answer arrives as a DM from
+`you@yourstump`. That works over LXMF too: a mesh client sends `/msg
+rod@LaBuche text` like any `/msg`. A DM to a Stump itself shows in its
+`#wifi-mesh` as `@ThatStump text`. The other Stumps' names are in the
+poll's `stumps` list: the web chat groups them at the bottom of its
+column with a 🪵 (see *Telling Stumps from people*).
 
 ---
 
@@ -284,21 +372,45 @@ formats: every endpoint, payload and limit a client touches.
 # Reference for client builders
 
 Everything the client teams have been given, in one place. Checked
-against the current `barkeep.py`, `rrc.py`, `rrc_mesh.py`,
-`billboard.py` and `fserv.py` source.
+against the 1.0.0-beta.21 `barkeep.py`, `rrc.py`, `rrc_mesh.py`,
+`billboard.py`, `fserv.py`, `plugins.py`, `chain.py` and
+`example_node.py` source; the JSON shapes below are the ones the
+firmware's own tests (`tests/`) check.
 
 ## Addresses
 
 A node answers on two IPs with different guarantees:
 
-- **`http://192.168.4.1/`** — its own WiFi hotspot. Always there, for
-  any device that joins it directly. When in doubt, use this one.
+- **Its own WiFi hotspot** — always there, for any device that joins
+  it directly. That's `http://192.168.4.1/` on a lone Stump, but a
+  chained Stump uses `192.168.<n>.1` (see *Chained Stumps*), so take
+  the address from the network you joined — its gateway — rather than
+  hard-coding `192.168.4.1`. When in doubt, use this one.
 - **Its LAN IP** — only if the node also joined a router. Reachable
   only from that router's network, and it can change whenever the node
   or the router reboots, unless the router reserves it.
 
 Over LoRa there are no IPs: the node is its LXMF `lxmf.delivery`
 address, taken from its announces.
+
+**`GET /node.json`** — who the node is, without joining anything
+(polling `/rrc/poll` puts you in the chat, and others see you arrive).
+Use it to probe and label nodes:
+
+```json
+{"name": "LaBuche", "lxmf": "53d91d2f…48e4", "version": "Beta A",
+ "release": "1.0.0-beta.21", "ap_ip": "192.168.4.1", "chain": null,
+ "features": ["chat", "billboard", "files", "about"]}
+```
+
+`lxmf` is the same address as `node.lxmf` in `/rrc/poll`. `version` is
+a label for people; `release` is the firmware release. `ap_ip` is the
+node's own hotspot address. `chain` is `null` unless the node is
+chained, and then the same object as `GET /chain.json`. `features` is
+what the node offers (see the next section). Always answers, whatever
+features are on; ignore keys you don't know. New after 1.0.0-beta.2:
+an older node answers it with its home page (HTML, not JSON), so treat
+a non-JSON answer as "older node" and fall back to showing the address.
 
 ## Features a node may not offer
 
@@ -314,20 +426,145 @@ it aren't answered — though its `stump.node` beacon still announces.
 A node with a certificate installed (see `HTTPS_SETUP.md`) also serves
 HTTPS on 443 under its name, e.g. `https://stump.labuche.app`, reachable
 **on the node's own Wi-Fi** (its DNS answers every name with the node's
-address). Same API, same paths. A page opened over plain HTTP on the node's Wi-Fi first asks the
-browser to fetch `https://<name>/tls-ok` and moves to HTTPS only if that
-works; API requests are never redirected.
+address). Same API, same paths, but use plain HTTP for everything except
+what needs it: each HTTPS request is a full TLS handshake for the CAM
+(it closes every connection after one request), so polling over HTTPS
+every 2 s keeps it busy. The node's own web pages use HTTPS only for
+`/admin` and the voice recorder (`/rrc/rec`); `GET /rrc` over HTTPS
+answers `302` back to HTTP. API requests are never redirected.
+
+## Finding a Stump on a Wi-Fi (since 1.0.0-beta.21)
+
+A Stump on a home or office Wi-Fi gets its address from the router, which
+can change it. Never keep a Stump by its address: keep it by its
+**identity** (its LXMF delivery address, `lxmf` below, which never
+changes), and find its current address when you need it:
+
+1. **Ask the network.** Send a UDP datagram whose first bytes are
+   `STUMP?` (ASCII; anything after them is ignored, e.g. `STUMP? v1`) to
+   port **4244**: as a broadcast (`255.255.255.255`, or the subnet's
+   broadcast address) to find every Stump, or to one address to check it.
+   Every Stump that hears it answers the sender, unicast, within a moment,
+   with one JSON object:
+
+   ```json
+   {"stump": 1, "name": "macOS", "lxmf": "b9b7de41a6b23b7a6108eb76cce3e8dd",
+    "release": "1.0.0-beta.21",
+    "http": ["http://192.168.0.176/"],
+    "here": "http://192.168.0.176/"}
+   ```
+
+   `http` lists every address it serves its pages on (with `:port` when
+   it isn't 80, e.g. a computer Stump that fell back to 8080); `here` is
+   the one on the asker's network (`""` if none matches). Wait ~1.5 s for
+   answers; a Stump answers at most 5 questions a second. On Android, take
+   a `WifiManager.MulticastLock` while listening, and send from a socket
+   bound to the Wi-Fi network.
+2. **Listen to its beacon.** The `stump.node` announce's data is now
+   `["stump", version, name, <16-byte LXMF hash>, [web addresses]]` -- the
+   fifth item is the same list as `http`, and a Stump announces again soon
+   after its address changes. Older Stumps send four items: read the first
+   four as before, the fifth when present.
+3. **Ask any Stump for the others.** `GET /stumps.json` →
+   `{"self": <its card>, "stumps": [{"name", "lxmf", "http", "heard_s"}]}`:
+   every other Stump it heard, with the addresses its beacon gave.
+
+When a connection to a known Stump fails ("connection refused", a
+timeout), ask again (1), find the answer with the same `lxmf`, and carry
+on at its new address. Before treating an address as a Stump (the Wi-Fi's
+gateway, say -- true on a Stump's own hotspot, not on a home Wi-Fi), check
+that it answers `STUMP?` or `GET /node.json`. A Wi-Fi that keeps its
+devices from seeing each other (some guest networks) blocks all of this.
+
+## The greeting: apps say who they are first (since 1.0.0-beta.31)
+
+A client that keeps no cookie -- an app, like FireFly -- must greet a
+Stump before it chats over Wi-Fi (HTTP):
+
+1. `/auth` (the challenge above: it proves your Reticulum identity), then
+2. `/nick <the name the user chose>` -- unless the Stump already knows
+   that name from your LoRa announce, in which case `/auth` is enough.
+
+Send both as `/rrc/send` lines as soon as you connect, every time you
+connect (a new Wi-Fi address means a new session). Until the greeting is
+done:
+
+- `/rrc/poll` answers `"hello": "required"`, no messages, no DMs, no
+  people, and the reason in `topic`;
+- `/rrc/send` refuses anything but `/auth`, `/nick`, `/help`, `/whoami`
+  with `"error": "hello_required"`; voice notes are refused too;
+- you aren't listed anywhere (no stray `guest-xxxx` in anyone's list).
+
+Once it's done, `/rrc/poll` and `/rrc/send` answer `"hello": "done"`.
+From then on you're **one person**: the Stump links your Wi-Fi session to
+your LoRa identity, you're listed once under the name you chose, DMs to
+that name reach you over Wi-Fi while you poll (over LoRa once you stop),
+and the other Stumps of the chain don't list you again as `name@thatstump`
+(their lists carry an identity: `[NAMES] RodCell~3f2a91bc ...`). A name you
+chose always beats a `guest-` or `mesh-` one, in both directions; change
+it in your app and your next announce renames you everywhere, with
+`"renamed": {"old": "new"}` in the poll so a client folds its threads.
+
+**The greeting in one exchange: `/hello`** (since 1.0.0-beta.32) -- what an
+app should use, inside its own connect handshake, invisible to the person.
+Both sides prove who they are:
+
+1. `GET /hello` -> `{"stump", "lxmf", "pub", "nonce", "sig", "hello"}`: this
+   Stump's name and LXMF address, its public key, a one-time code, and the
+   Stump's signature over `nonce + lxmf` (ASCII). Check it with `pub`, and
+   that `pub` is the identity you know from the Stump's announce or beacon:
+   you're talking to the real Stump.
+2. `POST /hello` with JSON `{"pub": <your public key, hex>, "sig": <your
+   signature over the nonce's hex string, ASCII>, "name": <the name the
+   person chose>, "prefer": "wifi" | "lora"}` -> `{"hello": "done", "nick",
+   "lxmf", "prefer"}`. A wrong or replayed signature: `403`. A name someone
+   else has: `"error": "name"` (pick another, or let the person).
+
+`prefer` is the person's route, a toggle in the app like the Stump's own
+USB / Bluetooth switch: with `"lora"`, DMs to them go over LoRa even while
+they're on this Stump's Wi-Fi too (they're listed once either way); with
+`"wifi"` (the default), over Wi-Fi while they poll. Send `/hello` again to
+change it. `/auth` + `/nick` as chat lines remain as a fallback.
+
+Browsers keep the Stump's cookie and aren't asked anything: they're
+guests, as before. A Stump's owner can switch the greeting off
+(`APP_HELLO = False` in config.py).
 
 ## Identity model (WiFi/HTTP)
 
-There is no login, cookie or token. Without `/auth`, a WiFi client's
-entire state — nickname, room, language, DM inbox, credit balance — is
-keyed by **the source IP of the TCP connection**, read server-side on
-every request. It's stable while your device keeps the same IP on the
-node's network, and becomes a new, unrelated identity if the IP
-changes. Build the WiFi client assuming "whoever is connecting from
-this IP right now" is the whole session model; `/auth` (above) is what
-gives a durable identity across IPs and transports.
+A WiFi client's state — nickname, room, language, DM inbox, credit
+balance — is keyed by, in order (since 1.0.0-beta.19):
+
+1. a **registered profile** (`/profile`, a nick and a password, for
+   people without a FireFly): the `stump_p` session cookie;
+2. a **browser's visitor ID**: the `stump_v` cookie, offered on the
+   first page (it counts from the next request);
+3. otherwise **the source IP of the TCP connection** — a client that
+   keeps no cookies (the FireFly app's HTTP client) is known by its
+   address exactly as before, so its one-button `/auth` works unchanged.
+
+A browser's first request with its visitor ID takes over what its
+address had (nick, language, credits), once — unless that address is a
+verified FireFly session. Rate limits and wrong-password lockouts still
+count per address. `/auth` (above) is what gives a durable identity
+across devices and transports; a profile does it for nick and credits on
+the Stumps of one chain, and doesn't let you write in `hybrid`'s other rooms.
+`/rrc/poll` answers `"registered": true` for a logged-in profile.
+
+**One phone on Wi-Fi and LoRa is one person -- once it sends `/auth`
+over Wi-Fi** (since 1.0.0-beta.25). Without it, the Stump can't know the
+Wi-Fi visitor and the LoRa identity are the same phone (a claim without
+the signature could take someone else's messages), so it lists two
+people under two names. After a successful `/auth` over HTTP, if the
+Stump knows that identity's LXMF address on LoRa: the LoRa entry takes
+the Wi-Fi nick, it's listed once, DMs still waiting to go out over LoRa
+are delivered in the Wi-Fi poll instead, and DMs to that nick come over
+Wi-Fi while the phone polls -- over LoRa again once it stops (300 s).
+**So a FireFly on a Stump's Wi-Fi should `/auth` as soon as it
+connects**, not only when asked. A LoRa contact that announces a new
+display name is renamed too. `/rrc/poll` carries `"renamed": {"old":
+"new"}` for renames in the last 30 minutes: a client keeping
+conversations by nick should fold the old name's into the new one.
 
 ## RRC over HTTP — chat, rooms, DMs
 
@@ -341,7 +578,7 @@ is the highest message `id` you already have.
  "room": "main",
  "nick": "guest-a1b2",
  "topic": "",
- "rooms": ["main", "lxmf"],
+ "rooms": ["main", "lora-mesh"],
  "messages": [ {"id": 42, "ts": 1789700000.1, "nick": "alice", "body": "hey", "kind": "msg"} ],
  "dms": [ {"id": 43, "ts": 1789700001.2, "nick": "bob", "body": "psst", "kind": "dm"} ],
  "users": ["alice", "bob", "guest-a1b2"],
@@ -355,13 +592,25 @@ is the highest message `id` you already have.
   `action` (`/me`), or `dm`.
 - `messages` and `dms` share one id sequence — one `since` covers both.
 - `users` is the people in your room **plus** mesh peers reachable by
-  DM only (see RRC over LXMF) — i.e. everyone you can `/msg`.
+  DM only (see RRC over LXMF) and, on a chain, people on the other
+  Stumps as `nick@thatstump` — i.e. everyone you can `/msg`.
 - `node` is the node you're talking to: its name and its LXMF address.
   A client reaching the same node over Wi-Fi and LoRa matches the two
   by this address.
 - `stumps` lists which of those nicks are other Stump nodes (known from
-  their `stump.node` beacons, below). The web chat shows them with a
-  small "stump" tag; the nick itself is unchanged.
+  their `stump.node` beacons, below). The web chat groups them at the
+  bottom of its column with a 🪵 in front, under *Stumps* (*Buches* in
+  French); the nick itself is unchanged.
+- `hw`: `{"state": "none"|"online"|"connecting"|"error", "title"}` — the
+  node's radio, for a status light (`title`: the port, board and RNode
+  firmware, or the problem, one line per radio). Details: `GET /hw.json`.
+  When `/admin` lets the chat change the radio, it also has `settings`
+  (`{"frequency", "bandwidth", "sf", "cr", "txpower"}`, in Hz) and
+  `edit` (whether this client may: the computer's owner or an `/admin`
+  session); `POST /admin/radio.json` with `freq` (MHz), `bw`, `sf`,
+  `cr`, `txp` applies them: `{"ok", "message"}`, or 403.
+- `nick` on a message may be `rod@LaBuche`: a line from someone on
+  another Stump of the chain, in `#wifi-mesh`.
 - Limits: 60 messages per room (oldest drop like scrollback), 16 rooms,
   400 characters per message.
 
@@ -416,10 +665,10 @@ then ` — ` and a sentence for people:
 
 | Token | Meaning |
 |---|---|
-| `= #lxmf — …` | you're already in #lxmf (reply to `/join`, `/part`) |
+| `= #lora-mesh — …` | you're already in #lora-mesh (reply to `/join`, `/part`) |
 | `? /frob — …` | no such command |
 | `⊘ #vip minted — …` | that room's tier (`minted` or `hybrid`) refused you |
-| `⧗ — …` | slow down: too many voice notes too fast |
+| `⧗ — …` | slow down: lines too fast (3 at once, then one every 2 s, for anything others see), too many voice notes, or too many wrong passwords. The line wasn't sent: offer to resend it |
 
 Inside a DM, `♪ 5.0 s` is a voice note and its length: `[DM] <bob>: ♪ 5.0 s`.
 
@@ -465,15 +714,15 @@ another existing room without moving.
 Up to 10 room messages per 5-second cycle; your own room lines are
 never echoed back.
 
-**Each pushed batch names its room in the LXMF message title** — `#lxmf`,
-`#main` — so lines queued just before a `/join` can't be filed under the
+**Each pushed batch names its room in the LXMF message title** — `#lora-mesh`,
+`#main`, `#wifi-mesh` — so lines queued just before a `/join` can't be filed under the
 wrong room. File room lines by the title, not by the room you think
 you're in. A batch with only DMs has no title (each `[DM]` line names
 its author).
 
 **You're told which room you landed in.** Whenever the node puts you in
 a room you didn't ask for — your first message, your first message
-after going quiet past `MESH_PEER_TIMEOUT`, or a tiered `#lxmf`
+after going quiet past `MESH_PEER_TIMEOUT`, or a tiered `#lora-mesh`
 redirecting you to `#main` — it sends `→ #room` before anything else.
 
 **Room tiers apply over the mesh.** `/join` and the `#room text`
@@ -542,8 +791,8 @@ are fixed encryption and LXMF overhead.
   someone" under your announced display name, and DMs to you are
   delivered over LoRa. The first is preceded by a one-line hint on how
   to reply. No room traffic is sent to you.
-- **Any message to the node → room participant.** You land in `#lxmf`
-  (or `#main` if a tiered `#lxmf` redirects you), and room traffic is
+- **Any message to the node → room participant.** You land in `#lora-mesh`
+  (or `#main` if a tiered `#lora-mesh` redirects you), and room traffic is
   pushed to you as well.
 
 Participation lasts `MESH_PEER_TIMEOUT` (default 300 s) after your last
@@ -569,6 +818,10 @@ Its announce data is a msgpack list:
 ["stump", <firmware version>, <node name>, <16-byte LXMF delivery hash>]
 ```
 
+The version is a free-text label (`"Beta A"` today), for showing, not
+parsing. Read the first four elements and ignore any more: later
+firmware may append fields.
+
 So any LXMF address that has a `stump.node` announce on the same
 identity is a Stump; everything else is a person (or another app).
 Stumps use this themselves: over HTTP, `GET /rrc/poll` already tells
@@ -585,7 +838,7 @@ import RNS, RNS.vendor.umsgpack as msgpack
 class StumpBeacons:
     aspect_filter = "stump.node"
     def received_announce(self, destination_hash, announced_identity, app_data):
-        kind, version, name, lxmf_hash = msgpack.unpackb(app_data)
+        kind, version, name, lxmf_hash = msgpack.unpackb(app_data)[:4]
         mark_as_stump(lxmf_hash, name, version)   # your code
 
 RNS.Transport.register_announce_handler(StumpBeacons())
@@ -600,8 +853,9 @@ beacon = RNS.Destination.hash(identity, "stump", "node")
 RNS.Transport.request_path(beacon)
 ```
 
-Beacons go out at boot and every 30 minutes (`STUMP_ANNOUNCE_INTERVAL`),
-so on first sight of a peer, asking is faster than waiting. Only CAM
+Beacons go out at boot, every 30 minutes (`STUMP_ANNOUNCE_INTERVAL`)
+and within seconds of a new chain link, so on first sight of a peer,
+asking is faster than waiting. Only CAM
 nodes beacon: a standalone Heltec transport runs different firmware and
 has no chat of its own.
 
@@ -738,7 +992,11 @@ upstream delivers locally.
 
 `id` is the post's id (it can be `null` for a post written before ids
 existed, until the node next rewrites the board). `body` is `""` for a
-title-only post.
+title-only post. Notices past their 72 hours aren't listed.
+
+Optional: `?q=<words>` keeps the posts whose title or body holds one of
+them (case and accents ignored: `velo` finds *Vélo*), and
+`?sort=newest|oldest|title`.
 
 `GET /billboard` is the rendered HTML page. A post is a required **title** and an optional
 **body**:
@@ -760,9 +1018,21 @@ markup.
 `title=` (required, 80 chars, line breaks become spaces) and `body=`
 (optional, 600 chars, line breaks kept). The original single `entry=`
 field is still accepted as a title-only post; a post with only
-`body=` takes the body's first line as its title. Always answers
-`303 See Other` → `/billboard`, **even when an empty post was silently
-rejected** — there's no error path on this endpoint. Posts expire 72
+`body=` takes the body's first line as its title. Or send
+`Content-Type: application/json` with `{"title": ..., "body": ...}`.
+
+**Send `Accept: application/json` to get the result as data** — without
+it the answer is `303 See Other` → `/billboard` whatever happened, which
+is what the web form wants:
+
+| Status | Body |
+|---|---|
+| `201 Created` | `{"ok": true, "message": "posted", "id": "1791388089.870112274"}` — the same `id` as in `/billboard.json` |
+| `400 Bad Request` | `{"ok": false, "error": "title_required", "message": "a title is required"}` |
+| `507 Insufficient Storage` | `{"ok": false, "error": "storage", "message": "the post couldn't be saved"}` — it wasn't |
+| `429 Too Many Requests` | `{"ok": false, "error": "rate_limited", "message": "…"}` — 3 posts a minute per visitor (`BILLBOARD_POSTS_PER_MIN`); try again in a minute |
+
+Act on `error`, a stable token; `message` is for people. Posts expire 72
 hours after posting (the clock only counts once the node's clock is
 set); don't assume permanence.
 
@@ -772,12 +1042,24 @@ set); don't assume permanence.
 
 ```json
 {"sd": true, "credits": true,
- "files": [{"name": "photo.jpg", "size": 48213, "class": "other", "cost": 1}]}
+ "files": [{"name": "photo.jpg", "size": 48213, "class": "other", "cat": "image",
+            "mtime": 1791388089, "cost": 1}]}
 ```
 
-`size` is in bytes (`null` if it couldn't be read), `class` is one of
-`video`, `music`, `document`, `other`, and `cost` is the credit weight
-(0 when credits are off). Both JSON endpoints answer `404` when their
+`size` is in bytes, `class` is the credit class (`video`, `music`,
+`document`, `other`), `cat` the kind of file for finding things (`video`,
+`music`, `document`, `image`, `other` — broader: `.webm`, `.epub`,
+pictures…), `mtime` when it arrived (node clock), and `cost` the credit
+weight (0 when credits are off). Optional: `?q=<words>` (in the name;
+accents ignored), `?cat=<cat>`, `?sort=newest|oldest|name|small|large`
+(default: by name).
+
+**`POST /chat`** asks BarKeep, the node's librarian (`COMMANDS.md`
+Part 4): a raw text body, a question in French, English or Spanish.
+With `Accept: application/json`: `{"reply": "<HTML>", "found": {"intents",
+"words", "topic", "files", "others", "posts", "apps", "counts"}}` —
+`files`/`others` rows like `/files.json`'s, `posts` `{"id", "title",
+"body", "snippet"}`. Both JSON endpoints answer `404` when their
 feature is off on the node. `GET /files` is the rendered HTML page.
 
 **`POST /upload`** — raw body, not multipart; filename and optional
@@ -792,11 +1074,52 @@ Content-Length: <n>
 <raw file bytes>
 ```
 
-Plain-text responses: `400` (no filename or empty body), `503` (no SD
-card mounted), `507` (card at its 75% ceiling with nothing evictable),
-`500` (connection dropped mid-upload; nothing kept), `200` with
-`Uploaded. Your balance: N` (credits on) or `Uploaded. Thanks for
-bringing something.` (credits off). Filenames are sanitized for the SD
+Responses are plain text by default — what the Files page shows. **Send
+`Accept: application/json` to get them as data**, with the same status
+codes:
+
+| Status | `error` | Meaning |
+|---|---|---|
+| `200` | — | `{"ok": true, "name", "size", "slot", "balance", "message"}` — `name` is the stored (sanitized) name; `balance` is `null` with credits off or for a slot delivery; `"warning": "bookkeeping"` if the file is saved but the balance couldn't be updated |
+| `400` | `no_filename` / `empty` | No `X-Filename`, or an empty body |
+| `503` | `no_card` | No SD card mounted |
+| `507` | `full` | Card at its 75% ceiling with nothing evictable (files shared in the last hour aren't pushed out for someone else's) |
+| `429` | `one_at_a_time` | Another upload from your address is still going: one at a time (since 1.0.0-beta.27) |
+| `429` | `too_many` | 30 files from your address in the last hour |
+| `429` | `quota` | Your address's share of the card for the day (a quarter of its room) |
+| `500` | `interrupted` | Connection dropped mid-upload; nothing kept. Adds `received` and `expected` byte counts |
+
+**Any request, any address: `503` with `Retry-After: 2` and the body
+`busy`** means the Stump is full right now (too many connections at once,
+or too many from your address) -- wait that long and try again. Keep at
+most a few connections open to one Stump (a CAM serves about ten in all,
+six per address). A connection that goes quiet is closed: the request
+line and headers must arrive within 10 s (3 s when the Stump is busy), and
+a body or download where nothing moves for 15 s is let go -- an upload
+cut that way keeps nothing, like any interrupted one.
+
+A name already shared isn't replaced: the upload is kept as `name (2).ext`,
+and `name` in the answer says which (since 1.0.0-beta.27). On a CAM, all
+uploads together are held to about 300 KB/s, shared between those going
+on -- a big file takes longer, nobody else's chat stalls.
+
+Every JSON answer has `ok` and a human `message`; act on `error`. **Non-ASCII names: percent-encode them.** A header carries only Latin-1,
+so send the name as `encodeURIComponent(name)` (percent-encoded UTF-8) with
+`X-Filename-Encoding: url`:
+
+```
+X-Filename: th%C3%A9%20%E6%97%A5%E6%9C%AC.jpg
+X-Filename-Encoding: url
+```
+
+That's plain ASCII on the wire, so any name survives — accents, other
+scripts, emoji. A raw name still works: UTF-8 bytes are read as UTF-8,
+anything else as Latin-1 (so `é` sent as the single byte `0xE9`, as
+browsers and Python's `urllib` do, now arrives as `é`; nodes before this
+fix closed the connection with no reply). Without
+`X-Filename-Encoding`, a `%` in a name is kept literally.
+
+Filenames are sanitized for the SD
 card's FAT32/exFAT rules — `< > : " / \ | ? *` become `_`, quotes are
 dropped — so the stored name can differ slightly from what you sent.
 
@@ -817,6 +1140,100 @@ on the node, as awaiting one specific upload. Send that hash as
 `X-Hash` and the file goes to its own one-shot slot instead of the
 shared pool, marked fulfilled only once the bytes are on disk. Omit
 `X-Hash` (or send it empty) for ordinary uploads.
+
+## Apps and tools
+
+**`GET /tools.json`** — what the node's `/tools` page offers, as data:
+
+```json
+{"sd": true,
+ "apps": [{"app": "android", "file": "FireFly-Android-0.2.11.apk", "version": "0.2.11",
+           "size": 49712049, "url": "/tool?f=firefly%2FFireFly-Android-0.2.11.apk"},
+          {"app": "rk3326", "file": "FireFly-RK3326-0.6.2.zip", "version": "0.6.2",
+           "size": 97653, "url": "/tool?f=firefly%2FFireFly-RK3326-0.6.2.zip"}],
+ "files": [{"name": "provisioner.py", "size": 156584, "section": "provisioner",
+            "url": "/tool?f=provisioner%2Fprovisioner.py"}],
+ "sections": [{"dir": "provisioner", "title": "Provisioner",
+               "summary": "The tool that sets up and updates Stump nodes…",
+               "readme": "/tool?f=provisioner%2FREADME.md",
+               "files": [{"name": "provisioner.py", "size": 156584, "section": "provisioner",
+                          "url": "/tool?f=provisioner%2Fprovisioner.py"}]}]}
+```
+
+The Tools page has a section per tool, each a folder on the node's
+card with a `README.md`. `files` lists every file flat, as before, with
+the `section` it's in (`""` for a loose file); `sections` groups them
+as the page does, with each one's title, summary and README address
+(`readme` is `null` without one; a section of loose files has
+`"dir": ""` and no title). The FireFly apps are only under `apps`.
+Always download with the `url` as given: since the sections, it names
+the folder. (Sections and `section` are new after 1.0.0-beta.2; `file`
+in `apps` is still the bare file name.)
+
+`apps` holds the newest of each FireFly app on the node's card (versions
+compared as numbers); an app the node doesn't carry is simply absent. A
+client can compare `version` with its own and offer "a newer version is
+on this Stump". Download with the `url` as given.
+
+## Plugins: extra commands and pages
+
+A node can carry plugins (`PLUGINS.md`) that add chat commands — dice,
+polls, `!seen` — and pages under `/p/<plugin>/`. Nothing about the
+protocol changes; what a client may want to know:
+
+- **`!word` lines.** Plugin commands answer both `/roll` and `!roll`.
+  `!roll` is an ordinary room line (posted, seen by everyone), then the
+  plugin answers: replies meant for the sender come back as usual, and
+  room answers arrive as a room line from the plugin's own nick. Over
+  LXMF a plugin command answers in one line by default.
+- **No new symbols.** Too many commands too fast: `⧗ — …`. A plugin
+  switched off: `? /roll — …`, like any unknown command. The only new
+  sentence is the failure line, `<plugin> had a problem — not your
+  fault, try again later`.
+- **`GET /plugins.json`** lists what's running, so a client can offer
+  plugin commands as suggestions or link a plugin's pages:
+
+```json
+{"api": 1, "trigger": "!",
+ "plugins": [{"name": "tavern", "version": "0.1", "commands": ["8ball", "roll", "seen"],
+              "pages": ["/p/tavern/", "/p/tavern/votes"]}]}
+```
+
+`trigger` is the prefix for `!word` commands. fservbot (`/fs*`) and
+stumpid (`/auth`, `/whoami`, `/admin`, `/invite`) are listed too; their
+commands are slash only, since some carry a password. Nothing about
+`/auth` changed: same replies, byte for byte.
+
+## Chained Stumps
+
+Stumps can be chained over Wi-Fi (`CHAIN.md`). Nothing changes for a
+client: chained Stumps relay Reticulum for each other, so a Stump two
+apartments away is just a destination a few hops off, reached over
+Wi-Fi rather than LoRa. Two things worth knowing:
+
+- **A Stump's Wi-Fi may not be `192.168.4.1`.** In a chain each one has
+  its own range (`192.168.5.1`, `192.168.6.1`…). Use the address the
+  phone was given (its gateway), never a hard-coded one.
+- **Big transfers relayed onto LoRa are cut off** after 48 KB per link
+  every 10 minutes. Over the chain there's no limit.
+
+- **The chain has its own room, `#wifi-mesh`** (see *The two rooms that
+  always exist*): the other Stumps and their people, with lines as
+  `nick@thatstump` and DMs across Stumps. A client reached over the
+  chain lands there rather than in `#lora-mesh`.
+
+`GET /chain.json` shows the Stump's place in a chain; its `lan_ip` is
+where the first Stump also takes chain links on the Wi-Fi it joined.
+
+## Stumps on a computer
+
+A Stump can also run on a laptop or desktop (`PC.md`): same pages, same
+API, same LXMF behaviour, and it chains like any other Stump. For a
+client the differences are addresses: its Wi-Fi is the computer's
+hotspot (`192.168.137.1` on Windows, `192.168.2.1` on macOS) or a
+router's, the web port may be 8080, and the sign-in pop-up may not
+appear. Take the address from the network you joined (and `/node.json`
+reports `ap_ip`), as for chained Stumps.
 
 ## Android: RNode over a local TCP bridge
 

@@ -145,7 +145,7 @@ function flash(target){
 
   var esp=null, transport=null;
 
-  import('/tool?f=esptool-bundle.js').then(function(mod){
+  import('/tool?f=flasher/esptool-bundle.js').then(function(mod){
     say('Select the board in the browser prompt...');
     return navigator.serial.requestPort().then(function(port){
       transport=new mod.Transport(port, true);

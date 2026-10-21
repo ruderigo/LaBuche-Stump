@@ -1,22 +1,13 @@
 {
   "plugin": "fservbot",
-  "version": "1.0",
+  "version": "1.1",
   "title": "fserv bot (RRC channel)",
   "summary": "mIRC-style fserv bot that answers triggers in the RRC channel. Ships base templates and an editable dialogue table.",
   "target_dir": "final_firmware/fservbot/",
   "stump_version": "Beta A",
-
   "modifies_core_files": false,
   "binds_ports": false,
   "starts_tasks": false,
-
-  "activation": {
-    "note": "The only change to any Stump file. Natural home is example_node.py, after RRC exists and before the server starts serving.",
-    "import_line": "import fservbot.install",
-    "call_line": "fservbot.install.activate()",
-    "removal": "Delete the two lines and the fservbot/ folder."
-  },
-
   "files": [
     "fservbot/__init__.py",
     "fservbot/core.py",
@@ -25,7 +16,6 @@
     "fservbot/plugin.json",
     "fservbot/README.md"
   ],
-
   "wizard": {
     "mode": "technician_or_deferred",
     "note": "Only the password prompt matters. If the technician leaves it blank, the bot still runs and still answers its base triggers -- only editing is off. Everything else can be set later from the RRC channel by a user who has the password.",
@@ -61,7 +51,6 @@
       }
     ]
   },
-
   "config_block": [
     "# ---- fservbot (RRC channel fserv bot) ----",
     "# Blank password = dialogue editing is OFF. The bot still answers its",
@@ -71,15 +60,21 @@
     "FSERVBOT_TRIGGER_PREFIX = \"!\"",
     "FSERVBOT_BROADCAST_MINS = 0"
   ],
-
   "runtime_storage": {
-    "path": "/sd/fservbot.json",
-    "note": "Dialogues and runtime options. Created on first edit. No SD card means edits last until reboot; the bot says so when it saves. Delete this file to return to shipped defaults."
+    "path": "/sd/plugins/fservbot/fservbot.json",
+    "note": "Dialogues and runtime options. Created on first edit. No SD card means edits last until reboot; the bot says so when it saves. Delete this file to return to shipped defaults. (Kept at /sd/fservbot.json before plugin API 1; moved on the first boot with it.)"
   },
-
   "user_commands": {
     "note": "Available in the RRC channel after boot. Password-gated commands are marked.",
-    "channel_triggers": ["!fserv", "!about", "!help", "!list", "!files", "!info", "!rules"],
+    "channel_triggers": [
+      "!fserv",
+      "!about",
+      "!help",
+      "!list",
+      "!files",
+      "!info",
+      "!rules"
+    ],
     "admin": [
       "/fshelp                               no password -- explains the rest",
       "/fslist                               no password -- active triggers",
@@ -90,6 +85,18 @@
       "/fsset <pw> broadcast <mins|off>      password"
     ]
   },
-
-  "manifest_note": "provisioner.py's EXPECTED_FILE_HASHES needs one entry per file above. No existing entry changes: this plugin edits no file it did not create. plugin.json and README.md are documentation and may be excluded from the upload set if the team prefers to keep the 52-file payload lean -- core.py, templates.py, install.py and __init__.py are the only files needed at runtime."
+  "manifest_note": "provisioner.py's EXPECTED_FILE_HASHES needs one entry per file above. No existing entry changes: this plugin edits no file it did not create. plugin.json and README.md are documentation and may be excluded from the upload set if the team prefers to keep the 52-file payload lean -- core.py, templates.py, install.py and __init__.py are the only files needed at runtime.",
+  "plugin_api": 1,
+  "hooks": [
+    "/fsadd /fsdel /fslist /fsset /fsshow /fshelp (slash only)",
+    "on_message: channel triggers",
+    "every 30 s: the periodic notice"
+  ],
+  "hashes": {
+    "fservbot/__init__.py": "f164090d81312df8",
+    "fservbot/core.py": "bcaa09803bea6ffa",
+    "fservbot/templates.py": "c96ae972f8508915",
+    "fservbot/install.py": "9b5fb508cc06d5df",
+    "fservbot/README.md": "b13272f8f4ea0a92"
+  }
 }

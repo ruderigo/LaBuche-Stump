@@ -1,0 +1,30 @@
+{
+  "name": "rnfs",
+  "version": "1.1",
+  "author": "Project Stump",
+  "license": "MIT",
+  "stump_api": 1,
+  "description": "rnfs, the Reticulum file system, for walk-up visitors: everything to install it with no internet on the Tools page, a spotter that recognises rnfs links in chat (including ones arriving over LoRa), and !shelf, the place's own index of files worth fetching. rnfs (MIT, by Afi Hogan) runs on the visitor's computer, not on the node.",
+  "ram_kb": 20,
+  "plugins": [
+    "rnfs"
+  ],
+  "tools": true,
+  "home": false,
+  "hashes": {
+    "tools/README.es.md": "00ea9496e5d99fe9",
+    "tools/README.fr.md": "fa38bef40a81a97f",
+    "tools/README.md": "c8c5aae665199b21",
+    "tools/lxmf-1.2.0-py3-none-any.whl": "805f053e61082f58",
+    "tools/reticulum-LICENSE.txt": "851a55a19e4367da",
+    "tools/rnfs-0.1.1-py3-none-any.whl": "4dacc2dd6219de55",
+    "tools/rnfs-LICENSE.txt": "266d943536a4c09a",
+    "tools/rnfs-install.bat": "6b0ff9d4fa94c1b9",
+    "tools/rnfs-install.sh": "dded8c6935843016",
+    "tools/rnspure-1.5.7-py3-none-any.whl": "20489039ada391b1"
+  },
+  "plugin_hashes": {
+    "rnfs": "32efcab28d7d0df6"
+  },
+  "credits": "rnfs by Afi Hogan (afit21), MIT, https://github.com/afit21/rnfs. Reticulum (rnspure) and LXMF by Mark Qvist, Reticulum License, https://reticulum.network."
+}

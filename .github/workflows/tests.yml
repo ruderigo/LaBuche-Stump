@@ -1,13 +1,10 @@
 name: Tests
 
-# Board-free checks on every push and pull request (tests/):
-#  - every firmware file compiles with mpy-cross v1.28 (the MicroPython the provisioner flashes)
-#  - provisioner.py's file manifest matches final_firmware/
-#  - FR/EN/ES strings are complete and every key the code uses exists
-#  - µReticulum (urns) interoperates with the reference rns/lxmf: keys, addresses,
-#    signatures, encryption and LXMF messages, both directions
-# The reference side runs twice: the version FireFly for Android pins, and the newest
-# release (what FireFly handhelds install), so an upstream protocol change shows up here.
+# Every push to main and every pull request: the whole suite (tests/run.py) --
+# the firmware on MicroPython built with single-precision floats like the
+# ESP32-S3, the plugin API, both packs, and the Provisioner (manifest hashes,
+# pack checks, uploads against a simulated board). Releases are built by
+# release.yml, which runs the same suite first.
 
 on:
   push:
@@ -21,26 +18,89 @@ concurrency:
 
 jobs:
   test:
-    name: Tests (reference rns ${{ matrix.rns }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - rns: "1.5.5"
-            pip: "rns==1.5.5 lxmf==1.2.0"
-          - rns: "latest"
-            pip: "rns lxmf"
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.12'
 
-      - name: Install test tools and the reference Reticulum
-        run: pip install pytest cryptography "mpy-cross==1.28.*" ${{ matrix.pip }}
+      - name: Packages for Stump on a computer
+        run: python3 -m pip install cryptography pyserial
 
-      - name: Run the tests
-        run: python -m pytest -v tests
+      - name: MicroPython (cached)
+        id: mp-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/micropython-f32
+          key: micropython-f32-${{ hashFiles('scripts/build_micropython.sh') }}
+
+      - name: Build MicroPython, single-precision floats
+        if: steps.mp-cache.outputs.cache-hit != 'true'
+        run: sh scripts/build_micropython.sh ~/micropython-f32
+
+      - name: Every Python file compiles (CPython and MicroPython)
+        run: |
+          python3 -m py_compile provisioner.py scripts/*.py tests/*.py
+          find final_firmware packs -name '*.py' -not -path '*/third_party/*' | while read f; do
+            ~/micropython-f32/micropython -c "compile(open('$f').read(), '$f', 'exec')" || exit 1
+          done
+
+      - name: Test suite
+        run: |
+          export MICROPYTHON=$HOME/micropython-f32/micropython
+          python3 tests/run.py
+
+      - name: The release builds, reproducibly
+        run: |
+          V=$(sed -n 's/^STUMP_RELEASE = "\(.*\)"/\1/p' final_firmware/example_node.py)
+          python3 scripts/build_release.py "$V" dist-a > /dev/null
+          python3 scripts/build_release.py "$V" dist-b > /dev/null
+          diff dist-a/SHA256SUMS dist-b/SHA256SUMS
+          cat dist-a/SHA256SUMS
+
+  # Stump on a computer (docs/PC.md) on the systems people will run it on:
+  # a Stump folder made by the Provisioner, started, every page checked.
+  # (The chain half, with a MicroPython CAM, runs in the Linux job above.)
+  computer:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Packages
+        run: python -m pip install cryptography pyserial
+      - name: A Stump on this computer
+        run: python tests/pc/pc_chain_test.py
+      - name: The chain checks (--check-chain)
+        run: python tests/pc/pc_joins_cam_test.py
+      - name: The Heltec on USB, against a simulated RNode
+        if: runner.os == 'macOS'
+        run: python tests/pc/rnode_serial_test.py
+      - name: USB <-> Bluetooth switch, against simulated RNodes
+        if: runner.os == 'macOS'
+        run: python tests/pc/radio_link_test.py
+      - name: The Heltec over Bluetooth, against a simulated RNode
+        run: python tests/pc/rnode_ble_test.py
+      - name: "#lora-mesh between Stumps over the radio"
+        run: python tests/pc/lora_radio_test.py
+      - name: Turning the Stump off from /admin
+        run: python tests/pc/pc_power_test.py
+      - name: The Stump's settings changed from /admin
+        run: python tests/pc/settings_test.py
+      - name: Finding a Stump on the Wi-Fi (STUMP? on UDP 4244)
+        run: python tests/pc/discovery_test.py
+      - name: The computer's "card" (uploads, PC_STORAGE_MB)
+        run: python tests/pc/storage_test.py
+      - name: Connections that hold the Stump (slow, silent, endless)
+        run: python tests/pc/conn_test.py
+      - name: The watchdog and the rescue start (a frozen Stump, failed starts)
+        run: python tests/pc/watchdog_test.py

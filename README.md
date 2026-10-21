@@ -1,24 +1,77 @@
-# Project Stump — Beta A (Release)
+# Project Stump — Beta A (beta testing)
 
-<p align="center">
-  <img src="demo.gif" alt="App Demo" width="600" />
-</p>
+[![Tests](https://github.com/ruderigo/LaBuche-Stump/actions/workflows/tests.yml/badge.svg)](https://github.com/ruderigo/LaBuche-Stump/actions/workflows/tests.yml)
+[![Release](https://img.shields.io/github/v/release/ruderigo/LaBuche-Stump?include_prereleases)](https://github.com/ruderigo/LaBuche-Stump/releases)
 
-An off-grid community node. A long-range encrypted mesh radio and a
-local high-bandwidth server, deliberately kept on separate hardware.
+**This repository is where Stump is beta-tested.** Download a release
+(`Stump-<version>.zip`: the Provisioner, the firmware and the packs in
+one folder) from [Releases](https://github.com/ruderigo/LaBuche-Stump/releases),
+check it (`sha256sum -c SHA256SUMS`, `gh attestation verify`, see
+[docs/RELEASE.md](docs/RELEASE.md)), and report what you find in Issues.
+What changed: [CHANGELOG.md](CHANGELOG.md). The stable line is
+[LaBuche-Stump](https://github.com/ruderigo/LaBuche-Stump).
 
-```
-[ Mesh ] <--( LoRa )--> [ Heltec V3 ] <--( WiFi/TCP :7633 )--> [ ESP32-S3-CAM ] <--( WiFi )--> [ Local room ]
-                        CONTROL PLANE                          DATA PLANE
-                        RNS identity, LXMF,                    SD storage, chat, files,
-                        routing. Low power.                    billboard, about page, captive portal.
-```
+![demo](demo.gif)
 
-Walk up with a phone, join the WiFi, and get a chat room, a bulletin
-board, a file library, and an About page explaining the project — in
-French, English, or Spanish. Meanwhile the node holds a cryptographic
-identity on the Reticulum mesh, so people reachable only over LoRa can
-share rooms with the people standing in front of it.
+## What a Stump is
+
+A Stump is an off-grid community node. Walk up with a phone, join its
+Wi-Fi, and get a chat room, a bulletin board, a file library and an
+About page, in French, English or Spanish. It also holds a
+cryptographic identity on the [Reticulum](https://reticulum.network)
+mesh, so people reachable only over LoRa radio share the same rooms
+as the people standing in front of it.
+
+The same firmware runs on a small board or on a computer, with or
+without a radio.
+
+| Stump | Radio | What it adds | Set up with |
+|---|---|---|---|
+| **ESP32-S3-CAM + Heltec V3** | Heltec V3 over Wi-Fi | The original: a pocket-sized, low-power node with its own Wi-Fi for visitors and an SD card for files | `python3 provisioner.py` → *A Stump CAM*, then *A Heltec for a CAM* |
+| **macOS / Windows / Linux + Heltec V3** | Heltec V3 on USB or Bluetooth | A computer as a full node: more storage and speed, on the LoRa mesh directly; USB ⇄ Bluetooth and pairing from `/admin` | `python3 provisioner.py --pc` → the Heltec on USB |
+| **macOS / Windows / Linux** | none | A computer as a node with no radio of its own: it reaches LoRa through another Stump it's chained to | `python3 provisioner.py --pc` → no Heltec |
+
+**Three rooms, three reaches.** `#main` stays on its Stump.
+`#lora-mesh` is the radio's room: LoRa phones and handhelds land there,
+and the Stumps share it — over the radio first when they have one, even
+with Wi-Fi between them. `#wifi-mesh` is shared by chained Stumps over
+Wi-Fi only.
+
+**Chained Stumps.** Stumps link to each other over Wi-Fi — a CAM's own
+Wi-Fi, or the home Wi-Fi they share — and relay for each other, so a
+Stump without a radio still reaches the LoRa mesh through one that has
+one. A chain is a tree: a new Stump joins whichever is closest, and a CAM
+whose Stump above goes away joins another of the same chain in range.
+See [Chained Stumps](#chained-stumps).
+
+## Who connects to a Stump
+
+| Client | How it connects |
+|---|---|
+| **Android** — [FireFly-Android](https://github.com/ruderigo/FireFly-Android) | Over LoRa, through its own Heltec V3, with its own identity; or over Wi-Fi to a Stump, from FireFly's Stump panel |
+| **Handheld** (R36S / R36MAX) — [FireFly for RK3326](https://github.com/ruderigo/FireFly_RK3326_R36MAX_R36S) | Over LoRa, through its own Heltec V3, with its own identity |
+| **Any phone or computer** | A browser on the Stump's Wi-Fi (or the network it's on) |
+
+## Tested so far (17 Oct 2026, 1.0.0-beta.21)
+
+| | On hardware | In the lab only |
+|---|---|---|
+| ESP32-S3-CAM + Heltec V3 | ✓ | |
+| macOS + Heltec V3 on USB (handshake, status, unplug and replug) | ✓ | |
+| macOS + Heltec V3 over Bluetooth (pairing and switching from `/admin`) | in progress | ✓ (simulated RNode, firmware behaviour read from its source) |
+| Windows / Linux + Heltec V3 | | ✓ |
+| macOS, no radio, chained to a CAM over the home Wi-Fi | ✓ | |
+| Windows / Linux, no radio | | ✓ |
+| CAM chained to a CAM | | ✓ |
+| A CAM joining another Stump when its own goes away | | ✓ (simulated Wi-Fi) |
+| `#lora-mesh` between Stumps over the radio, with and without Wi-Fi | | ✓ (two simulated Heltecs over a simulated air) |
+| Turning a computer Stump off from `/admin`, Start/Stop files | | ✓ |
+| Android (FireFly + Heltec V3) over LoRa | ✓ | |
+| Android over Wi-Fi (FireFly's Stump panel) | ✓ | |
+| Handheld (FireFly + Heltec V3) over LoRa | ✓ | |
+| Browsers: phones, a Windows PC on the home Wi-Fi | ✓ | |
+| `#wifi-mesh` between chained Stumps, DMs across Stumps | ✓ | |
+
 
 ---
 
@@ -50,6 +103,9 @@ assuming you know what "turn on hybrid" does.
 
 ## Contents
 
+- [What a Stump is](#what-a-stump-is)
+- [Who connects to a Stump](#who-connects-to-a-stump)
+- [Tested so far](#tested-so-far-17-oct-2026-100-beta16)
 - [Quick start](#quick-start)
 - [Reading the boot log](#reading-the-boot-log)
 - [Troubleshooting](#troubleshooting)
@@ -60,14 +116,21 @@ assuming you know what "turn on hybrid" does.
 - [Access control](#access-control)
 - [File storage](#file-storage)
 - [Billboard](#billboard)
-- [Direct messages](#direct-messages)
+- [Chat and direct messages](#chat-and-direct-messages)
+- [Voice notes](#voice-notes)
+- [LXMF propagation node](#lxmf-propagation-node)
+- [Home page, navigation, About and Tools](#home-page-navigation-about-and-tools)
+- [BarKeep, the librarian](#barkeep-the-librarian)
+- [HTTPS](#https)
 - [Internationalization](#internationalization)
-- [The About page](#the-about-page)
-- [Plugins](#plugins)
+- [Chained Stumps](#chained-stumps)
+- [Stump on a computer](#stump-on-a-computer)
+- [Plugins and packs](#plugins-and-packs)
 - [Configuration](#configuration)
 - [Conventions for contributors](#conventions-for-contributors)
 - [Testing](#testing)
 - [Verification status](#verification-status)
+- [Engineering notes](final_firmware/docs/ENGINEERING_NOTES.md): how things came to work this way
 - [Credits](#credits)
 - [Hidden features](#hidden-features)
 
@@ -75,21 +138,25 @@ assuming you know what "turn on hybrid" does.
 
 ## Quick start
 
-Download `Stump_<version>.zip` from the
-[latest release](https://github.com/ruderigo/LaBuche-Stump/releases),
-unzip it, and run the provisioner from the folder it creates. That folder
-holds `provisioner.py` with the `final_firmware/` it was built for: keep
-them together, since the provisioner checks every firmware file against
-its own list and flags any from another release or from `main`. (Or clone
-this repository and run it from the top folder.)
+Download `Stump-<version>.zip` from
+[Releases](https://github.com/ruderigo/LaBuche-Stump/releases),
+check it (`docs/RELEASE.md`), unzip it, and inside the folder:
 
 ```bash
 python3 provisioner.py
 ```
 
-The guided wizard: flashing, app upload, configuration, plugin setup
-and diagnostics, for all three roles — the CAM, the Heltec Bridge, and
-the standalone Heltec transport.
+It asks what you're setting up (a CAM, a Heltec for a CAM, a Heltec
+relay, a Stump on this computer, or a check or fix), then shows the
+**route**: its numbered sections, what each does, how long it takes,
+whether it needs you or runs by itself, and what you'll need. A CAM
+takes about 30 minutes, most of it copying files to the board over USB:
+all its questions come first (about 5 minutes), then the rest runs by
+itself while the computer is kept awake.
+Each section then opens with a header and where you are on the route,
+asks before touching the board, and ends with done, skipped or what
+went wrong. The run ends on a summary: each section's result, and what
+to keep (addresses, the chain secret, the next command).
 
 Everywhere below, `PORT` means the board's USB serial port, not the
 word itself — find it with `--scan` (on a Mac it looks like
@@ -98,10 +165,14 @@ word itself — find it with `--scan` (on a Mac it looks like
 ```bash
 python3 provisioner.py --check-tools      # verify esptool/mpremote/rnodeconf
 python3 provisioner.py --scan             # list connected boards and their ports
-python3 provisioner.py --upload-app PORT  # update the CAM's code only, no erase
+python3 provisioner.py --upload-app PORT  # update the CAM's code only, no erase; keeps its config.py
 python3 provisioner.py --get-ip PORT      # query LAN + hotspot addresses
 python3 provisioner.py --diag PORT        # serial, SD and radio checks
 python3 provisioner.py --wipe-sd PORT     # reformat a problem SD card
+python3 provisioner.py --erase-flash PORT # erase a CAM's or a Heltec's whole flash, to start it over
+python3 provisioner.py --list-packs       # the packs in packs/, with their hashes
+python3 provisioner.py --install-pack PORT packs/tavern-pack   # add a pack to a node
+python3 provisioner.py --remove-plugin PORT tavern             # take a plugin off a node
 ```
 
 **Updating a CAM that's already deployed:** the wizard's "Flash
@@ -110,10 +181,14 @@ identity — it comes back with a **new LXMF address**, and mesh clients
 (the Android app, Sideband) must pick it again from its next announce.
 To update without that, use `--upload-app`: it copies the new files
 only, keeping the identity, and the billboard and shared files on the
-SD card. It also copies the firmware folder's `config.py` onto the
-board, so check that file holds this node's settings first — or, after
-uploading, run the wizard, answer **no** to "Flash firmware" and
-**yes** to the config wizard.
+SD card. **It keeps the node's own `config.py`** — its name, Wi-Fi,
+passwords, theme and every other setting stay as they are; settings
+added by the new version take their defaults. To replace it with the
+`config.py` in the firmware folder, add `--replace-config`, or run the
+wizard, answer **no** to "Flash firmware" and **yes** to the config
+wizard. (Up to 1.0.0-beta.2, `--upload-app` copied the folder's
+`config.py` over the node's — a node's theme changing after an update
+was the visible sign.)
 
 `--diag` automates the serial, SD card and radio checks. Network
 reachability is confirmed by hand at the end (it prints how): power-
@@ -218,7 +293,7 @@ a system message explaining why. See [Access control](#access-control).
 
 **The FireFly Android APK has to go on the SD card with a card reader.**
 At ~50 MB it would take about 14 hours over USB, so the provisioner
-refuses it and says where it goes (`tools/` on the card). Until it's
+refuses it and says where it goes (`tools/firefly/` on the card). Until it's
 there, the About page's Android card says "Not on this Stump yet".
 
 ---
@@ -226,48 +301,52 @@ there, the About page's Android card says "Not on this Stump yet".
 ## Repository layout
 
 ```
-final_firmware/              75 files hashed, 64 uploaded to a CAM (~1.3 MB)
+provisioner.py               technician deployment tool (runs on a laptop): flashes,
+                              uploads, configures and diagnoses three board roles
+packs/                       plugin packs the Provisioner offers (tavern, rnfs) -- docs/PACKS.md
+pc/                          Stump on a computer: stump_pc.py and the stand-ins that run
+                              the firmware on regular Python (provisioner.py --pc, docs/PC.md)
+tests/                       the test suite: python3 tests/run.py (tests/README.md)
+bench/                       measurements run on a CAM: relay speed, Wi-Fi, TLS (bench/README.md)
+scripts/                     build_micropython.sh, build_release.py, sign_release.py, update_manifest.py
+docs/RELEASE.md              how releases are built, signed and checked
+.github/workflows/           tests on every push; tested, signed releases on every tag
+CHANGELOG.md
+
+final_firmware/              the CAM's firmware (core files hashed in provisioner.py)
 ├── main.py                  CAM boot entry -- boots example_node.py via boot_common
 ├── boot_common.py           Shared retry-vs-give-up boot logic main.py delegates to
 ├── example_node.py          the real CAM boot sequence; wires everything together
 ├── config.py                ALL CAM configuration lives here
 ├── node_common.py           shared identity/router bring-up, safe for other firmware to import
+├── plugins.py               the plugin API: gates, commands, listeners, pages, timers, safe mode
 ├── i18n.py                  trilingual (FR/EN/ES) string table + per-visitor language state
 ├── barkeep.py                HTTP server (the only one), chat console, page router
 ├── rrc.py                    RRC chat engine — rooms, nicks, history, DMs
-├── rrc_ui.py                  RRC web client (mIRC-style)
+├── rrc_ui.py                  RRC web client (mIRC-style), voice notes
 ├── rrc_mesh.py                 RRC ↔ LXMF bridge; mesh peers join rooms, land per stumpid's setting
+├── propagation.py               LXMF propagation node (store-and-forward)
+├── radio.py                      the Heltec from /admin: settings, live state, reconnect, Bluetooth, USB ⇄ Bluetooth
+├── guard.py                      speed limits and the wrong-password lockout
+├── librarian.py                  BarKeep as the librarian: questions -> files, notices, apps
+├── chain.py                      a chain of Stumps over Wi-Fi: links, the path, joining another Stump (docs/CHAIN.md)
+├── stump_tls.py                   HTTPS with your own certificate
 ├── billboard.py                 bulletin board storage + rendering
-├── fserv.py                      file storage, streaming I/O, credit economy
+├── fserv.py                      file storage, streaming I/O, credit economy, home branding
 ├── captive_portal.py              AP bring-up + DNS redirect
 ├── flasher_ui.py                   browser-based board flasher (WebSerial)
 ├── lora_boards.py                   LoRa pinout presets (native SPI radio boards)
 ├── fservbot/                         PLUGIN — channel bot
 ├── stumpid/                           PLUGIN — identity verification + room + mesh access
+├── web/                                Opus and Codec 2 for the browser (WebAssembly)
+├── third_party/                         their sources and licences (not uploaded)
 ├── tools_payload/                      host-side flasher assets (not uploaded to the board)
 ├── lib/                                 native crypto accelerators
 ├── peripherals/                          ADC / battery reading (incl. gated-divider boards)
-└── urns/                                  µReticulum: identity, LXMF, crypto, interfaces
-
-provisioner.py               technician deployment tool (runs on a laptop) -- provisions
-                              three board roles; see "Standalone Heltec V3 transport role" below
-tests/                       board-free checks, run on every push (see below)
+├── docs/                                  COMMANDS, CLIENT_QUICKSTART, PLUGINS, PACKS,
+│                                          ENGINEERING_NOTES (how things came to work this way), ...
+└── urns/                                  µReticulum: identity, LXMF, crypto, interfaces (the Heltec over Wi-Fi, USB, Bluetooth)
 ```
-
-**Tests** (no board needed):
-
-```bash
-pip install pytest cryptography "mpy-cross==1.28.*" rns lxmf
-python3 -m pytest tests
-```
-
-They compile every firmware file with MicroPython's own compiler, check
-`provisioner.py`'s file hashes and the FR/EN/ES strings, and run
-µReticulum under CPython against the reference `rns`/`lxmf` to prove the
-two agree on keys, addresses, signatures, encryption and LXMF messages.
-`tests/shims/` stands in for the MicroPython-only modules. If you change
-a firmware file, regenerate `EXPECTED_FILE_HASHES` (the command is in the
-comment above it) or the manifest test fails, as the provisioner would.
 
 **Not part of `final_firmware/` at all**: the standalone Heltec V3 transport role runs
 `microReticulum_Firmware`, a real, pre-built, third-party C++ firmware -- flashed and
@@ -439,69 +518,27 @@ detection depends on probe requests getting a real HTTP response.
 
 ### What ends up in `/sd/tools/`, and why
 
-`provisioner.py`'s `install_tools_on_node()` pushes a few things onto
-the node's own SD card during provisioning, so a technician can walk
-up with nothing but a laptop and pull down what they need over HTTP
-instead of carrying a USB stick:
+`provisioner.py` puts a few things on the node's SD card, so a
+technician can walk up with only a laptop and download what they need
+from `/tools`:
 
-- **`provisioner.py` itself** — the node hands back the exact version
-  it was provisioned with, so there's never doubt about whether a copy
-  pulled off the node matches what's actually running.
-- **`README.md`** — same reasoning, right next to it: the setup steps a
-  technician needs (`--check-tools`, the standalone Heltec transport
-  commands, everything else in this document) live in this file now,
-  pushed to the node instead of being duplicated as a shorter,
-  separately-maintained CLI snippet that used to sit directly on the
-  `/tools` page — one real source for those commands instead of two
-  that could quietly drift apart.
-- **`LICENSE`** — the MIT license this build ships under, so a copy
-  pulled off the node carries its actual terms with it, not just the
-  code. Named `LICENSE` with no extension deliberately, matching the
-  standard convention GitHub, package managers, and license scanners
-  all look for by that exact name.
-- **`Stump_Beta_A.zip`** — the full firmware source, built *fresh* from
-  the technician's own `final_firmware/` directory at push time rather
-  than copied from wherever their original download happened to land.
-  Built this way specifically so it can't go stale relative to what's
-  actually provisioned, and doesn't depend on the technician having
-  kept the original zip around after extracting it.
-- **The browser flasher's own assets** (`esptool-bundle.js`, its
-  licence, `catalog.json`, and any staged firmware images) — see
-  "Hidden features" at the end of this document for why this exists
-  but isn't linked from `/tools` anymore. Confirmed directly: this
-  folder holds no actual firmware images today, only a `README.txt`
-  with instructions for staging one. Worth knowing before ever
-  following those instructions for real: `catalog.json`'s own
-  `rnode-heltec-v3` entry names its source as the GPL-3.0-licensed
-  RNode Firmware CE releases. A `.bin` obtained that way and staged
-  here would make this node *convey* that GPL-3.0 object code over
-  `/fw?f=` and `/tool?f=` to anyone who downloads it — which is a
-  different thing from flashing it directly from a laptop, and GPL-3.0
-  §6 requires that conveyance be accompanied by the corresponding
-  source, or a written offer for it. Neither this document nor the
-  `LICENSE` pushed alongside it provides that; see the warning in
-  `tools_payload/images/README.txt` for what staging a real binary
-  there would actually require.
-- **The FireFly apps** (`tools_payload/apps/`) — found on the card by
-  name (`FireFly-Android-<version>.apk`, `FireFly-RK3326-<version>.zip`)
-  and offered on the About page and `/tools`. The handheld package goes
-  over USB; anything over 1 MB — the ~50 MB Android APK — is left for a
-  card reader, and the provisioner says where it goes.
-- **A `home` folder next to `provisioner.py`**, if there is one, goes to
-  `home/` on the card (not `tools/`): the node's own home page branding,
-  see `docs/HOME_BRANDING.md`. Same 1 MB rule.
+- **`provisioner/`** — `provisioner.py` itself (the exact version the
+  node was set up with), this README as `Stump-README.md`, `LICENSE`,
+  and `Stump_Beta_A.zip`, the firmware built fresh from the technician's
+  own `final_firmware/`;
+- **`flasher/`** — the browser flasher's assets (hidden feature HF-001).
+  It holds no firmware images: staging a GPL-3.0 RNode image there would
+  make the node *convey* it, which needs its source offered alongside
+  (see `tools_payload/images/README.txt`);
+- **`firefly/`** — the FireFly apps, found by name and offered on the
+  About page (anything over 1 MB, like the ~50 MB Android APK, goes on
+  the card with a card reader);
+- **a `home` folder** next to `provisioner.py` goes to `home/` on the
+  card: the node's home page branding (`docs/HOME_BRANDING.md`).
 
-All of it downloads from `/tools` via `/tool?f=`, streamed in 16KB
-chunks like every other file transfer in this project — confirmed
-directly for `Stump_Beta_A.zip` specifically, since at roughly 440KB
-it's by far the largest thing served from that route: hashed the
-actual streamed bytes against the source file's hash rather than just
-checking the response arrived, and confirmed the transfer happens in
-dozens of real chunks, never one large in-memory write.
-
-Best-effort like the rest of provisioning: a node with no SD card, or
-a technician's copy of `final_firmware/` gone missing, still finishes
-provisioning normally, it just can't hand these back.
+Everything streams from `/tool?f=` in 16 KB chunks. A node with no card
+still finishes provisioning; it just can't hand these back. Details and
+history: [`ENGINEERING_NOTES.md`](final_firmware/docs/ENGINEERING_NOTES.md#what-ends-up-in-sdtools).
 
 ---
 
@@ -517,13 +554,15 @@ Set at provisioning time, or live via `/admin <password> mode <m>`:
 
 - **`open`** (default, recommended for this release) — nothing is
   gated. Anyone can read, post, join, DM.
-- **`hybrid`** — reading stays open; writing anything (posting,
-  joining, DMing, `/topic` with an argument) requires a verified
-  identity (`/auth`). A **plain message is always classified as a
-  write**, unconditionally — a mesh peer's very first message will be
-  challenged before a room's own tier ever gets consulted.
-- **`mandatory`** — everything except `/auth`, `/whoami`, `/help`
-  requires verification.
+- **`hybrid`** — everyone reads every room (joins it, sees its lines and
+  who's there) and writes in `#main`. Writing anywhere else -- any other
+  room, private messages -- takes a verified identity: the `/auth`
+  challenge, which a FireFly answers with one button. A FireFly over
+  LoRa counts as verified (every message it sends is signed, and a
+  non-open node only takes signed ones).
+- **`mandatory`** (closed) — reading and writing both take a verified
+  identity. Before `/auth`, a web client's poll comes back empty, with
+  the topic saying why; only `/auth`, `/whoami`, `/help` work.
 
 **Status: implemented, unit-tested, not field-hardened.** Use `hybrid`
 or `mandatory` if you're specifically testing identity verification;
@@ -543,6 +582,7 @@ unconditionally, even under global `open`, on purpose. Tiers:
 
 ```
 /admin <password> room <name> <open|minted|hybrid>   -- create or re-tier a room
+/admin <password> reset-access                        -- back to config.py's mode, no tiers
 /invite <nick>                                        -- invite someone into the room you're in
 ```
 
@@ -555,821 +595,159 @@ unconditionally, even under global `open`, on purpose. Tiers:
 **Status: implemented, tested against every combination with the
 global mode above, not field-hardened.**
 
-### 3. The mesh landing room
+### 3. The mesh room
 
-Where a mesh peer lands **automatically**, on first contact — not
-something they request, since they never typed `/join` at all.
+A LoRa mesh user who messages the node lands in **`#lora-mesh`**, always there
+and seeded like `#main`, and is told so (`→ #lora-mesh`). If `#lora-mesh` has been
+given a tier (`/admin <password> room lora-mesh minted`) and they don't
+qualify, they land in `#main` instead, told why. `/admin <password>
+meshroom` shows `#lora-mesh`'s current tier.
 
-```
-/admin <password> meshroom <name>   -- mesh peers now default here instead of #main
-/admin <password> meshroom off      -- back to today's behaviour (#main)
-/admin <password> meshroom          -- shows the current setting
-```
+**Status: tested across all three global modes; not yet exercised
+against a real mesh peer on real hardware.**
 
-Unset by default — nothing changes for a deployment that never touches
-this. Runtime-only, like a live `mode` change: it reverts on reboot,
-not written to `config.py`.
+### 4. `/admin` — the node's own admin page
 
-**Automatic placement is gated exactly like an explicit `/join` would
-be**, on purpose. If the landing room is tiered and an unverified peer's
-first message arrives, they're redirected to `#main` instead, with a
-system message explaining why, translated into whatever language
-they're set to (see [Internationalization](#internationalization)) —
-mesh peers get the same courtesy a rejected web visitor already gets.
-This holds identically under all three global modes: the redirect
-doesn't get stricter or looser depending on `AUTH_MODE`, because the
-room-tier gate this relies on was already mode-independent before the
-mesh landing room existed.
+No page links to it: type the address. One password, stumpid's
+`AUTH_ADMIN_PASSWORD`, or fservbot's operator password if it has none.
+Logging in starts a session: a cookie, forms that carry the session
+rather than the password, **Log out** at the top and bottom, and an end
+after 30 minutes unused or at restart. After 5 wrong passwords that
+visitor waits 30 s, doubling each time up to 15 minutes. With a
+certificate installed, the page moves to HTTPS.
 
-**Status: implemented and tested across all three global modes in the
-same test run, not yet exercised against a real mesh peer on real
-hardware.**
+The page opens on **tiles** — radio, chain, people in the chat, files —
+that open their section. The sections come in groups (*On the air*,
+*Content*, *Look*, *System*), each a card that folds open with a short
+status by its title; the cards left open stay open on that device.
 
-### 4. The `/admin` page — file deletion, billboard moderation, and site customization
+| Section | What it does |
+|---|---|
+| Files | Tick files on the shared shelf; delete them together |
+| Billboard | Tick posts (title and body shown); delete exactly those |
+| Radio (Heltec Bridge) | The radio live first (signal, noise, channel load, battery, packets); *Settings*, folded: frequency, bandwidth, TX power, spreading factor, coding rate, checked, saved in `/radio.json`, sent to the Heltec at once (all but TX power must match the mesh); whether the chat's profile pop-up offers them too; *Transport*, folded ("Transport: USB"): the **USB ⇄ Bluetooth** switch on a computer, **Reconnect the radio**, and Bluetooth: *Pair this computer* / *Pair a device* (the code shown here), on, off, *Forget paired devices* |
+| Theme for everyone | Amber, Phosphor, OLED, Paper or a pack's theme, for every visitor, saved in `/site_theme.json`; *As set up* goes back to `THEME` in `config.py` |
+| Order | Drag (arrows on a phone) the navigation buttons and home tiles; hide or show each; saved in `/layout.json` |
+| Home page section | The `home/` branding: where it goes, frame height, shown or not (`docs/HOME_BRANDING.md`) |
+| Tools page | Delete sections or files from the card's `tools/` |
+| Stump settings | The Provisioner's answers, changed in place, no reinstall: name, bot's name and auto-reply, file sharing (free / standard / custom weights), who may enter (open / hybrid / mandatory), features, the librarian's firefly on or off, and on a computer its storage (`PC_STORAGE_MB`). Identity, history, files and radio are kept |
+| Plugins | Each plugin's state and memory; switch one off |
+| Propagation node | On/off, status, a test mailbox, leave a message for an address |
+| Stump chain | This Stump's place, the one above, who's below |
+| HTTPS | Certificate status, expiry, days left |
+| This Stump on the computer (*Restart* on a CAM) | **Restart the Stump** (applies settings waiting for it); a computer Stump only: **Turn off this Stump** (the radio off first); started again from *Start Stump* in its folder |
+| This browser only | A theme, a five-colour palette and an SVG logo for that one browser (`localStorage`: nothing changes for others) |
 
-A separate, narrower gate from the three above — not tied to
-`AUTH_MODE` or room tiers at all, and not part of `/files` anymore
-either. There is no admin UI, drawer, or delete link visible on any
-page a normal visitor sees. Everything in this section lives entirely
-at `GET /admin` — an address with no link pointing to it from anywhere
-in the visible UI, reachable only by typing it directly.
-
-**Deleting files.** `GET /admin` shows a password field only. A
-correct password shows every current file as a checkbox, with the
-password carried forward as a hidden field. Checking several files and
-submitting once deletes all of them together — `POST /admin/delete`
-re-validates the password for real rather than trusting the hidden
-field just because it arrived with the form, since anyone could POST
-there directly with a forged one.
-
-The password check reuses `stumpid.core.check_admin_password()`
-directly — the same function `/admin <password> ...` chat commands
-already use for mode/room-tier/meshroom, not a second, competing
-mechanism. It tries stumpid's own `AUTH_ADMIN_PASSWORD` first, falls
-back to fservbot's operator password (read live, not duplicated), and
-refuses outright — `403`, nothing touched — if neither plugin is
-installed at all.
-
-An earlier version of this put a collapsed drawer directly on `/files`
-— a dropdown, password field, and button all on one row, which
-overflowed its own container on narrower viewports, and needed a full
-password re-entry per file with nothing to select more than one at a
-time. Both problems came from the same root cause: admin controls
-living on a page every visitor already sees. Moving it to its own
-unlinked page removed both at once, not just the layout.
-
-**Deleting billboard posts.** Added on request, for removing something
-inappropriate without waiting up to 72 hours for the Billboard
-section's own auto-purge to age it out. The same login shows every
-current post as a checkbox (newest first) with enough of its text to
-identify it; `POST /admin/delete_post` re-validates the password the
-same strict way `/admin/delete` does, and calls
-`billboard.delete_entry()` for each one checked.
-
-Each post is identified by its own timestamp rather than a separate ID
-field added just for this — confirmed directly that MicroPython's
-`str(float(x))` round-trips exactly for real timestamps here, so
-comparing as strings (never re-parsing to float) sidesteps any
-formatting mismatch risk. `/admin/delete_post` had to be placed
-*before* the existing `/admin/delete` check in the router, not after —
-`"/admin/delete_post".startswith("/admin/delete")` is `True`, so a
-router matching by prefix means the more specific path always has to
-come first, or the broader, older check catches it instead and tries
-to delete files named after timestamps that don't exist.
-
-A real, reported bug found after this shipped: a post made *before*
-the auto-purge feature existed, and never touched by a prune pass
-since (a board's first admin visit after upgrading, before anyone had
-posted again to trigger one), reads back from `_read_entries()` with
-no timestamp at all — its stored line genuinely has only two fields,
-never three. That rendered as a checkbox with `value='None'`, and
-deleting it always silently failed: `delete_entry()` can only match a
-stored line that actually has three fields including a real
-timestamp, and a never-pruned old entry doesn't have one to match
-against. The delete request would succeed, report "0 message(s)
-deleted", and leave the post sitting there — the exact same *symptom*
-as the double-encoding bug that hit file deletion earlier, but a
-different cause underneath. Fixed by having the admin page trigger a
-prune pass (with no new post to add) before it ever reads the entries
-to build checkboxes from — every post gets a real, stored timestamp
-stamped onto it before the admin ever sees a checkbox, so what's
-displayed and what's on disk can never disagree. Confirmed directly by
-reproducing the exact old-format, never-pruned scenario end to end
-(the entry used to be genuinely undeletable; it now deletes correctly)
-and re-confirming the already-working, already-timestamped case is
-completely unaffected.
-
-That same fix immediately introduced a second, more serious bug of its
-own, also real and reported: selecting one post and deleting it
-emptied the *entire* board. `_prune_and_write()` computes `now` once
-per call and, before this, reused that exact value verbatim for every
-untimestamped entry it stamped in that same call — so several old
-posts landed on the *identical* timestamp instead of merely close
-ones. `delete_entry()` identifies a post by timestamp alone, with no
-separate ID field (see its own docstring for that reasoning), so
-"delete the post at this timestamp" matched and removed every post
-sharing it — one checkbox, whole board gone. Confirmed directly by
-reproducing it exactly: three distinct old posts, one admin page load,
-all three landing on one shared value, one checkbox deleting all
-three.
-
-Fixed in two layers, not one. First, the actual cause: each
-untimestamped entry stamped within the same `_prune_and_write()` call
-now gets a distinct, microsecond-scale offset from `now` rather than
-the bare, shared value — unique for identification purposes while
-staying "now" for everything that reads it (the 72-hour TTL check,
-display order). Second, independent of that fix and kept regardless:
-`delete_entry()` now only ever removes the *first* line it finds
-matching a given timestamp, never every line that matches — the
-original code had no such limit, which is what let one match turn into
-three removals. If some other, not-yet-anticipated cause ever produces
-a collision again, one checkbox can now only ever remove one post,
-never silently take out everything sharing its identifier with it.
-Confirmed directly both ways: the exact reported scenario now deletes
-exactly one and leaves the other two, and a timestamp collision forced
-directly (bypassing the fixed stamping logic entirely, standing in for
-any future cause this hasn't anticipated either) still only ever
-removes one of the two colliding posts, never both.
-
-Checked whether the file-deletion flow above shares the same flaw,
-since both now identify what to delete from a value carried in a
-checkbox. It doesn't, structurally: a file is deleted by
-`os.remove(SHARED_DIR + "/" + filename)` — the filesystem itself
-guarantees two files can never share a name in the same directory, so
-there is no "computed value that can collide" step for files the way
-a timestamp is computed and can coincide for posts. Each checked
-filename maps to exactly one real, distinct path; there is nothing
-equivalent to fix there. Re-ran the full existing file-deletion test
-suite alongside this fix to confirm that conclusion holds against the
-real code, not just the reasoning above — no changes needed, and none
-made.
-
-**Then, on real hardware: ticking entry #2 deleted entry #1.** The two
-fixes above were verified on desktop MicroPython, which uses 64-bit
-floats. This board's ESP32 build uses 32-bit floats — about 7
-significant digits — and every prune rewrote each post's timestamp from
-its parsed float (`str(ts)`), not from the text on disk. Timestamps
-like `1789740233` came back out as `1.78974e+09`: identical for every
-post within a couple of minutes of each other, so every checkbox
-carried the same value and the first-match backstop deleted whichever
-post happened to be first in the file. Reproduced exactly by running
-the real `billboard.py` with device-accurate float behavior injected:
-three posts, tick #2, #1 disappears.
-
-Fixed by separating identity from time entirely. A post's id is now
-the ts field *exactly as stored on disk*, carried through every
-rewrite verbatim and compared only as a string — never regenerated
-from a float again. New posts get ids of the form
-`1789740233.004821917` (whole seconds, then 9 random digits from the
-ESP32's hardware RNG): still parseable for the 72-hour TTL, but unique
-by the random part rather than by time, so same-second posts and
-off-grid boards whose clock restarts at every reboot can't collide
-either. Duplicate ids already on disk — which every board that ran the
-previous build now has — are repaired to unique ids on the first
-rewrite, i.e. the first admin page load. The earlier docstring claim
-that `str(float(x))` "round-trips exactly" was only ever true on
-desktop and has been corrected in the source.
-
-**Status: verified with device-accurate floats and on MicroPython** —
-ticking each of #1, #2 and #3 in turn deletes exactly that post, on a
-fresh board and on a file already holding the collapsed duplicates;
-five same-second posts get five distinct ids that stay stable across
-ten rewrites; and through the real `/admin` → `/admin/delete_post`
-HTTP route, 72-hour expiry, old-format stamping, and the 150-post
-ceiling all still behave as before.
-
-**Still unreliable after that — the clock, not the delete.** Tested
-this time on a real single-precision MicroPython build (the ESP32
-port's own `MICROPY_FLOAT_IMPL_FLOAT` setting), not an emulation: the
-delete itself removes exactly the ticked post. What made posts vanish
-unasked was expiry. The CAM sets its clock by NTP only when it joins
-the router at boot, and a failed sync is tolerated — the clock then
-counts from the epoch, so posts made that session get tiny timestamps.
-After the next boot *with* a sync, those posts looked decades old, and
-the next prune — every new post and every admin page load — silently
-removed all of them at once. Reproduced exactly: two posts made while
-the router was down disappeared the moment anyone posted after a
-normal reboot.
-
-Expiry now only trusts a correctly-set clock (compared against
-2025-01-01 via the device's own `mktime`, so it's right whichever epoch
-the firmware counts from). With no valid clock, nothing expires by
-time; the 150-post ceiling still applies. A post stamped while the
-clock was unset counts as posted *now* once the clock becomes valid —
-the same rule already used for pre-timestamp posts — and then expires
-72 hours later as usual. Also: the admin confirmation now names the
-posts it removed (*1 message(s) supprimé(s). « … »*), so a mismatch is
-visible immediately; and both admin delete forms set
-`autocomplete='off'`, since some browsers restore checkbox ticks *by
-position* on reload, which after a list shift lands them on different
-posts.
-
-**Status: on single- and double-precision MicroPython** — a whole
-session with no clock (nothing expires, delete exact); unsynced posts
-kept once the clock is set, still there at 71 hours, gone at 73;
-synced posts older than 72 hours still expire; synced posts survive a
-reboot where NTP fails; ids restamp once when the clock becomes valid,
-then stay stable; and the earlier title/body, delete-by-id, ceiling and
-HTTP suites all still pass.
-
-**Radio settings for the Heltec Bridge, behind `/admin`.** The CAM
-configures the Heltec's radio itself every time it connects —
-frequency, bandwidth, TX power, spreading factor, coding rate (see
-`_init_radio()` in `urns/interfaces/wifi_serial.py`). Those values
-used to come only from config.py's bridge entry, which set none of
-them, so the driver's built-in defaults always won — **7 dBm** among
-them — and an `rnodeconf` change on the Heltec was simply overwritten
-at its next reconnect. (The provisioner's Bridge-role TX power question
-didn't help: its answer goes into the Heltec's own profile, not the
-CAM's config.)
-
-The same `/admin` login now shows a **Radio (Heltec Bridge)** section
-with the bridge's current values, pre-filled. *Apply* re-checks the
-password, validates every field (TX power 0–22 dBm, frequency
-150–960 MHz, the ten LoRa bandwidths, SF 5–12, CR 4/5–4/8 — anything
-else is refused and nothing changes), saves them to `/radio.json` on
-internal flash (so they work without an SD card and survive reboots),
-and sends them to the Heltec at once if it's connected — or says
-they'll go at its next connection if it isn't. At boot the saved values
-are written into the bridge's config *before* it first connects, so the
-Heltec never briefly gets config.py's values. Frequency is typed in MHz
-and parsed as text to exact hertz, never through a float — on this
-board's single-precision floats `915.1` would otherwise become
-915,099,976 Hz. All in `radio.py`; the section warns that frequency,
-bandwidth, SF and CR must match every node on the mesh, while TX power
-can differ.
-
-**Status: tested end to end on single-precision MicroPython** against a
-fake Heltec on TCP that logs every command it receives: the bridge
-connects with 7 dBm; *Apply* with 17 reaches it live; a reconnect keeps
-17; a reboot's first connection already sends 17; a bad value sends
-nothing; a wrong password gets `403`; with the Heltec unreachable the
-value is saved and held for its next connection. (Doing this surfaced
-that the older MicroPython 1.22 Unix build used earlier for tests lacks
-`socket.sendall`; the ESP32 port and current MicroPython have it.)
-
-**Theme — site-wide, chosen at provisioning.** The node has one theme
-for every visitor, on every page including the chat: Amber (the
-original look), Phosphor, OLED or Paper. The technician picks it in
-the provisioner's config wizard, and it's stored as `THEME` in
-`config.py`; the server writes it into each page's
-`<html data-theme='…'>`, so it applies on first paint, with or without
-JavaScript. An unknown value falls back to Amber. All colours live in
-one shared module, `theme.py`, used by both `barkeep.py` and the chat
-page (`rrc_ui.py`). The chat page used to hard-code the amber palette
-in about 30 places, so it ignored themes entirely — including the
-per-browser choice below; it now takes every colour from the theme.
-The palettes were checked for WCAG contrast on every text/background
-pair the pages use; Paper's secondary text was darkened slightly
-(`#7a7264` → `#6b6355`, 4.25:1 → 5.3:1) to clear the 4.5:1 guideline
-for readable text.
-
-**Per-browser overrides and logo, behind `/admin`.** The same login
-unlocks a per-browser theme (*Site theme* to follow the node, or
-Amber / Phosphor / OLED / Paper), a five-colour custom palette
-(background, panel, text, accent, border — the in-between shades are
-derived from those five), and an SVG logo the default
-stump-cross-section mark can be replaced with, hidden, or restored.
-
-**These overrides are `localStorage`, not server-side.** They change
-what *that one browser* sees, not what anyone else sees; *Site theme*
-and *Reset palette* both return that browser to the node's theme. To
-change the theme for everyone, re-run the provisioner's config wizard.
-The logo is still per-browser only.
-
-An admin visiting `/admin` sees their own current custom colors and
-saved SVG pre-filled in the controls (read back from their own
-`localStorage`), not because the server remembers anything.
-
-An earlier version of this section's client-side JavaScript had a real
-bug worth noting since it's the kind that's easy to reintroduce:
-placeholder tokens for translated header text were substituted into
-positions still wrapped in the template's own leftover quote marks.
-French specifically broke the entire RRC chat page's script — not just
-the mistranslated string — because the French text for one of those
-headers contains an apostrophe, which closed the surrounding quote
-early and produced a genuine syntax error. English and Spanish
-happened to survive by accident, not correctness, since neither
-translation for those particular strings contains an apostrophe. Fixed
-by letting the JSON-encoded substitution provide its own quoting
-entirely, the same way `ROOM_INIT`/`NICK_INIT` already did correctly —
-verified by extracting the actual rendered script for all three
-languages and running a real JS syntax check on each, not just reading
-the diff. The same discipline was applied here: every string injected
-into the settings page's script is JSON-encoded, never hand-wrapped in
-quotes.
-
-**Status: every step tested through real HTTP dispatch or a real JS
-syntax check, not just read** — the login page shows no file content
-and no settings controls before authentication; a wrong password is
-refused (`403`) with nothing shown; a correct one shows both the file
-checkboxes and the settings controls together after one login; a
-genuine two-file batch delete removes exactly those two files and
-re-renders the updated file list directly with a "N file(s) deleted"
-notice (not a redirect to the bare login form — see the real,
-confirmed bug directly below for exactly why that distinction matters
-in practice); `/admin/delete` called directly with a wrong password
-refuses even when the file list is valid; the settings section's
-rendered script was extracted and syntax-checked for all three
-languages, confirming no leaked placeholders and no repeat of the
-quoting bug described above; and billboard moderation was tested the
-same way — a real post shown as a checkbox on the admin page, its
-exact timestamp extracted from the rendered HTML and submitted back
-precisely the way a browser would, confirming only the targeted post
-is removed and the others survive untouched, a wrong password on
-`/admin/delete_post` correctly refusing while the post survives, and
-`/admin/delete` (files) confirmed unaffected by adding the new route
-next to it.
-
-A real, reported bug found after this shipped: the admin password
-travels forward as a hidden field, HTML-escaped for safe embedding --
-but the escaping function only covered `&`, `<`, `>`, and double
-quotes, not the single quote every attribute in this codebase is
-actually delimited with (`value='...'`). A password containing an
-apostrophe closed that attribute early, silently truncating the value
-a browser would submit back on the delete request -- which then failed
-re-validation with a `403`, correctly refusing to delete anything, but
-with nothing about the failure obviously visible to someone who just
-sees the file still sitting there after "the flow." Confirmed directly
-against a real admin password containing an apostrophe: the rendered
-HTML broke exactly as predicted, and simulating precisely what a
-browser does (HTML-decode the attribute at parse time, URL-encode the
-decoded value at submit time) reproduced the exact 403-with-no-deletion
-symptom. Fixed by escaping both quote characters, not just one -- the
-one general-purpose HTML-escaping function this project has, used in
-ten places across three files, all of which write single-quoted
-attributes. Verified the fix with the same real-password-with-apostrophe
-simulation (now deletes correctly) and confirmed an ordinary password
-with no special characters is completely unaffected.
-
-A second, related but distinct bug, reported after the first fix
-shipped: deleting a real file with a space in its name (`IMG_0005_2
-copy.jpg`) reported success but deleted nothing. Root cause this time
-wasn't escaping but double encoding -- each checkbox's `value`
-attribute was being *pre* URL-encoded (`IMG_0005_2%20copy.jpg`) before
-ever reaching the browser. A browser encodes whatever's actually in a
-field at submit time regardless, so the already-encoded `%` character
-got encoded a second time, and the server's single decode pass landed
-on `IMG_0005_2%20copy.jpg` -- still not the real filename, so nothing
-matched on disk and the delete silently did nothing while reporting
-`0 file(s) deleted`, not an error. Confirmed precisely by simulating
-the same real browser encode-at-submit behavior the apostrophe fix's
-own test used, tracing the exact string through each step. Fixed by
-no longer pre-encoding the checkbox value at all -- form field values
-are plain text; the browser's own submission logic is what URL-encodes
-them, exactly once, and the server's existing decode step was already
-correct for that single round of encoding. The five other places this
-project already uses URL-encoding (`/download?f=`, `/tool?f=`,
-`/about/img?f=`, and similar real `href`/`src` links) were checked and
-left untouched, since those are genuine URLs a browser navigates to
-directly rather than a form field it re-encodes -- the two cases need
-opposite handling, and only the checkbox case had it backwards.
-Verified with the literal reported filename, and with a batch delete
-mixing spaced and plain filenames together, confirming only the
-selected files are removed and nothing else.
+How posts are identified, why the radio values are parsed as text, and
+the bugs fixed along the way:
+[`ENGINEERING_NOTES.md`](final_firmware/docs/ENGINEERING_NOTES.md#the-admin-page).
 
 ---
 
+## Registered profiles (people without a FireFly)
+
+`/profile` (linked from the chat's own pop-up and the Files page): a
+nickname and a password. Logged in from any browser, a profile carries
+its nick (no one else can take it, and the chat keeps it), its credits
+and its private messages, on this Stump and every Stump of its chain --
+the records go over the chain link only (never the radio), and a Stump
+takes them in only from a signed message that came in on a chain link.
+Credits are counted per Stump and merged, so spending on two Stumps
+before they sync loses nothing; the same nick registered on two Stumps
+before they sync: one keeps it, the other becomes `nick-xxxx`.
+Passwords are salted and hashed; wrong ones get the `/admin` lockout.
+There's no email: `/admin` → System → *Registered profiles* resets a
+password or deletes a profile (chain-wide). A profile doesn't let you
+write in `hybrid`'s other rooms -- that takes a FireFly's `/auth`.
+
+Visitors without a profile: a browser keeps a visitor ID (a cookie)
+rather than being known by its address; a client that keeps no cookies
+(the FireFly app) stays known by its address. Rate limits count per
+address either way.
+
 ## File storage
 
-`/sd/shared/` — where visitor uploads land — is capped at **75% of the
-card's total capacity** (`fserv.MAX_SD_RATIO`), checked via
-`os.statvfs` before a single byte of an incoming upload is read, not
-after. `/sd/tools/`, `/sd/fw/`, and `/sd/about/` are never eligible for
-eviction under any circumstance — there's no code path in the eviction
-function that can reach them, not just a check that happens to exclude
-them.
+`/sd/shared/`, where visitors' uploads land, is capped at **75% of the
+card** (`fserv.MAX_SD_RATIO`), checked before the first byte of an
+upload is read. Over the cap, the oldest shared files are removed one
+at a time until the new one fits; if even that isn't enough, the upload
+gets `507`. Only `shared/` is ever trimmed: `tools/`, `fw/`, `about/`
+and `home/` are never touched.
 
-When an upload would push usage over that ceiling, the **oldest**
-shared files (by modification time) are removed one at a time — not a
-bulk clear — stopping the moment the incoming file fits. If evicting
-every shared file still isn't enough, the upload is refused with `507
-Insufficient Storage` rather than accepted onto a card that can't
-actually hold it.
+Uploading is on the Files page, shown only with a card in. File names
+are made safe for the card's FAT filesystem (`< > : " / \ | ? *`
+replaced) and sent URL-encoded, so any name works, accents and emoji
+included. With credits on (`CREDITS_ENABLED`), uploading earns credits
+by kind (`CREDIT_WEIGHTS`) and downloading spends them; the ledger is
+saved whole or not at all. Apps get JSON answers
+(`docs/CLIENT_QUICKSTART.md`).
 
-**Status: tested against a real filesystem with controlled file ages**
-— confirmed minimal eviction (stops at the first file removed once
-there's room, doesn't over-evict), confirmed the three protected
-directories are completely untouched, and confirmed the correct `507`
-refusal when even a full eviction isn't enough.
-
-**Where uploading lives.** The upload panel is on the Files page,
-under the list it adds to (it used to sit on the home page); the Files
-tile's subtitle says so. It's only shown when an SD card is mounted,
-since without one `/upload` can only answer "no card". After a
-successful upload the list refreshes in place, so the new file appears
-while the confirmation (and any credit balance) stays on screen. The
-`/upload` endpoint itself is unchanged.
-
-**A real, reported bug: uploads that appeared to just silently not
-work.** Not a problem with the storage logic above — the actual file
-transfer (`stream_to_file`) was, and stayed, solid the whole time. The
-break was one step later. `CREDITS_ENABLED` defaults to `True`, so
-every single upload rewrites the entire credit ledger to the SD card
-through `_save_json()`, and that function had no exception handling at
-all. A write failure there — a card at or near the 75% ceiling above,
-or any other transient I/O hiccup — raised straight through
-`credit_add()`, through the `/upload` route, uncaught, out to
-`barkeep.py`'s own outer exception handler. That handler logs the
-error server-side but was never built to send a response for a
-failure this deep — it just closes the connection with nothing sent
-back. The file could be genuinely, successfully sitting on the card at
-that exact moment, and the client would still receive nothing at all:
-no success, no error. Made worse by a second, independent gap on the
-client side — the upload button's own `fetch()` chain had no
-`.catch()` — so the visible result was the status line stuck on
-"Sending..." forever, indistinguishable from the upload having failed
-outright even when it hadn't.
-
-Fixed at three layers, not one. `_save_json()` now catches a write
-failure and returns `True`/`False` instead of raising — confirmed its
-other two callers (`credit_add()`, `mark_awaiting()`) already treat a
-failed save as non-fatal and proceed regardless, so neither needed to
-change. The `/upload` route's own post-write bookkeeping (marking a
-slot fulfilled, adding credit) is now wrapped in its own `try`/`except`
-too, independent of the fix above — specifically so ANY future
-exception there, not just this one, still ends in a real response
-("Uploaded, but couldn't update your balance/slot record.") instead of
-nothing. And the upload button's JS gained the missing `.catch()`
-(showing a clear connection-problem message and re-enabling the
-button rather than leaving it stuck), a disabled state for the
-duration of the request (guarding against a second, overlapping
-upload from an impatient repeat click), and clears the picked file
-once a response actually arrives, success or not, as a visible sign
-something happened.
-
-**Status: tested at every layer, not just the one that was broken** —
-a genuine ledger-write failure forced directly confirms the client
-still receives a real `200 OK` and the file is genuinely saved despite
-it; the existing ordinary-upload, empty-upload, no-SD-card, and
-awaiting-slot-fulfillment paths were all re-run afterward to confirm
-none of them regressed from the restructuring; and the client-side fix
-was tested against a real DOM (via jsdom) executing the actual
-extracted JavaScript, covering both a normal successful upload (button
-disabled then re-enabled, file input cleared) and a simulated network
-failure (a clear error shown, button re-enabled, not stuck).
-
-**That fix immediately broke uploading completely, on the default
-language, for a much worse reason.** Real, reported symptom: no
-"Sending..." at all anymore, no network request even attempted,
-clicking Envoyer did visibly nothing. The new French translation added
-for the fix above — *"échec de l'envoi — problème de connexion.
-réessaie."* — has an apostrophe in *l'envoi*, and it was embedded
-directly into a single-quoted JavaScript string literal with no
-escaping at all. On the French page (the default language) that
-apostrophe closes the string early and the entire `<script>` block on
-the home page fails to parse as JavaScript — not just `doUpload()`,
-but `sendMsg()` and the Enter-key-to-send listener too, since all three
-live in that one script tag. This is the exact same bug class this
-project has hit once before (see the RRC client's own DM sidebar
-headers, fixed the same way, earlier in this document) — a translation
-containing an apostrophe breaking a JS string it was never escaped
-for — reintroduced here because the new strings this fix added went in
-the same unescaped way the *existing* `BOT_NAME` value on this exact
-page had already been fixed against, without applying that same
-lesson to what was new.
-
-Confirmed precisely, not guessed: rendered the actual French page,
-loaded it into a real DOM, and clicked the real, rendered upload
-button rather than calling `doUpload()` directly — reproducing a
-`ReferenceError: doUpload is not defined` and, underneath it, the
-literal `SyntaxError` from the malformed script. Fixed by escaping
-every dynamic string this page's script block embeds — the same
-HTML-entity escaping (`&#39;` for an apostrophe, decoded back to a
-normal apostrophe once it lands in `innerHTML`) already used for
-`BOT_NAME` on this identical page, applied now to `home_sending`,
-`home_upload_error`, and `home_you_label` as well, rather than a
-narrower fix to only the one string that happened to break first.
-Audited every other `<script>` block in the firmware for the same
-unescaped-i18n pattern afterward — the admin settings script and the
-RRC client both already use proper JSON-based JS-escaping, and the
-theme-startup and About-page scripts embed no translated text at all —
-confirming this was the one instance, not the first of several.
-
-**Status: reproduced and fixed against the real rendered page, not a
-synthetic one** — the broken French page confirmed genuinely
-unparseable before the fix (both the click's `ReferenceError` and the
-underlying `SyntaxError` from the malformed script), the same fixed
-page confirmed working after it (a real click on the real button
-correctly reaches `fetch('/upload', ...)` with the right filename and
-headers), the network-failure `.catch()` path re-confirmed to display
-correctly with the apostrophe intact and readable, and English and
-Spanish (never broken, since neither of those two translations
-happened to contain an apostrophe) re-confirmed unaffected — plus
-`sendMsg()` and the Enter-key listener, broken as collateral damage by
-the same failed parse despite neither being touched directly,
-confirmed working again as a consequence of the same fix.
-
-**A third, real, reported upload failure, once the above two were both
-fixed: certain files still wouldn't upload at all, with nothing in the
-browser's console and no request even visible in the Network tab.**
-Traced through curl first, bypassing the browser entirely to separate
-"server problem" from "browser problem" — a plain-named file uploaded
-perfectly over curl, proving the server and this whole request path
-were sound. The actual difference turned out to be the filename
-itself: `screenshot 2026.12:18pm EST.png` failed every time; renaming
-it to `test.png` with nothing else changed worked immediately.
-
-The SD card these files land on is FAT32/exFAT, and that filesystem
-reserves a specific set of characters — `< > : " / \ | ? *` — that it
-will not accept in a filename at all. `_clean_filename()` already
-handled two of those (quotes, forward slash) but not the rest,
-including the colon in that screenshot's own default name.
-`stream_to_file()`'s `open(dest, "wb")` fails outright on a name like
-that, which its own `except` already turns into a real `500` — but
-from the browser's side, a request that fails this early and this
-completely, on real hardware, is indistinguishable from the connection
-having never worked at all: no partial response, nothing in the
-console, nothing in the Network tab. Confirmed directly against a real
-FAT32 filesystem image, not assumed or looked up: installed
-`dosfstools`/`mtools` and wrote the exact reported filename to an
-actual FAT32 volume — it fails to write, exit code 1, the file never
-appears; the same name with the colon replaced writes successfully on
-the first attempt and is genuinely present afterward. Real filenames
-come from whatever device and OS a visitor's phone or laptop happened
-to generate them on, none of which know or care that this specific
-board's storage is FAT32/exFAT, so sanitizing the complete reserved
-set is what makes upload robust to a name like that rather than
-requiring every visitor to rename their file first, the way this one
-had to be worked around here.
-
-**Status: verified against the real filesystem constraint, not a
-guess about what "probably" isn't allowed** — the exact reported
-filename confirmed to fail against a real, mounted-via-`mtools` FAT32
-image before the fix, and the sanitized result of the fix confirmed to
-write successfully to that same real image afterward; the full upload
-request re-run end to end with the exact reported filename, landing
-correctly on disk with a `200 OK`; every character in the reserved set
-individually confirmed sanitized, not just the one that was reported;
-and the existing upload test suite (plain filenames, spaces, empty
-uploads, no SD card, awaiting-slot fulfillment, apostrophes and
-quotes) re-run afterward to confirm none of it regressed.
+The upload failures found in the field and how they were fixed:
+[`ENGINEERING_NOTES.md`](final_firmware/docs/ENGINEERING_NOTES.md#file-storage).
 
 ---
 
 ## Billboard
 
-Same retention model as Direct messages below, applied on request to a
-genuinely different kind of storage: DMs are in-memory and vanish on
-reboot by architecture; billboard posts are appended to a persistent
-file (SD card, or internal flash with no card fitted) that, before
-this, grew forever with no pruning at all. `MAX_ENTRIES_SHOWN` already
-existed, but it only ever limited what the `/billboard` page displays
-— the underlying file kept every post ever made, unbounded, even
-though only the newest 50 were ever shown.
+A post is a title (80 characters) and an optional body (600, line
+breaks kept). The page lists titles, newest first; a body opens with a
+tap (`<details>`, no JavaScript). Posts are kept **72 hours**
+(`BILLBOARD_TTL_SECONDS`), at most 150 on the card
+(`MAX_ENTRIES_STORED`, 50 shown), one line each in a file on the SD card
+(internal flash without one), rewritten whole or not at all. Expiry
+only trusts a set clock: posts made while the clock was unset count from
+when it's set. Each visitor can post 3 times a minute
+(`BILLBOARD_POSTS_PER_MIN`).
 
-**Titles and bodies.** A post is a required title (80 characters) and
-an optional body (600 characters, line breaks kept). The page lists
-titles only, newest first; a post with a body shows its title as a
-native `<details>`/`<summary>` toggle — tap to expand, tap again to
-collapse, no JavaScript involved, so it behaves the same on the kiosk,
-phones and screen readers. A post without a body is a plain row with
-nothing that looks tappable. The admin moderation list shows each
-title *with* its full body, since what a moderator needs to see is
-often in the body.
-
-On disk each post is still one line — `sig ⇥ id ⇥ title ⇥ body` — with
-the body's line breaks and backslashes escaped. Posts written before
-this have three fields and read back as title-only, so existing boards
-display exactly as before with no migration. `POST /post` takes
-`title=` and `body=`; the original single `entry=` field is still
-accepted as a title-only post, so existing clients keep working. A
-post with a body but no title takes the body's first line as its title.
-
-**Accented text was being garbled on the way in — fixed alongside.**
-Found while building this, and live before it: `_url_decode()` turned
-each `%XX` into its own character, but browsers send each UTF-8 *byte*
-that way (`é` arrives as `%C3%A9`), so "café" was stored as "cafÃ©".
-French being the default language, that hit ordinary billboard posts,
-and everything else decoded the same way: admin passwords, the
-file-delete checkboxes, download names. It now collects the bytes and
-decodes them as UTF-8 once. `_url_encode()` (which builds download
-links) changed in step to encode UTF-8 bytes too — it had been using
-`ord()`, which only happened to round-trip for characters below
-U+0100 and produced unreadable links beyond that.
-
-**Status: verified through real HTTP dispatch on MicroPython, and in a
-real DOM** — a post with an accented, apostrophe-containing, two-line
-body is stored intact and renders as a collapsed title that expands on
-tap and collapses again; legacy `entry=` posts and pre-existing
-one-line posts render as plain rows; an empty post is rejected; a
-`<script>` title and an `<img onerror>` body render as inert text; the
-French title placeholder (*titre de l'avis*) survives attribute
-escaping; the admin list shows full bodies and still deletes exactly
-the ticked post, including under the device's single-precision floats;
-72-hour expiry and the 150-post ceiling are unchanged; and a download
-link for `résumé été 🌲.txt` round-trips.
-
-Auto-purge isn't the only way a post disappears — see "The `/admin`
-page" above for manually removing something inappropriate without
-waiting on the 72-hour window below.
-
-A post is now kept for **up to 72 hours since it was made**
-(`billboard.BILLBOARD_TTL_SECONDS`), checked first and given priority
-over a separate, larger storage ceiling
-(`MAX_ENTRIES_STORED`, 150) that exists purely as a safety valve for a
-flood of posts all arriving within the same 72 hours — the identical
-relationship `rrc.py`'s own `DM_TTL_SECONDS` has with `MAX_DMS_PER_USER`,
-applied here on request. Pruning runs on every new post, rewriting the
-storage file to a temp file and renaming over the original — a rewrite
-has a real window where the file could be left empty or half-written
-if power drops mid-write, which a plain append never risked; the
-rename is atomic on the filesystems this runs on, so the live file is
-never observably incomplete.
-
-Posts written before this shipped have no timestamp at all — the
-storage format only ever recorded a signature and the text. Rather
-than treat that as either "ageless, keep forever" or "unknown, delete
-on sight" (which would have wiped an existing board's entire history
-the moment anyone posted again after upgrading), an untimestamped post
-is treated as posted right now the first time it's seen, and stamped
-with a real timestamp going forward — a fresh 72-hour window from the
-upgrade point, not instant deletion of whatever was already there.
-
-**Status: tested against a real, temporary file, not mocked** — a
-plain round-trip confirms posts are stored with a real timestamp; an
-old-format post with no timestamp at all survives a prune and is
-stamped with one close to the exact moment it was first re-read, not
-deleted; a post older than 72 hours is genuinely removed on the next
-prune while one just inside the window survives; 80 posts made within
-the window all survive in storage even though the display still only
-shows 50, confirming the two limits are independent; and a real,
-found-through-testing off-by-one — reaching the storage ceiling
-exactly, then posting one more, used to leave the file one entry over
-the ceiling, since the original design pruned by time *before*
-appending without re-checking the count *after* — is fixed by pruning
-and appending in a single pass, the same way `rrc.py`'s own
-`send_dm()` re-checks its count after appending rather than only
-before. Confirmed directly at that exact boundary: at the ceiling,
-one more post, storage stays at the ceiling, not one over.
+`POST /post` takes `title=` and `body=` (or the older `entry=`), or JSON;
+with `Accept: application/json` it answers with the post's `id` or an
+error token. Moderation is on `/admin`. History:
+[`ENGINEERING_NOTES.md`](final_firmware/docs/ENGINEERING_NOTES.md#billboard).
 
 ---
 
-## Direct messages
+## Chat and direct messages
 
-Two things worth knowing if you're touching this: how a conversation
-starts, and how long a DM survives.
+Rooms: `#main` (this Stump only), `#lora-mesh` (where LoRa phones and
+handhelds arrive, shared by the Stumps over the radio first; `#lxmf`
+before 1.0.0-beta.4, and the old name still works), `#wifi-mesh` on a
+Stump in a chain (shared over Wi-Fi only) and any made with `/join`. Who
+may be in `#lora-mesh` follows the access mode, like every room
+(`LORA_MESH_LOCKED = True` in config.py keeps it, on a computer with its
+own Heltec, to LoRa users, the computer's owner and whom they
+`/lora invite`).
+Every command and reply is in
+[`docs/COMMANDS.md`](final_firmware/docs/COMMANDS.md).
 
-**Starting one.** `/rrc/poll` now includes who's currently in the room,
-and the RRC client renders it as a clickable "Message someone" list —
-clicking a name opens a thread the same way clicking an existing
-conversation in "Direct Messages" already did. Typing `/msg <nick>
-<text>` (or its `/m`/`/w` aliases) directly, without clicking anyone
-first, now works the same way too: the client recognizes that pattern
-and threads it identically. Before this, only the *second* message to
-someone landed in the thread view — the first one, sent via a typed
-`/msg`, printed as a plain command reply in the room log instead,
-since no thread existed yet to route it into. Both paths now land in
-the same place. Anyone who already has an open thread is excluded from
-"Message someone" — a real screenshot showed the same name appearing
-in both lists at once, which read as a duplicate rather than two
-different actions; someone already reachable from "Direct Messages"
-doesn't need a second entry whose only job is starting a conversation
-that already exists.
-
-**Retention.** DMs are in-memory only — the same architecture as every
-other piece of chat state in this project, cleared by a reboot with no
-SD-card path at all, never a special case that needed building. Beyond
-that, a DM is kept for **up to 72 hours since receipt**
-(`rrc.DM_TTL_SECONDS`), pruned on every send *and* every poll so a
-recipient's box gets cleaned up even if nobody messages them again.
-This time-based rule is checked first and given priority over
-`MAX_DMS_PER_USER` (raised to 60, purely as a safety ceiling for a
-flood of messages all arriving within the same 72 hours) — a message
-inside its window is never evicted just because other messages arrived
-after it, unlike the file-storage FIFO above, which exists specifically
-to make room by evicting the oldest.
-
-**Status: tested with controlled timestamps** — 45 messages within 72
-hours all survive where the old 30-message-only cap would have
-truncated them; the safety ceiling still catches a genuine flood,
-oldest-first; pruning fires correctly from both a new send and a bare
-poll. The client-side thread-routing fix, the "Message someone" /
-"Direct Messages" list headers (a real, hardcoded-English bug found
-after this shipped — neither was ever wired through i18n, so both
-stayed in English regardless of language), and the duplicate-exclusion
-fix were all tested by executing the actual extracted JavaScript
-against a mocked DOM, not just read — including reproducing the exact
-duplicate-listing scenario a screenshot caught.
-
-**Leaving a DM back to the same room.** Three real, reported symptoms
-— a duplicate DM thread for the same person, DM content appearing to
-persist into `#main`, and a confusing "you're already in #main" right
-after closing a DM — turned out to share one root cause, plus a
-genuinely separate second bug.
-
-*The shared root cause*: opening a DM never changes which room the
-server has you in — DMs are a parallel channel, not a room switch, by
-design (see "Starting one" above). But clicking a room in the sidebar
-to leave a DM view always sent `/join <room>` unconditionally, even
-for the room the server already had you in the whole time. The server
-correctly replied `join_already` ("you're already in #room") — true,
-but confusing right after closing a DM — and because the log-clearing
-logic only ever fired on an *actual* room change (`d.room!==room`,
-never true here since the room never changed), that reply landed
-straight on top of whatever the DM thread had left sitting in the log,
-which is what made DM content look like it was persisting into
-`#main`. Fixed by having the room-click handler check whether the
-clicked room is the one the server already has the client in: if so,
-exiting DM view is now purely a local change — clear the log directly,
-no `/join` sent at all, so `join_already` can never fire from this
-path. A genuine switch to a *different* room still sends `/join`
-exactly as before, confirmed directly with a real DOM test.
-
-That fix also closes a second issue found while testing it: messages
-that arrive in `#main` while a DM is open are correctly skipped from
-rendering (so they don't leak into the DM thread), but `lastId` still
-silently advances past them — before this, returning to `#main`
-would permanently miss them, since the next poll only asks for
-messages newer than an `lastId` that had already passed them by.
-Leaving a DM now restores `lastId` to what it was *before* the DM was
-opened, so the next poll correctly re-fetches and shows everything
-that arrived in the meantime — confirmed directly by reproducing that
-exact scenario.
-
-*The separate bug*: `rrc.py`'s own nick lookup
-(`find_client_by_nick()`) is deliberately case-insensitive, so a DM
-to `BOB` still reaches a user registered as `Bob` — but the client's
-`dmThreads` object is a plain JS object keyed by whatever string was
-actually typed. Typing `/msg BOB hello` keyed the sent side `"BOB"`,
-while Bob's own reply arrived with his real, registered nick `"Bob"`
-and landed in a *separate* `dmThreads` entry — one conversation split
-across two sidebar rows, which is exactly what "duplicate DM" looks
-like. Fixed by resolving a typed target against the current, known
-user list (case-insensitively, matching the server's own resolution)
-before ever using it as a `dmThreads` key, falling back to the typed
-text unresolved only if no current match exists. Confirmed directly:
-typing a wrong-case name now resolves to the one real thread, and a
-reply from that person lands in the same thread rather than a new one.
-
-**DMs to mesh/LXMF peers only worked after they'd posted publicly.**
-Real, reported by the Android team, and confirmed from source rather
-than assumed. `/msg` resolves nicks against `rrc`'s own user table, but
-the only thing that ever registered a mesh peer there was the
-fall-through at the bottom of `rrc_mesh._handle()` — reached by a plain
-public message (or `/msg`, `/me`, `/topic`), never by `/help`, `/rooms`,
-`/names`, `/nick`, `/join` or `/part`, which `rrc_mesh` handles itself.
-A peer whose traffic so far was only commands existed on the mesh side
-but got "no one here called X" from `/msg`. Three related defects in
-the same path, all fixed together:
-
-- **Registration** now happens on *any* inbound LXMF message, and is
-  re-synced after every command — so a mesh `/nick` or `/join` is
-  reflected in `/msg` and `/names` immediately (previously `/msg` to a
-  mesh peer's new nick failed the same way, and `/names` kept listing
-  them in the room they'd left).
-- **Quiet rooms**: `_flush_to_peer()` returned early whenever the peer's
-  room had no new messages, *before* checking for DMs — so a DM to a
-  mesh peer in a silent room sat undelivered until someone happened to
-  speak in that room. A second, independent route to exactly the
-  reported symptom. DMs are now checked regardless of room traffic.
-- **Presence**: a LoRa client can't poll the way a browser does, so
-  `rrc` dropped mesh peers from `/msg` after `USER_TIMEOUT` (300s) of
-  silence, while `rrc_mesh` only expired them lazily, when some *other*
-  mesh message happened to arrive — meanwhile still pushing room
-  traffic to them over the radio. Both now run on one clock in
-  `poll_loop()`: a mesh peer is present, `/msg`-able, and receiving room
-  traffic for exactly `MESH_PEER_TIMEOUT` seconds after their last
-  transmission (new optional `config.py` setting, default 300 —
-  unchanged). Raising it keeps peers reachable longer at the cost of
-  LoRa airtime spent on peers who may have left.
-
-Also fixed on the way: DMs shared the room's delivery marker, which
-`/join` resets to replay room context — so every room change
-re-delivered every DM still in the peer's 72-hour inbox. DMs now have
-their own marker.
-
-**Status: reproduced against the shipped code, then re-run against the
-fix** — `/msg` after a command-only first contact, after `/nick`, in a
-quiet room, 250s into silence, and past the timeout (pruned on
-schedule, departure announced); a DM delivered exactly once across a
-`/join`; plus a regression pass on ordinary mesh chat (room messages
-still forwarded, own lines not echoed back, mesh→web DMs unaffected).
-Every case failed on the shipped code and passes on the fix. The web
-client's own DM path (`rrc.py`) was not changed.
-
-**A DM received while in another room was duplicated.** Real,
-reported and reproduced: a DM arrives while you're in `#lxmf`, you
-switch to `#main`, open the DM — it's there twice, and the unread count
-had doubled too. Switching rooms resets the client's `lastId` to 0 to
-load the new room's history; DMs share the same id sequence, so the
-server (correctly) sent every DM again, and the client added each one
-to its thread a second time. The client now remembers which DM ids it
-has already placed and skips repeats, which also covers the other path
-that lowers `lastId` (returning to a room from a DM view). Verified in a
-real DOM against the server's own `since` semantics: the exact repro
-now shows the DM once; bouncing between rooms repeatedly, a genuinely
-new DM arriving afterwards, replying from the thread, and returning to
-the room all behave correctly.
-
-**Room activity and DMs are written in symbols, not sentences.** A
-notice like "X a rejoint" used to be stored once, as finished text in
-the language of whoever triggered it, so every reader saw that one
-language — and the mesh bridge's notices were always English. They're
-now symbols every reader understands, built by one set of helpers in
-`rrc.py` (`ev_join`, `ev_leave`, `ev_rename`, `ev_topic`, `dm_line`,
-`no_such`, `moved`, `names_line`, `rooms_line`) that the web
-chat and the mesh bridge both use, so the two can't drift apart:
+- **Direct messages:** `/msg <nick> text`, or a name in *Message
+  someone*. Each conversation is a thread. Kept in memory for **72
+  hours** (`rrc.DM_TTL_SECONDS`), at most 60 per person; a restart clears
+  them.
+- **On a chain (`#wifi-mesh`):** the other Stumps of the chain are taken
+  in as soon as they're heard over the chain, and anyone on any Stump
+  can `/join wifi-mesh`. Only chat lines cross between Stumps, shown as
+  `<rod@LaBuche>`; joins and parts stay on their own Stump. People on
+  other Stumps are DM contacts as `rod@LaBuche` (`/msg rod@LaBuche ...`
+  is private); a DM to a Stump itself shows in its `#wifi-mesh`.
+- **`#lora-mesh` between Stumps:** each Stump sends its own people's
+  lines there to the other Stumps it knows — over its radio when it has
+  one online, one packet each, even when Wi-Fi reaches them too — and
+  they show as `<rod@LaBuche>`, once. With no Wi-Fi at all, Stumps meet
+  over the radio: one announces itself when its radio connects, and
+  answers a Stump it hears for the first time.
+- **The column:** drag the bar between the rooms and the chat to widen
+  it. Other Stumps are grouped at the bottom, each with a 🪵, under
+  *Stumps* (*Buches* in French). At its foot, your **profile**: the
+  radio's status dot and your nickname; click it for your nickname, this
+  Stump and its radio (and, for the computer's owner or an admin, the
+  radio's settings).
+- **Speed limit:** lines other people see, 3 at once then one every 2 s
+  (`CHAT_BURST`, `CHAT_EVERY`), on the web and over the mesh, where each
+  line costs airtime. `/help`, `/names` and other replies only you see
+  don't count.
+- **Room activity is written in symbols** every reader understands,
+  built by one set of helpers in `rrc.py` that the web chat and the mesh
+  bridge share:
 
 | Line | Meaning |
 |---|---|
@@ -1379,499 +757,144 @@ chat and the mesh bridge both use, so the two can't drift apart:
 | `→ #main` | you're now in #main |
 | `⊖ ghost` | no one here by that name |
 | `#main: a, b` · `#main ·3 text` | `/names` · `/rooms` |
+| `= #room` · `? /cmd` · `⊘ #room minted` · `⧗` | already there · no such command · refused by the room's tier · slow down |
 
-`~` in front of a name marks a mesh user (`✓ ~rod`); nicks can't contain
-it, and `/msg ~rod` still reaches rod. Moving rooms shows `✗ rod` in the
-room left and `✓ rod` in the room joined, with nothing after the name.
-DMs are `[DM] <author>: text` everywhere — the web thread used to draw
-both sides as `→ <author>`, arrows pointing the same way whichever way
-the message went; now every line simply names who wrote it, so a thread
-reads as a conversation. Over LXMF that replaces `[private] <nick>
-text`, and notices arrive as bare symbol lines (they had a `* `
-prefix).
+`~` before a name marks a mesh user. The rarer replies are sentences,
+in the reader's language (mesh users get the node's default, French).
 
-Still sentences, and translated: `/help` (ending with a key to the
-symbols), and the rarer replies to one person — messaging yourself, a
-malformed command, a taken nick, a room you can't enter, the hint
-before the first DM to an announce-only peer. Web users get their own
-language; mesh users the node's default, French — no language setting
-over LXMF, since what they see constantly needs none. The mesh
-bridge's own replies (`/join`, `/nick`, `/part`, `/help`, `/clear`),
-previously English, now use the same translations as the web chat. The
-two built-in rooms' default topics follow each reader's language until
-someone sets a real topic. The file bot's `!` replies, posted to the
-room for everyone, use the node's default language; the translations
-live in `fservbot/templates.py` with the rest of its voice, so an
-operator still rewrites it by editing one file. Its `/fs…`
-configuration commands, operator-only, stay English. The web chat adds
-a spoken label in the reader's language to every symbol line, for
-tooltips and screen readers. Nine translation strings made obsolete by
-this were removed.
+**Over LXMF:**
+- A mesh user lands in `#lora-mesh` (anyone reached over a chain, in
+  `#wifi-mesh`). Their lines go to the room they're in, and they get that
+  room's traffic for `MESH_PEER_TIMEOUT` seconds (300) after their last
+  message. Room batches carry the room as the LXMF title.
+- Someone heard only by their announce can be sent DMs, never room
+  traffic, for `MESH_ANNOUNCE_TIMEOUT` seconds (3600).
+- A DM a mesh user sends is echoed back to them as their own
+  `[DM] <nick>: text` line: it confirms the node found the recipient
+  (else `⊖`). It doubles a DM's airtime.
+- A message whose signature doesn't match its sender is dropped. A
+  sender not heard announcing yet (no key to check) is taken on an open
+  node, refused in hybrid or mandatory mode.
 
-**Every DM sent over LXMF is echoed back to the sender — deliberately.**
-A mesh client sending `/msg <nick> <text>` gets an LXMF reply that is
-its own DM line, `[DM] <its nick>: text` — the same in every language.
-It's kept on purpose: the LXMF delivery proof only says the node
-received the message, while the echo says it found a recipient by that
-name (failure comes back as `⊖ <name>`, or a sentence for the rarer
-cases). Because it names the author, a client tells it from an
-incoming DM by comparing the author with its own nick; it no longer
-names the recipient. The web chat relies on the same confirmation: your
-message appears in a thread only once your own `[DM]` line comes back,
-so a DM to someone who has left shows `⊖` instead of looking sent —
-previously, a reply typed in a thread ignored the server's answer
-entirely. Since the confirmation no longer carries the recipient's
-exact capitalisation, the web chat merges a thread started as `/msg BOB`
-into Bob's own name as soon as Bob replies, so one conversation stays
-one thread. Parsing patterns are in the Client Quickstart.
+## Voice notes
 
-Cost: every LXMF message across the radio is two transmissions (the
-message and its delivery proof), so the echo doubles a DM's airtime —
-about 0.9 s → 1.8 s for a 29-character DM at SF8/125 kHz/CR 4/5
-(measured packet sizes: 227 bytes per message, 83 per proof; 198 bytes
-of a message are fixed overhead, so a shorter echo text barely helps).
-That's ~3% → ~6% of the channel at 2 DMs a minute, ~15% → ~30% at 10.
+A voice note is a DM with audio (LXMF `FIELD_AUDIO`, FireFly's spec),
+shown as `[DM] <author>: ♪ 5.0 s`, and travels unchanged between the web
+chat, FireFly and Sideband: **Opus** (mode 16, an Ogg Opus file,
+FireFly's default) or **Codec 2** (modes 3–9).
 
-**The technician-tools step of an upload, made visible.** After the app
-is installed, `--upload-app` (and full provisioning) copies the tools
-for the node's `/tools` page to its SD card: `provisioner.py`,
-`README.md`, the firmware bundle, the browser flasher — about 1.1 MB.
-Copies to the SD card run at roughly 1 KB/s over USB, so the first time
-this takes up to ~20 minutes, and it used to do it in silence apart from
-one line about the bundle: it looked hung. Now it states the total and
-the time up front; prints every file with its size, then `ok` with how
-long it took, `unchanged, skipped`, or the reason it failed; skips any
-file already on the card byte for byte (SHA-256 computed on the board),
-so a re-run is quick and a half-copied file is redone; scales each time
-limit with the file's size; treats Ctrl+C as "stop here, the app is
-installed" instead of a traceback; and `--skip-tools` leaves it out.
-The bundle copied to the node no longer carries `third_party/` (the
-3 MB of Codec 2 sources tripled it to 1.6 MB); it stays in the project
-download.
+- **Web chat:** ♪ in a DM thread records, ▶ plays. The browser does the
+  codec work with WebAssembly built from libopus 1.5.2 and Codec 2 1.2.0
+  (`web/`, served by the board; `third_party/` holds their sources,
+  licences and build scripts, never copied to the board). It sends Opus
+  with FireFly's settings (16 kHz mono, 8 kbit/s, 60 ms frames).
+- **Recording:** on a node with a certificate, ♪ opens a small HTTPS
+  window that records the microphone and hands the audio back to the
+  chat. Otherwise, or if the phone refuses, the phone's own recorder app
+  (`<input type=file accept=audio/* capture>`).
+- **Over the mesh:** FireFly's shape both ways (`/msg <nick>` plus the
+  field).
+- **Limits:** 0.6–15 s; one note per 5 s and 30 an hour per sender; 10
+  held per inbox; ~2 MB of voice in memory in all.
 
-**HTTPS on the Stump's own Wi-Fi.** Browsers only open the microphone
-on secure pages, so live voice recording needs HTTPS. With a real
+## LXMF propagation node
+
+Switched on in the Provisioner or `/admin` (needs the SD card), the node
+holds messages for people who are offline: a phone (FireFly, Sideband)
+that picks it as its propagation node leaves messages for absent people,
+who collect them with a sync. It can't read them. It follows upstream
+LXMF 1.2.0 field for field, with one difference: each message's
+proof-of-work stamp takes the CAM **~30 s** to check, so receipt is
+confirmed at once and stamps are checked in the background, ~60 ms at a
+time; only a message whose stamp checks out is stored.
+
+Limits: 15 KB per message, 100 per recipient, 50 MB in all, 30 days.
+`/admin` shows the status and has a test mailbox and *leave a message
+for an address*. Peering with other propagation nodes is still to come.
+
+## Home page, navigation, About and Tools
+
+- **Home page:** a tile per feature offered, in the order set on
+  `/admin`. A `home/` folder on the card can replace the logo and title
+  with the node's own branding, a fragment or a whole page in a
+  sandboxed frame
+  ([`docs/HOME_BRANDING.md`](final_firmware/docs/HOME_BRANDING.md)).
+- **Navigation:** every page shows the others as an icon row, names as
+  tooltips, in the same order.
+- **About** mirrors the public site in three views (Project, How to
+  Connect, Apps & Handhelds), with what only the node knows: the Wi-Fi
+  name it actually broadcasts, its address, and the FireFly apps as
+  downloads from its card.
+- **Tools:** one section per folder of the card's `tools/`, each with
+  its README in the visitor's language.
+
+How each came to be, with its tests:
+[`ENGINEERING_NOTES.md`](final_firmware/docs/ENGINEERING_NOTES.md#chat-direct-messages-voice-notes-the-propagation-node-and-the-pages).
+
+## BarKeep, the librarian
+
+Visitors ask BarKeep what's on the node, in French, English or Spanish —
+*"do you have a movie?"*, *"as-tu un livre sur le jardinage ?"*,
+*"¿qué hay en el tablón?"* — and get the matching files (linked), notices
+and apps. It's a **firefly** in the bottom-right corner of the Files,
+Billboard and home pages (like a help chat) that opens into a small
+chat with BarKeep, with suggestions to tap (and `/concierge`); labelled
+"the librarian", so nobody takes it for the people's chat room. In the
+chat, `!find <words>` asks it on one short line. No language model:
+`librarian.py` folds accents, drops filler words, spots the kind of file
+or the billboard or the apps, and matches the rest against file names
+and notices. Commands and examples: `COMMANDS.md` Part 4.
+
+The Files page also sorts (⇅: newest, oldest, name, size) and filters
+(by kind, or as you type; Enter asks BarKeep), and the Billboard searches
+titles and bodies (opening a post whose body matches) and sorts — all in
+the browser, no request to the node. `/files.json` and `/billboard.json`
+take `?q=`, `?cat=` and `?sort=` for apps.
+
+## HTTPS
+
+Browsers only open the microphone on secure pages, so live voice
+recording needs HTTPS. With a real
 certificate for a name you own (e.g. `stump.labuche.org`, from Let's
 Encrypt — **step-by-step with Firebase Hosting in
 `docs/HTTPS_SETUP.md`**), installed with
 `provisioner.py --install-cert PORT fullchain.pem privkey.pem`, the node
 also serves HTTPS on 443 (`stump_tls.py`; certificate in `/tls/` on
-internal flash). The captive DNS already answers every name with the
-node's address, so on its Wi-Fi that name reaches the node with a
-normal padlock, offline too. There is **no server-side redirect**: a
-page opened over plain HTTP on the Stump's Wi-Fi is a tiny page that
-asks the browser to fetch `https://<name>/tls-ok` and moves to HTTPS
-only if that works — so the *phone* checks the certificate against its
-own clock, and with an expired certificate, a wrong phone clock or no
-answer in 3 s the visitor just stays on HTTP, with no warning page. (A
-first version redirected from the server, which would have sent everyone
-into a warning once a certificate lapsed; an outside review caught it.)
-That also leaves captive-portal detection exactly as before. Background
-requests (polls, uploads, audio, downloads) are never touched; visitors
-on the router's LAN never try (there the name resolves to the internet).
-The guide recommends an ordinary TLD (`.org`, `.net`, `.com`): `.app` and
-`.dev` are HSTS-preloaded, so a lapsed certificate there would be an
-unbypassable error for anyone typing the name. `/admin` shows HTTPS status, the expiry
-date, and the days left (bold under 21) when the node's clock is set. With no certificate, or a MicroPython that
-can't serve TLS, nothing changes. `--install-cert` checks the key
-matches, the expiry, that the chain includes the intermediate, and the
-key type, before copying anything. `tls_probe.py` checks a board's TLS
-support and handshake time. The module is `stump_tls`, not `tls`:
-recent MicroPython has a built-in `tls` that would shadow it.
+internal flash). The captive DNS answers every name with the node's
+address, so on its Wi-Fi that name reaches the node with a normal
+padlock, offline too.
 
-*Status:* the real web server under MicroPython served HTTPS that a
-client verified like a browser (test CA, hostname `stump.labuche.app`,
-ECDHE-ECDSA-AES256-GCM); a plain-HTTP page on the Stump's Wi-Fi got the
-upgrade page (no redirect), `plain=1` the normal page, `/tls-ok` answered
-over HTTPS, polls and LAN visitors untouched; a wrong hostname refused.
-The upgrade page in a browser engine: valid certificate → HTTPS; failed
-fetch → stays on HTTP; no answer → HTTP after 3 s; a late answer can't
-cause a second jump. `--install-cert` checks tested
-on valid, mismatched, expired, near-expiry, intermediate-less, RSA and
-wildcard certificates. Not yet measured: handshake time and memory on
-the ESP32 itself, which matter more than usual because the Stump closes
-each connection after one request — on HTTPS, every chat poll (every
-2 s, per visitor) is a fresh handshake. `tls_probe.py` and the burst and
-parallel tests in `HTTPS_SETUP.md` step 0 measure exactly that.
+- **Only two things use it:** the voice recorder, a small window the
+  chat opens at `/rrc/rec` that records and hands the audio back to the
+  chat, and `/admin`, where a password is typed. The chat and the other
+  pages stay on plain HTTP: its 2-second polls would each be a new TLS
+  handshake for the CAM. The chat opened over HTTPS goes back to HTTP.
+- **The phone decides, never a warning page:** before using HTTPS the
+  browser fetches `https://<name>/tls-ok`; with an expired certificate,
+  a wrong phone clock or no answer, ♪ uses the phone's recorder app and
+  `/admin` stays on HTTP. Captive-portal detection is untouched, and
+  visitors on the router's LAN never try (there the name is the
+  internet's).
+- **Checks:** `--install-cert` checks the key matches, the expiry, the
+  intermediate and the key type before copying anything;
+  `bench/tls_probe.py` checks a board's TLS support and times its
+  handshakes. `/admin` shows the status, expiry and days left. The guide
+  recommends an ordinary TLD (`.app` and `.dev` are HSTS-preloaded: a
+  lapsed certificate there is an error nobody can click through).
+- The module is `stump_tls`, not `tls` (MicroPython has a built-in `tls`).
+
+*Status:* served under MicroPython to a client that verified it like a
+browser (test CA, ECDHE-ECDSA-AES256-GCM); the recorder window's hand-off
+tested in a browser engine with a fake microphone (record, hand back,
+encode to Opus, send; a recorder opened by another site refuses).
+`--install-cert` checks tested on valid, mismatched, expired,
+near-expiry, intermediate-less, RSA and wildcard certificates. Not yet
+measured on the ESP32 itself: handshake time and memory
+(`bench/tls_probe.py`, `HTTPS_SETUP.md` step 0).
 
 **Next field test:** `docs/FIELD_TEST.md` is the checklist for this
 build — what's new, in the order to check it on site, with the questions
 only real hardware can answer marked, and what to send back.
-
-**Home branding is set from `/admin`.** The Home page section panel shows
-what the node sees in `home/` and sets where the section goes — above
-the buttons, under them, beside them on the left or right — the frame's
-height (80–1200 px, for a complete page), and whether to show it at all
-(unticked brings back the Stump logo, files kept). It saves
-`home/home.json` (`fserv.save_home_config()`, now with `"hidden"`), so
-the panel and the file always agree; `POST /admin/home` re-checks the
-password and refuses unknown placements and out-of-range heights,
-changing nothing. *Status:* with the hearth file — every placement and
-height saved and followed by the home page, the panel reflecting each;
-hide and show; wrong password (403); bad values refused; no SD card
-(status only, no form); and in a browser engine, the form sends exactly
-what the route expects (no `show` field when unticked).
-
-**Home branding: any single file, complete pages framed, a status line.**
-A field report: a complete page dropped in `home/` under its own name
-(`the_hearth_kinetic_ascii.html`, a canvas animation) wasn't picked up —
-only `home.html` was looked for, silently. Now `fserv.home_branding()`
-also takes the only `.html` file in the folder, whatever its name (with
-several and no `home.html` it won't guess). A **complete page**
-(`<!DOCTYPE>`/`<html>`) is shown in a sandboxed `<iframe>` rather than
-inserted: inline, its `body` styles (`overflow:hidden`, `display:flex`,
-`margin:0` on everything) would have taken over the whole Stump page.
-The frame's height comes from `home.json` (`"height"`, 80–1200 px,
-default 280); `sandbox="allow-scripts"` lets it animate but gives it an
-origin of its own, so its scripts can't read the node's pages as the
-visitor. `.html`/`.htm` now have a type (`text/html`) — without one the
-frame would have downloaded the file. `/admin` gains **Home page
-section**: the file in use and how it's shown, or why none is
-(`fserv.home_status()`). *Status:* the user's own file — framed at the
-top, served intact as a page, named in `/admin`; frame height; the
-several-files case; a fragment still inline; the earlier placement
-suite unchanged. The canvas itself wasn't run (no real browser here):
-that's a field-test item.
-
-**Branding can bring its own styles and fonts.** The node now serves
-`text/css`, `font/woff2`, `font/woff`, `font/ttf`, `font/otf`,
-`image/x-icon` and `image/avif` (node-wide, so the Files page benefits
-too): a browser refuses a stylesheet sent as generic data, which made a
-`style.css` in `home/` useless. `docs/HOME_BRANDING.md` now covers
-images, styles, fonts and scripts — including that a home-page script
-acts as the visitor on that node, and Python only via an in-browser
-runtime like Brython stored on the card.
-
-**The home page can carry its own branding.** Whoever keeps a node can
-drop a `home` folder on its SD card (next to `tools`) with `home.html` —
-an HTML fragment, up to 32 KB — and its images, and that section
-replaces the Stump logo and title (`fserv.home_branding()`,
-`barkeep._render_chat_page()`). `home.<lang>.html` wins for that
-language; `home.json` (`{"place": "top"|"bottom"|"left"|"right"}`) puts
-it above, below, or beside the cards — side by side from 760 px wide,
-the page widened for it, stacking on phones (left above, right below).
-Files are served from `/home-file?f=`, behind the same name guard as
-`/tool`. A missing or broken `home.json` means top; a file over 32 KB is
-ignored and the default page shows; no folder, no change. The
-provisioner copies a `home` folder next to it to the card with the
-tools. Guide: `docs/HOME_BRANDING.md`. *Status:* every placement, the
-per-language file, missing/unknown/broken `home.json`, the size cap, the
-file route and a `../` attempt, through the real request handler.
-
-**Navigation rows are icon-only.** The Files page's row has five
-destinations (home, chat, billboard, tools, about); with a word under
-each, the grid's 92 px minimum fit only three on a phone and the tools
-tile dropped to a second line. Navigation rows (`_nav()`, class
-`tiles nav`) now show the icon alone, with the translated name kept as
-a tooltip and for screen readers (`title`, `aria-label`), at a 48 px
-minimum: five fit in 280 px, inside even a 320 px phone's 284 px of
-content width. The phone rule that stacked tiles in one column skips
-navigation rows. The home page's cards keep their words and subtitles.
-Every page's row is now one rule, `NAV_ORDER` minus the page itself —
-chat, billboard, files, tools, about, home — so each shows the other
-five in the same order (home, the billboard, tools and about had each
-been missing one); the home page gained a Tools card, and the chat
-page's bar follows the same order, icons only. Switched-off features
-drop out everywhere.
-The home page's cards are a vertical list, one per row (`tiles home`):
-icon on the left, the name and subtitle beside it — five cards in a grid
-were too compact.
-
-**The About and Tools pages now mirror the public site.** The About
-page follows labuche-stump.web.app as it is now: three views — Project
-(v1), How to Connect, Apps & Handhelds — with the site's current copy in
-all three languages, its five link tiles (LaBuche-Stump, FireFly-Android,
-FireFly_RK3326, LinkedIn, email), and its device cards for the two
-FireFly apps. The hardware photo gallery the site dropped is gone too,
-along with its `/about/img` route. Where the node can do better than the
-site, it does: the connect steps name the network it **actually**
-broadcasts (read live, so a technician's custom name shows) and its live
-address; and since there's no internet on its own Wi-Fi, each app card
-offers a **download from this node** — version and size shown, plus how
-to install — with GitHub kept as the second, online-only link. `/tools`
-lists the apps first, then the technician's files. APKs are served as
-`application/vnd.android.package-archive`, so a phone offers to install.
-
-*The apps are found on the SD card by name* (`fserv.find_apps()`), in
-the card's `tools` folder: `FireFly-Android-<version>.apk` and
-`FireFly-RK3326-<version>.zip`. The highest version wins (compared as
-numbers: 0.2.11 beats 0.2.9), so a newer file dropped on the card
-updates the page with no firmware change; a missing app says "Not on this
-Stump yet". The handheld package (95 KB) ships in
-`tools_payload/apps/` and the provisioner's tools step copies it. **The
-Android APK does not travel over USB**: FireFly 0.2.11's debug APK is
-49.7 MB — about 14 hours at the ~1 KB/s the SD card takes over USB — so
-the tools step refuses anything over 1 MB and says to copy it with a
-card reader (seconds). To install it: rename `app-debug.apk` to
-`FireFly-Android-0.2.11.apk` and copy it into `tools/` at the top of the
-node's SD card. (A release build for arm64 only would be far smaller,
-and its release signature avoids the uninstall a debug-signed install
-forces later.) Installing the handheld package still needs internet on
-the handheld — FireFly's `install.sh` uses `apt-get` — and the page says
-so.
-
-*Status:* through the real request handler with no apps, Android only,
-and both apps plus an older Android: the right downloads and "not here
-yet" messages, 0.2.11 chosen over 0.2.9, apps kept out of the technician
-list, the five tiles, the live network name and address, the site's
-French and Spanish labels, and the 49.7 MB APK streamed whole with
-Android's type; tab switching tested in a browser engine. The tools step
-copies the handheld zip and sends the APK to the card reader, and the
-firmware bundle carries no app files.
-
-**Voice notes in Opus as well as Codec 2 (FireFly 0.2.10).** FireFly
-now sends Opus by default on every link, Stump voice DMs included, so
-the node relays both: `FIELD_AUDIO` = `[16, Ogg Opus file]` or
-`[3–9, Codec 2 frames]`, byte for byte unchanged. Lengths come from the
-bytes in whole milliseconds as FireFly's spec defines them — Opus from
-the Ogg pages, `(last granule − pre-skip) / 48` (`rrc.opus_ms()`, which
-also validates `OpusHead`: 1–2 channels, mapping family 0) — with
-integer half-up labels, and limits of 600–15,000 ms (Codec 2) and
-600–15,100 ms (Opus). `/rrc/voice` takes up to 16 KB (a 15 s Opus note
-at 8 kbit/s is ~13.4–14.2 KB; every other small body stays at 8 KB); the
-poll's `voice` object gains an exact `ms`; voice held in RAM is capped
-at ~2 MB overall. The web chat now **sends Opus** with FireFly's
-settings (16 kHz mono, 8 kbit/s constrained VBR, 60 ms frames, VOIP,
-complexity 10) and plays both: libopus 1.5.2 compiled to WebAssembly
-(`web/opus.wasm`, 333 KB, BSD-style licence — `third_party/opus/` holds
-the licence, the wrapper and a build script that reproduces it byte for
-byte) with an Ogg writer/reader in `web/opus.js`; recordings are
-resampled to 16 kHz with a 7.2 kHz low-pass. The codec files are now
-streamed in 16 KB chunks (reading `opus.wasm` whole needed one 333 KB
-allocation — a MemoryError in testing). Two related fixes: the
-propagation node advertised 15 KB per message but answered syncs with
-at most 14,000 bytes, so a message between ~14 and 15 KB — a 15 s Opus
-note — was stored but never collectable (replies now hold ~16 KB, and
-uploads over the advertised limit are refused); and chat that reaches
-the node through its own propagation node more than 30 minutes late is
-not acted on — the sender is told instead.
-
-*Status:* both FireFly Opus vectors (`kristoff_opus.ogg`,
-`kristoff_opus_8k.ogg`) give 5,000 ms on the node and in the browser,
-and decode in the browser to exactly 240,000 samples at 48 kHz (60 dB
-SNR against the reference `opusdec`); `kristoff_3200` and
-`kristoff_1200` reproduce byte for byte. Our encoder's files pass
-`opusinfo` with no warnings and match FireFly's structure (pre-skip
-312, 960/840/240 ms pages, ~7.3 kbit/s). Every row of FireFly's
-"Seconds" table matches; Opus at exactly 15,100 ms is accepted, 15,101
-refused; five kinds of malformed Opus are refused. Against upstream
-LXMF 1.2.0: FireFly's Opus vector reached the web user byte for byte
-over an LXMF link, a 15 s Opus note (14,219 B) went the other way
-intact with a valid signature, and the same note left at the
-propagation node was collected intact. The web chat in a browser
-engine sends a real Ogg Opus file and plays Opus, Codec 2 and an
-unknown mode correctly.
-
-**Voice notes (Codec 2), on Wi-Fi and over the mesh.** A voice note is
-a DM with audio: `/msg <nick>` plus the note, delivered like any DM and
-shown as `[DM] <author>: ♪ 5.0 s`. It follows FireFly's voice-note spec
-(LXMF `FIELD_AUDIO` = `[mode, raw Codec 2 frames]`, default
-`AM_CODEC2_1200`), so notes travel between the web chat, FireFly and
-Sideband unchanged:
-
-- **Web chat:** a ♪ button in DM threads records; ▶ plays. The browser
-  does the codec work — Codec 2 1.2.0 compiled to WebAssembly
-  (`web/codec2.wasm`, 210 KB, served from the board with
-  `web/codec2.js`, loaded only on first use). Recordings are decoded,
-  brought to 8 kHz through a windowed-sinc low-pass at 3.6 kHz (aliasing
-  measured >80 dB down), DC-filtered, levelled to ~70 % peak with at
-  most 4× gain, capped at 15 s, refused under 0.6 s, then encoded at
-  1200 and posted as raw frames to `POST /rrc/voice?to=&mode=`. Playback
-  fetches `GET /rrc/voice?id=` (the recipient's own notes only).
-- **Two ways to record, one pipeline.** On a secure (HTTPS) page — a
-  node with a certificate, see `docs/HTTPS_SETUP.md` — ♪ records the
-  microphone live (`getUserMedia` + `MediaRecorder`) and ■ sends. On plain
-  HTTP, or if the visitor refuses microphone access, ♪ uses **HTML Media
-  Capture** (`<input type="file" accept="audio/*" capture>`): the device's
-  own recorder makes the recording and hands back a file — no HTTPS
-  needed. On iPhone, Safari may offer a file picker instead of a
-  recorder; worth testing on real devices. Either way the recording is
-  decoded, converted and encoded to Codec 2 in the browser and sent to
-  `/rrc/voice` as a DM — deliberately *not* through the file-sharing
-  `/upload`: a raw phone recording would land on the shared shelf, is far
-  too big for LoRa, and isn't something FireFly can play. While a note is
-  being processed and sent, ♪ shows ⋯ and ignores further taps; a
-  recording the browser can't decode gets its own message rather than
-  "connection problem" (older iPhones without `File.arrayBuffer()` are
-  read through `FileReader`).
-- **Mesh:** an LXMF message carrying `FIELD_AUDIO` and the text
-  `/msg <nick>` (FireFly's shape) becomes a voice DM; a note to a mesh
-  user goes as its own LXMF message with the field and
-  `[DM] <sender>: ♪ 5.0 s` as text. Audio with no `/msg` gets a hint.
-  At SF8/125 kHz a 5 s note is a few seconds of airtime over a link.
-- **Limits:** modes 3–9 (700C … 3200; Opus and the removed 450 modes are
-  refused), 0.6–15 s, one note per 5 s and 30 an hour per sender
-  (`⧗ — …` otherwise — the rate token FireFly's memo asked for), 10 voice
-  notes held per inbox. Same access rule as `/msg`, and covered by the
-  chat feature switch.
-
-*Licence.* Codec 2 is LGPL-2.1. `third_party/codec2/` holds exactly the
-sources `codec2.wasm` is built from (unmodified 1.2.0, plus generated
-codebooks), the licence, the wrapper and `build_codec2_wasm.sh`, which
-rebuilds the shipped module byte for byte. It stays in the project and
-is never copied to the board.
-
-**Status:** the WebAssembly encoder reproduces FireFly's test vector
-(`kristoff_1200`, SHA-256 `7ba18f75…`) byte for byte, and decodes it to
-exactly 40,000 samples (within one LSB of native Codec 2). Against
-upstream LXMF 1.2.0: a 5 s note from an upstream client reached the web
-user with identical bytes over an LXMF link, and the web user's reply
-arrived upstream with identical `FIELD_AUDIO` and a valid signature.
-Server side on single-precision MicroPython: every reply, the rate
-limit, the 10-note cap, mesh both ways, HTTP upload/download/poll, the
-access gate and the feature switch. Web page in a browser engine with
-the real codec: the file fallback, the live mic on a secure page, send,
-playback, a rate-limited send, and an unplayable format.
-
-**LXMF propagation node (store-and-forward).** Switched on in the
-provisioner or `/admin` (needs the SD card), the node announces itself
-as an LXMF 1.2 propagation node (`lxmf.propagation`, on its own
-identity) and holds messages for people who are offline: a phone
-(FireFly, Sideband) that picks LaBuche as its propagation node uploads
-messages for absent recipients, and the recipient collects them with a
-sync. The node can't read them — they're encrypted for the recipient.
-All in `propagation.py`, matching upstream LXMF 1.2.0 field for field
-(announce data, uploads as packets or resources, the two-step `/get`
-sync, error codes).
-
-*The one deliberate difference.* Every stored message carries a
-proof-of-work stamp the node must check: a 256 KB work block built in
-1,000 rounds, then one hash. Measured on the CAM with `stamp_bench.py`
-(same work block as upstream, byte for byte): **~30 s per message**.
-Upstream checks before confirming receipt; here that would freeze the
-web pages, chat and Heltec bridge for half a minute per upload, and a
-phone would give up waiting and resend. So receipt is confirmed at
-once, the upload is parked in `/sd/lxmf_pn/pending`, and a background
-task checks stamps two rounds (~60 ms) at a time. A message is stored
-and offered to its recipient only once its stamp checks out; a bad one
-is dropped (the sender isn't told). Capacity is roughly 30+ messages an
-hour; collecting stored messages costs nothing extra.
-
-Limits: 15 KB per transfer (the stack's 16 KB cap), a `/get` reply of at
-most ~14 KB (a phone syncs again for the rest), 100 messages per
-recipient, 50 MB in total, 30-day expiry (clock-aware, like the
-billboard), 50 uploads waiting for checks. Peering with other
-propagation nodes is Phase B: until then `/offer` answers
-`ERROR_NO_ACCESS`, which makes an upstream `lxmd` that tries to
-auto-peer back off cleanly.
-
-`/admin` shows the switch, status (held, being checked, accepted,
-refused, handed over) and two single-phone test tools: a **test
-mailbox** — an address that's never online, whose messages `/admin`
-displays — and **leave a message for an LXMF address**, which stores a
-message from the node for that phone to collect with a sync. Messages
-left that way are made on the node, so they carry no stamp (generating
-one would take this board hours); Phase B won't forward them to peers.
-
-Two fixes in `urns` came with it. Request handlers always received
-`remote_identity=None`, even after the client identified itself, so no
-phone could have synced. And link setup was limited to one per 5 s
-globally, so a second phone arriving right after the first was refused
-(reproduced: upstream's sync failed as `PR_LINK_FAILED`); it's now a
-budget of 4 per window with native crypto, 2 without.
-
-**Status: tested against upstream RNS 1.5.5 + LXMF 1.2.0** (FireFly's
-versions), with the Stump's real stack on single-precision MicroPython
-connected over TCP: upstream validates the announce; phone A's upload
-is confirmed, stamp-checked and stored; offline phone B syncs and
-receives it, and the node deletes it once B has it; "leave a message"
-reaches B from the node; the test mailbox shows what's sent to it; a
-forged stamp is rejected and not stored; `/get` without identifying
-gets `0xf0`; `/offer` gets `0xf1`. `/admin` tested through real HTTP
-(switch, saved setting, status, mailbox, bad and unknown addresses,
-wrong password); the provisioner question and config writer tested; and
-the node boots with it on, creating its store on the card.
-
-**Room tiers weren't enforced over the mesh — fixed.** The web's
-`/join` goes through stumpid's `can_join_room()`; the mesh bridge
-answers `/join` itself, and also has a `#room text` shortcut that posts
-into any existing room without moving — neither checked tiers. A mesh
-user could join, or post into, a `minted` or `hybrid` room with no
-`/auth` and no invite. Found while answering the FireFly memo. Both
-paths now apply the same check (`_tier_refusal()` in `rrc_mesh.py`),
-**fail-closed**: if stumpid is active but the check errors, the move is
-refused. Only the initial landing room had been checked before.
-
-**From the FireFly memo (requests 1–4, and JSON endpoints).**
-- A mesh user the node lands in a room — first message, first message
-  after going quiet past `MESH_PEER_TIMEOUT`, or redirected by a tiered
-  `#lxmf` — is sent `→ #room` before anything else.
-- Replies clients act on start with a stable token, the same in every
-  language, then ` — ` and the sentence: `= #room` already there,
-  `? /cmd` no such command, `⊘ #room <tier>` refused by tier. Built by
-  `rrc.tok_already/tok_unknown/tok_refused`, used by the web chat, the
-  mesh bridge and stumpid alike; the web chat labels them like the
-  other symbols. (The memo also asked for a "rate limited" token; the
-  node has no rate limiting yet, so there's nothing to attach it to.)
-- `/rrc/poll` includes `"node": {"name", "lxmf"}`, set at startup from
-  the node's LXMF destination, so a client on both Wi-Fi and LoRa can
-  tell it's one node.
-- Every pushed room batch over LXMF carries its room as the LXMF
-  message **title** (`#lxmf`); DM-only batches carry none. The send
-  queue takes an optional title, sent by one helper (`_send_item()`).
-  A title packed by `urns` was decoded with upstream LXMF 1.2 to
-  confirm compatibility.
-- `GET /billboard.json` and `GET /files.json` return the board and the
-  shelf as data; both are covered by the feature switches (`404` when
-  their feature is off — added to `features.py` explicitly, since its
-  address matching wouldn't otherwise cover `.json`).
-
-**Status: on single-precision MicroPython with the device's plugins** —
-every token on web and mesh; `→ #lxmf` on first contact and after
-re-landing; mesh `/join` into a minted room and the `#vip` shortcut both
-refused with nothing posted, while the shortcut into an open room still
-works; room batches titled, DM-only batches untitled; `node` in the
-poll; both JSON endpoints, and `404` with their feature off. The
-earlier reachability, labelling, DM and web-chat suites still pass
-(two test fakes updated to the real `send_message(…, title=…)`
-signature).
-
-**Room tiers over the mesh.** The web `/rooms` shows `[minted]` /
-`[hybrid]` after a gated room (stumpid annotates it), but the mesh
-bridge answers `/rooms` itself and never went through stumpid, so a
-mesh user never saw any tier. It now adds the same labels, only while
-stumpid is active. Tested on both sides.
-
-**Announce-only mesh peers are reachable by DM.** Someone heard only
-by their LXMF announce — who has never messaged this node — can now be
-sent a DM from the web chat; they appear in its "Message someone" list
-under their announced display name. They receive **DMs only**: room
-traffic over LoRa still starts only when they message this node,
-which is what keeps a Stump from pushing chat at every Reticulum app
-in range. The first DM they get from this node carries a one-line hint
-on how to reply (`/msg NICK your text`). They're kept in their own
-registry in `rrc`, not the room roster, so they never show in `/names`,
-never count toward room occupancy, and can't push web users out of the
-40-user ceiling; capped at 20.
-
-The router is handed every announce on the mesh — nodes, propagation
-servers, other apps — so only LXMF delivery destinations (people)
-count: the announce's name hash, the 10 bytes after its 64-byte public
-key, must match this node's own `lxmf.delivery` destination's. Own
-announces are ignored. Each announce refreshes their reachability for
-`MESH_ANNOUNCE_TIMEOUT` seconds (new optional `config.py` setting,
-default 3600) — set it comfortably longer than your clients' announce
-interval.
-
-Moving between the two states never duplicates or loses a DM: a peer
-who messages keeps the exact nick people were DMing, and DM delivery
-continues from the same point; a peer who goes quiet past
-`MESH_PEER_TIMEOUT` but keeps announcing drops back to DM-only, again
-without re-sends. Also fixed on the way: a mesh peer who "left the
-mesh" stayed in `/names` for up to five more minutes; they're now
-removed from the room roster when they leave.
-
-**Status: on single-precision MicroPython, with the device's plugin
-stack, real `urns` Transport registration and device-accurate announce
-packets** — a person's announce makes them reachable; node and own
-announces don't; the web user's DM reaches them over LoRa once, with
-the hint once, and no room traffic; their reply reaches the web user;
-becoming a full peer re-sends nothing and starts room traffic; going
-quiet while announcing returns them to DM-only with no duplicates;
-silence past the announce window makes them unreachable; a name
-colliding with a web user gets a distinct nick; the 20-peer cap holds;
-the room roster is untouched; `/rrc/poll` lists them from any room.
-The earlier mesh-DM suites still pass.
 
 ---
 
@@ -1897,37 +920,83 @@ integration.
 
 ---
 
-## The About page
+## Chained Stumps
 
-`/about` mirrors the public site (labuche-stump.web.app): three views in
-one page — Project (v1) / How to Connect / Apps & Handhelds — switched
-client-side since they're facets of one page, not separate
-destinations. The copy is the site's own, in all three languages, with
-two things only the node can do better: the connect steps name the
-network it actually broadcasts and its live address, and the apps view
-offers each FireFly as a download from the node's SD card (with GitHub
-as the online-only second link). The hardware gallery the site dropped
-is gone here too. Details under "The About and Tools pages now mirror
-the public site", below.
+Stumps can be linked to each other over Wi-Fi — one per apartment, each
+joining the Wi-Fi of the one before it — so messages and files cross
+the chain over Wi-Fi and big transfers never touch LoRa. Only the
+Stumps with a Heltec use the radio. Set up in the Provisioner wizard;
+everything else is in [`docs/CHAIN.md`](final_firmware/docs/CHAIN.md).
 
----
+- **A computer on the same home Wi-Fi** as the first Stump joins the
+  chain without leaving it (and keeps its internet), when that Stump
+  has a chain secret (`CHAIN_LAN = True`, the default).
+- **`#wifi-mesh`** is the chain's chat room: the Stumps, their people,
+  and DMs between them (see *Chat and direct messages*), over Wi-Fi only.
+  `#lora-mesh` is shared too, over the radio first.
+- **A tree, not a line:** a new Stump joins whichever Stump is closest.
+  A CAM whose Stump above goes away for a minute joins another Stump of
+  the same chain in range — never one below itself — and tries its own
+  again at the next restart.
 
-## Plugins
+## Stump on a computer
 
-A plugin is a folder containing `install.py` (with `activate()`) and
-`plugin.json`. Installing one is: drop the folder in, re-run
-`python3 provisioner.py`.
+A Windows, macOS or Linux computer can be a Stump, running the same
+firmware: the same pages, chat, plugins, packs, `/admin` and mesh. A
+Heltec on USB or Bluetooth puts it on the LoRa mesh, and it chains with
+CAM Stumps over Wi-Fi. Set it up with `python3 provisioner.py --pc`
+(Windows: `py provisioner.py --pc`), which asks the CAM wizard's
+questions adapted to a computer and can start it at login.
+
+- **The Heltec, looked after:** unplugged or silent, the dot turns red at
+  once; plugged back in (even under another port name) it reconnects by
+  itself. `/admin` (Radio → *Transport*) has *Reconnect the radio*, the USB ⇄ Bluetooth switch
+  and Bluetooth pairing with the code shown on the page.
+- **On and off:** it runs in the background; `/admin` → *Turn off this
+  Stump*, or double-click **Stop Stump** / **Start Stump** in its folder.
+  Stopping switches the Heltec's radio off first.
+
+Visitors' Wi-Fi, the Heltec, chaining and the limits are in
+[`docs/PC.md`](final_firmware/docs/PC.md); what the Heltec and its
+Bluetooth expect, in
+[`ENGINEERING_NOTES.md`](final_firmware/docs/ENGINEERING_NOTES.md#the-heltec-on-a-computer-and-the-rooms-between-stumps).
+
+## Plugins and packs
+
+A plugin is a folder with an `install.py`; the node loads every one at
+boot. Plugins register with the plugin API (`plugins.py`) — commands
+(`/roll` and `!roll`), gates with an explicit priority, listeners,
+`on_result` hooks, pages under `/p/<plugin>/`, timers, their own
+settings, storage folder and translations — instead of patching core
+functions. The guide for plugin authors is
+[`docs/PLUGINS.md`](final_firmware/docs/PLUGINS.md); packs are in
+[`docs/PACKS.md`](final_firmware/docs/PACKS.md).
+
+A **pack** is the download: one or more plugins, and optionally a theme,
+a bot persona and files for the SD card. Put it in `packs/` next to
+`provisioner.py`; the wizard asks which to install and shows each
+pack's author, licence and file hashes first. Two reference packs ship
+in `packs/`:
+
+- **`tavern`** — `!roll`, `!8ball`, `!slap`, `!seen`, `!quote`, `!vote`
+  (with a results page), a flood guard, a Tavern theme.
+- **`rnfs`** — [rnfs](https://github.com/afit21/rnfs) (the Reticulum
+  file system) on the Tools page, a spotter for rnfs links in chat, and
+  `!shelf`, the place's own index of files.
+
+Off switch: `/admin <password> plugin off <name>` or `/admin` →
+**Plugins**. A plugin that resets or hangs the node while starting is
+switched off at the next boot.
 
 **`fservbot`** — channel bot for RRC, answering set phrases with
 dialogues editable live by an operator.
 
 **`stumpid`** — Ed25519 identity verification, per-room access control,
-and the mesh landing room (above). Wraps `rrc.handle_input` at runtime,
-same as `fservbot` — activates second (alphabetically), becoming the
-outermost wrapper, required for it to gate a write before anything else
-acts on it. `deactivate()` on either plugin refuses to unwind if it
-isn't still the outermost layer, rather than corrupting the handler
-chain.
+and the mesh landing room (above). Its gate runs at priority 10, in the
+band reserved for it, so it sees every line before any other plugin;
+the rest of the node asks it about access through the plugin API's
+`identity` service rather than importing it by name. It can't be
+switched off from `/admin`.
 
 `/auth` protocol: `/auth` requests a challenge, `/auth <pubkey_hex>
 <sig_hex>` answers it. The signed message is the ASCII bytes of the
@@ -1960,7 +1029,8 @@ to it, never from a different Wi-Fi network, even one in the same
 building. This isn't configurable or fixable in firmware — it's what a
 private, router-assigned address is, the same reason two houses' own
 `192.168.1.1` routers can't see each other. The CAM's own hotspot
-(`SSID_NAME` below, fixed at `192.168.4.1`) has no such dependency: it
+(`SSID_NAME` below, at `192.168.4.1`, or `192.168.<n>.1` on a
+chained Stump) has no such dependency: it
 comes up regardless of whether this upstream connection exists at all,
 which is why it's the reliable way to reach the device — join it
 directly rather than relying on whatever network happens to also have
@@ -2071,11 +1141,19 @@ board. Use `manifest_candidates()`, not a bare `rglob`.
 
 ## Testing
 
-Syntax and import chain, per module:
 ```bash
-cd final_firmware
-micropython -c "import barkeep"
+sh scripts/build_micropython.sh ~/micropython-f32     # once: single-precision floats, like the ESP32-S3
+MICROPYTHON=~/micropython-f32/micropython python3 tests/run.py
 ```
+
+The whole suite — chat, access control with real Ed25519, the LoRa
+bridge, the plugin API, safe mode, both packs, JSON answers, file names,
+the Provisioner against a simulated board, computer Stumps with
+simulated Heltecs (USB, Bluetooth, two Stumps over a simulated air) and
+chain failover over a simulated Wi-Fi — runs on every push
+(`.github/workflows/tests.yml`) and before every release. See
+`tests/README.md`; after changing a firmware file, run
+`python3 scripts/update_manifest.py`.
 
 Run the server locally with real sockets:
 ```python
@@ -2087,8 +1165,6 @@ async def main():
     while True: await asyncio.sleep(1)
 asyncio.run(main())
 ```
-
-**Simulate a headless boot** by stubbing `network` and `machine`.
 
 **Multi-party behaviour can't be tested over loopback** — every client
 gets the same IP. Test at the engine level with distinct client ids.
@@ -2118,97 +1194,41 @@ controlled file ages; DM retention against controlled timestamps; and
 the DM thread-routing fix by executing the actual client-side
 JavaScript against a mocked DOM, not just reading it.
 
+**Tested against simulated hardware** (the real firmware on regular
+Python): a Heltec on USB as a simulated RNode on a pseudo-terminal
+(handshake, unplug and replug, a freeze, reconnect, radio off on stop);
+Bluetooth through a stand-in for bleak that behaves like the RNode
+firmware (writes with a reply, silence until the link is encrypted, the
+pairing code over USB); two computer Stumps whose simulated Heltecs talk
+over a simulated air, with no Wi-Fi between them; a CAM finding another
+Stump of its chain through a simulated Wi-Fi scan.
+
 **Needs hardware.** Reticulum/LXMF in live operation with a real mesh
 peer exercising the landing-room redirect; real SD card mounting for
 the home page's branding and the app downloads; which crypto backend (`iram`/`xip`/pure
-Python) a given deployed board actually loads.
+Python) a given deployed board actually loads; Bluetooth pairing with a
+real Heltec end to end; chain failover with three real CAMs.
 
 **Known limits.**
 - All three `AUTH_MODE` values and both room-tier systems are
-  implemented and tested but not field-hardened at release scale — see
+  implemented and tested, but not field-hardened at release scale — see
   the notice at the top of this document.
-- Re-tiering a room stricter doesn't eject existing members.
 - Credit identity is IP-based; not a security boundary.
-- Chat, room-tier policy, and the mesh landing room all reset on
-  reboot, by design, for the identical reason rrc.py's own rooms do.
-- `wifi_serial.py` wraps `sendall` in a 2s blocking timeout — a
-  hardware-validated ESP32-S3 lwIP workaround, left untouched
-  deliberately.
-- The standalone transport role's radio parameters must match whatever
-  your deployed Heltec Bridge units were actually provisioned with via
-  `rnodeconf` — an operational fact invisible from source. See its own
-  section above.
-- **An LXMF sender's address is not proof of identity on this node.**
-  `urns` checks the Ed25519 signature on an incoming LXMF message only
-  when the board has native Ed25519 (`LXMRouter.verify_signatures =
-  ed25519.have_native()`); without it the check is skipped, on the
-  stated grounds that the encryption layer already authenticates the
-  message — which it doesn't, since anyone can encrypt a message *to*
-  this node. Messages whose signature wasn't checked, or whose sender's
-  identity isn't known yet, are delivered all the same. So nothing
-  links a mesh sender's LXMF address to a verified identity
-  automatically; `stumpid`'s `/auth` challenge is the proof, over LXMF
-  as on the web. Found while answering the Android team; the
-  `urns` behaviour itself is unchanged.
-- `--diag` used to include a Heltec Bridge reachability check and a
-  CAM web server reachability check as automated steps — both removed
-  on request after they kept producing new false-failure modes despite
-  several rounds of fixing them (a timeout that only meant this laptop
-  wasn't on the CAM's own hotspot at the moment the check ran; a boot
-  sequence taking close to a minute so an immediate check failed on a
-  perfectly healthy board; a router reboot silently reassigning the
-  very LAN IP being probed). Each fix made the automation more correct
-  without making it simpler, and every failure mode was something a
-  person glancing at a loaded page would resolve in seconds — an
-  automated probe from a laptop that may or may not be on the right
-  network at the exact moment it runs is inherently less reliable here
-  than a human checking directly. `--diag` (CAM role only) now ends
-  with a plain instruction instead: power-cycle the board, then
-  confirm it yourself by browsing to either its LAN IP (found with
-  `--get-ip`) or its own hotspot at `192.168.4.1` — either one loading
-  the BarKeep page confirms the board is up and serving requests
-  correctly. `serial_bridge` and `sd_card` are unaffected and still run
-  as automated checks; the diagnostic suite is now three steps for
-  every role instead of five for the CAM.
-- `provisioner.py`'s own terminal output now bolds and colors exactly
-  the information a technician needs to walk away remembering — the
-  discovered LAN/AP IPs (`--get-ip`, and the wizard's own post-config
-  address lookup, both now sharing one formatting helper instead of
-  drifting into two different layouts for the same data) and the
-  final CERTIFIED (green)/NOT CERTIFIED (yellow) verdict — added
-  directly prompted by a real mixup this session: an IP address
-  needed again later (after a router reboot silently reassigned it)
-  got lost in a wall of otherwise-identical plain text the same way
-  any other line of output would. Gated on `sys.stdout.isatty()`, so
-  these are only ever emitted when a real terminal is on the other
-  end to render the raw ANSI codes — piping this output to a file or
-  a log gets plain text, confirmed directly rather than assumed.
-- `--diag`'s serial bridge and SD card checks both run `mpremote`
-  against the board's USB port from the technician's computer, same as
-  the now-removed Heltec Bridge check used to run a TCP connect from
-  that same computer rather than the CAM. If the board was just
-  power-cycled (or the technician just switched their own Wi-Fi to the
-  CAM's own hotspot to confirm connectivity manually, per the point
-  above), the USB-CDC serial device can take a moment to fully settle
-  on the host OS, and `mpremote` reports
-  this as "failed to access PORT (it may be in use by another
-  program)" — a connectivity failure, not evidence about the SD card
-  at all. This used to be misdiagnosed: any SD card check failure,
-  including this one, triggered "Card looks unusable as-is. Wipe and
-  reformat it now?" — a real, reported case where a board's SD card had
-  already passed a genuine check minutes earlier, and the *only* thing
-  that had changed was the technician's own network switching to reach
-  the Heltec Bridge, not anything about the card. `sd_card_status()`
-  now distinguishes a connectivity failure (mpremote couldn't even
-  reach the board, or `fserv.py` isn't uploaded so `import fserv`
-  itself failed — the pre-existing fallback message already
-  anticipated that case) from a genuine one (the board actually ran
-  `fserv.mount_sd()` and it genuinely returned `False`) — the wipe
-  prompt is offered only for the latter now. Confirmed directly against
-  the exact reported error text: a connectivity failure now prints
-  guidance about closing whatever else has the port open instead of
-  offering to wipe, while a real, board-reported mount failure still
-  offers the wipe prompt exactly as before.
+- Chat history resets on reboot. The access mode and room tiers are
+  kept (`access.json`); `/admin <password> reset-access` goes back to
+  `config.py`.
+- `wifi_serial.py` wraps `sendall` in a 2 s blocking timeout — a
+  hardware-validated ESP32-S3 lwIP workaround, left as it is on purpose.
+- The standalone transport role's radio settings must match whatever
+  the deployed Heltec Bridges were set up with — invisible from source.
+- `--diag` checks the serial link and the SD card; whether the CAM is
+  serving pages is for a person to confirm (browse to it). Why, and the
+  history of the Provisioner's checks:
+  [`ENGINEERING_NOTES.md`](final_firmware/docs/ENGINEERING_NOTES.md#verification-and-the-provisioners-checks).
+
+The field checklist for the current build is
+[`docs/FIELD_TEST.md`](final_firmware/docs/FIELD_TEST.md).
+
 
 ---
 
@@ -2235,6 +1255,14 @@ true today, and worth keeping true: see "What ends up in `/sd/tools/`"
 above for the one place that claim would need re-checking if it ever
 changes (staging a real firmware binary for the browser flasher).
 
+The **rnfs pack** (`packs/rnfs-pack/`) hands out
+[rnfs](https://github.com/afit21/rnfs), written by **Afi Hogan**
+([afit21](https://github.com/afit21)), MIT, together with **Reticulum**
+(as rnspure) and **LXMF** by **Mark Qvist**
+([reticulum.network](https://reticulum.network), Reticulum License),
+unchanged, with their licences. The pack's own page, its `!rnfs` reply
+and its Tools page section credit them in all three languages.
+
 See `LICENSE` for this build's own terms and the full third-party list.
 
 ---
@@ -2255,6 +1283,5 @@ what each decision would need, in `docs/HIDDEN_FEATURES.md`:
   itself is unrelated to the file-deletion feature documented above —
   that's a separate capability that shipped since this entry was
   written, and doesn't touch the awaiting-slot mechanism at all.
-- **`HF-003`** — the Concierge (BarKeep) chat box, moved off the home
-  page. Still works at `/concierge` (and `POST /chat`); nothing links
-  to it.
+- **`HF-003`** — the Concierge (BarKeep) chat box: **brought back** as
+  the librarian (above), on the Files and Billboard pages.

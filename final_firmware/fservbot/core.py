@@ -222,6 +222,9 @@ def active_triggers():
     for t in templates.BASE_TEMPLATES:
         if t not in _disabled and t not in _custom:
             out.append(p + t)
+    for t in getattr(templates, "ARG_TEMPLATES", {}):
+        if t not in _disabled and t not in _custom:
+            out.append(p + t)
     return out
 
 
@@ -258,6 +261,14 @@ def maybe_respond(room, nick, text):
         except Exception as e:
             # A broken template must not take down the chat handler it
             # was called from. Report and stay quiet.
+            print("[fservbot] template '%s' failed: %s" % (trig, e))
+            return None
+    arg_templates = getattr(templates, "ARG_TEMPLATES", {})
+    if trig in arg_templates and trig not in _disabled:
+        rest = text.split(" ", 1)[1] if " " in text else ""
+        try:
+            return arg_templates[trig](_ctx(), rest)
+        except Exception as e:
             print("[fservbot] template '%s' failed: %s" % (trig, e))
             return None
     return None
@@ -330,7 +341,15 @@ def check_op_password(pw):
 # Old name, kept as a direct alias rather than a deprecated wrapper --
 # nothing about the old behaviour changed, only where it's advertised
 # from, so there's no reason to make internal call sites migrate.
-_auth = check_op_password
+def _auth(pw):
+    """check_op_password, behind the wrong-password lockout (guard.py):
+    the chat sets who's asking."""
+    try:
+        import guard
+    except ImportError:
+        return check_op_password(pw)
+    ok, wait = guard.password(lambda: check_op_password(pw))
+    return ok
 
 
 _DENIED = ["wrong password -- or none set yet, in which case editing is "

@@ -150,43 +150,16 @@ element and its JS wiring, and the now-unreferenced
 
 ---
 
-## HF-003 — The Concierge (BarKeep) chat box
+## HF-003 — The Concierge (BarKeep) chat box — **brought back (October 2026)**
 
-**What it is**: a small text-command bot (`menu`, `files`, `balance`,
-…) answered by `_process_command()` in `barkeep.py`, originally the
-first thing on the home page: a greeting line ("Tirez-vous une bûche.
-Je suis Concierge."), a log panel, an input and a Send button.
-
-**Hidden from**: the home page, by request, once the tiles covered
-everything it pointed to and it read as clutter. The greeting line
-moved with it, since it introduces a bot that's no longer on the page.
-The home page is now the logo and title (replaceable by the node's own
-branding, see HOME_BRANDING.md), the language switcher, and a card per
-destination, one per row.
-
-**Still fully functional at**: `GET /concierge` (the same box, on its
-own unlinked page) and `POST /chat` (the endpoint it talks to), for
-anyone who types the address. Nothing links to either.
-
-**Why hidden**: redundant with the tiles for navigation, and its menu
-describes features that a node can now switch off (see Features in the
-README) — it still lists them regardless, which is part of why it's not
-worth promoting as-is.
-
-**Decision an epic would need to make**: either (a) bring it back as a
-real feature — make its menu follow `features.enabled()`, give it a
-tile or nav link, and decide whether it belongs on the home page or its
-own; or (b) remove it — delete `_render_concierge_page()`, the
-`/concierge` and `/chat` routes, `_process_command()`, and the
-`barkeep_greeting`, `barkeep_evening`, `home_say_something`,
-`home_you_label` and `bot_menu_*` strings.
-
-**Code locations**:
-- `barkeep.py` — `_render_concierge_page()`, `_process_command()`, the
-  `GET /concierge` and `POST /chat` branches in `_handle()`, `BOT_NAME`
-- `i18n.py` — `barkeep_greeting`, `barkeep_evening`, `home_say_something`,
-  `home_you_label`, `bot_*`
-- `config.py` — `BOT_NAME` (set by the provisioner's "local greeter" question)
+No longer hidden: BarKeep is the node's **librarian** now. Visitors ask
+it what's on the node in French, English or Spanish, from the firefly
+in the corner of the Files, Billboard and home pages (and `/concierge`,
+still there); `POST /chat` answers, and `!find` asks it from the chat.
+It was hidden because visitors took the box for the people's chat room;
+it now lives where people look for things, labelled with what it does,
+and not on the home page. See *BarKeep, the librarian* in the README
+and Part 4 of `COMMANDS.md`.
 
 ---
 

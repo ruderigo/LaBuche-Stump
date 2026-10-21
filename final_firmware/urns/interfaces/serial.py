@@ -33,6 +33,7 @@ class SerialInterface(Interface):
     def __init__(self, config):
         name = config.get("name", "Serial")
         super().__init__(name)
+        self.bulk_ok = False      # a radio: big transfers stay off it
 
         self.speed = config.get("speed", 115200)
         self.databits = config.get("databits", 8)

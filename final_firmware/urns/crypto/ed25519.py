@@ -55,7 +55,9 @@ def _try_native():
         except ImportError:
             pass
     _native = mod
-    _native_name = name if mod is not None else "pure-python"
+    # A module can name its own backend: Stump on a computer's (docs/PC.md)
+    # says "host", the cryptography package -- fast, not the board's XIP.
+    _native_name = (getattr(mod, "BACKEND", None) or name) if mod is not None else "pure-python"
 
 _try_native()
 
@@ -85,6 +87,8 @@ def backend_name():
 from ..log import log, LOG_NOTICE, LOG_WARNING
 if _native_name == "iram":
     log("Ed25519/X25519: fast IRAM crypto active", LOG_NOTICE)
+elif _native_name == "host":
+    log("Ed25519/X25519: the computer's crypto (cryptography package)", LOG_NOTICE)
 elif _native_name == "xip":
     log("Ed25519/X25519: SLOW crypto path active (native module present but "
         "not the fast IRAM one -- signing/verifying is roughly 80x slower "

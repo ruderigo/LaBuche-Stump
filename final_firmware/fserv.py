@@ -5,11 +5,13 @@
 # RNS/LXMF; SAF (separate module) is the only thing that rides the mesh,
 # and only for small messages, never files.
 #
-# Neutral mode: anyone browses/uploads/downloads. Identified by MAC
-# address (imperfect -- phones randomize it per-network -- but sufficient
-# for a soft reputation economy, not a security boundary). Credit tracked
-# per identifier, class-weighted (a real upload/download economy, not
-# just a counter).
+# Neutral mode: anyone browses/uploads/downloads. Identified by IP
+# address (barkeep's `identifier`, from the connection's peer) -- an
+# earlier version of this comment said MAC address, which the code never
+# used. Imperfect (a phone can get a new address, two people behind one
+# router share one), but sufficient for a soft reputation economy, not a
+# security boundary. Credit tracked per identifier, class-weighted (a
+# real upload/download economy, not just a counter).
 #
 # Regulated mode, same mechanism: a slot gets marked "awaiting hash X" by
 # whoever has permission (e.g. a practitioner), while THEY are physically
@@ -45,6 +47,7 @@
 import uasyncio as asyncio
 import ujson as json
 import os
+import time
 
 import billboard
 
@@ -83,6 +86,115 @@ AWAITING_FILE = SD_MOUNT + "/fserv_awaiting.json"
 # filesystem's own bookkeeping, and enough slack that eviction (below)
 # is never fighting the FAT allocator over the last few blocks.
 MAX_SD_RATIO = 0.75
+DRAIN_MAX = 2 * 1024 * 1024   # a refused upload: read at most this much of it (drain())
+
+# Uploads, fair to everyone (the second step of hardening for the
+# pentest). One visitor -- one address -- can't hog the Stump:
+#   - one upload at a time;
+#   - UPLOAD_FILES_PER_HOUR files an hour;
+#   - UPLOAD_DAY_SHARE of the card's usable room a day (on a free Stump
+#     nothing else stops someone pushing everyone's files out);
+#   - all uploads together at most UPLOAD_MAX_BPS (bytes/s; 0: no cap),
+#     split evenly between those going on: one big upload can't take all
+#     of the CAM's Wi-Fi airtime. On a computer, no cap by default.
+# A file shared in the last FRESH_S is never pushed out to make room for
+# someone else's (507 instead), and a name already taken gets " (2)"
+# rather than replacing what someone shared. Each can be set in config.py.
+UPLOAD_FILES_PER_HOUR = 30
+UPLOAD_DAY_SHARE = 0.25
+FRESH_S = 3600
+_UPLOAD_BPS_CAM = 300 * 1024
+
+
+def _cfg(key, default):
+    try:
+        import config
+        v = getattr(config, key, None)
+    except ImportError:
+        v = None
+    return default if v is None else v
+
+
+def upload_max_bps():
+    try:
+        import stump_host  # noqa: F401
+        default = 0
+    except ImportError:
+        default = _UPLOAD_BPS_CAM
+    return int(_cfg("UPLOAD_MAX_BPS", default))
+
+
+_up_active = {}       # address -> uploads going on
+_up_log = {}          # address -> [[time, bytes]] of the last day's uploads
+_UP_MAX_KEYS = 64
+
+
+def _up_recent(key, now):
+    log = [e for e in _up_log.get(key, []) if now - e[0] < 86400]
+    if log:
+        _up_log[key] = log
+    else:
+        _up_log.pop(key, None)
+    return log
+
+
+def upload_gate(key, length, now=None):
+    """Before an upload from `key` (an address) of `length` bytes is read:
+    None if it may go ahead, else (status, code, i18n key, params)."""
+    now = time.time() if now is None else now
+    if _up_active.get(key, 0) >= 1:
+        return ("429 Too Many Requests", "one_at_a_time", "upload_one_at_a_time", {})
+    log = _up_recent(key, now)
+    if sum(1 for e in log if now - e[0] < 3600) >= int(_cfg("UPLOAD_FILES_PER_HOUR", UPLOAD_FILES_PER_HOUR)):
+        return ("429 Too Many Requests", "too_many", "upload_too_many",
+                {"n": int(_cfg("UPLOAD_FILES_PER_HOUR", UPLOAD_FILES_PER_HOUR))})
+    total, _, _ = get_storage_stats()
+    if length > total * MAX_SD_RATIO:
+        return None            # bigger than the whole card: "full" (507) says it better
+    room = int(total * MAX_SD_RATIO * float(_cfg("UPLOAD_DAY_SHARE", UPLOAD_DAY_SHARE)))
+    if total and sum(e[1] for e in log) + length > room:
+        return ("429 Too Many Requests", "quota", "upload_quota", {"mb": room // (1024 * 1024)})
+    return None
+
+
+def upload_start(key):
+    _up_active[key] = _up_active.get(key, 0) + 1
+
+
+def upload_end(key, written, now=None):
+    n = _up_active.get(key, 0) - 1
+    if n > 0:
+        _up_active[key] = n
+    else:
+        _up_active.pop(key, None)
+    if written:
+        _up_log.setdefault(key, []).append([time.time() if now is None else now, written])
+        while len(_up_log) > _UP_MAX_KEYS:
+            _up_log.pop(next(iter(_up_log)))
+
+
+def uploads_now():
+    return sum(_up_active.values())
+
+
+def free_name(directory, fname):
+    """fname, or "name (2).ext", "name (3).ext"... if it's taken: an upload
+    never replaces a file someone else shared."""
+    def taken(n):
+        try:
+            os.stat(directory + "/" + n)
+            return True
+        except OSError:
+            return False
+    if not taken(fname):
+        return fname
+    dot = fname.rfind(".")
+    base, ext = (fname[:dot], fname[dot:]) if dot > 0 else (fname, "")
+    for i in range(2, 1000):
+        n = "%s (%d)%s" % (base, i, ext)
+        if not taken(n):
+            return n
+    return fname
 
 # Credit weight per file class -- now operator-configurable via config.py
 # rather than edited here. The fallbacks below keep this module working
@@ -127,6 +239,8 @@ def mount_sd():
                 pass  # already exists
         sd_ok = True
         print("[fserv] SD mounted at", SD_MOUNT)
+        sweep_tmp()
+        migrate_tools()
     except Exception as e:
         print("[fserv] SD mount FAILED:", e)
         sd_ok = False
@@ -139,6 +253,32 @@ def _load_json(path, default):
             return json.load(f)
     except (OSError, ValueError):
         return default
+
+
+def sweep_tmp(paths=None):
+    """At start-up: the temporary files of saves a power cut interrupted
+    (the credit ledger, the billboard). Each save writes <file>.tmp and
+    then renames it over <file>, so a <file>.tmp still there is a save
+    that never finished: the <file> beside it is the last whole one.
+    Only those names -- never anything else that happens to end in .tmp
+    (a visitor's upload can). Returns how many were removed."""
+    if paths is None:
+        paths = [LEDGER_FILE, AWAITING_FILE]
+        try:
+            import billboard
+            paths.append(billboard.storage_file())
+        except Exception:
+            pass
+    n = 0
+    for p in paths:
+        try:
+            os.remove(p + ".tmp")
+            n += 1
+        except OSError:
+            pass
+    if n:
+        print("[fserv] removed %d unfinished save(s) left by a power cut" % n)
+    return n
 
 
 def _save_json(path, data):
@@ -159,12 +299,23 @@ def _save_json(path, data):
     failed even when the file itself made it onto the card intact.
     Every caller here already treats "couldn't persist this" as
     recoverable rather than fatal to the surrounding request."""
+    # Whole or not at all: written to a temporary file, then renamed over
+    # the old one (MicroPython's FAT rename replaces, as billboard.py's
+    # saves rely on). Writing in place meant a power cut mid-write left a
+    # truncated file -- and an unreadable ledger reads as empty, so
+    # everyone's credits were gone.
+    tmp = path + ".tmp"
     try:
-        with open(path, "w") as f:
+        with open(tmp, "w") as f:
             json.dump(data, f)
+        os.rename(tmp, path)
         return True
     except OSError as e:
         print("[fserv] failed to save", path, "--", e)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
         return False
 
 
@@ -187,9 +338,76 @@ def guess_class(filename):
     return "other"
 
 
+# What kind of file, for finding things (the Files page's filters,
+# BarKeep, /files.json?cat=). Broader than guess_class(), which sets
+# credit costs and stays as it is.
+KINDS = (
+    ("video", ("mp4", "mkv", "avi", "mov", "webm", "m4v")),
+    ("music", ("mp3", "flac", "wav", "ogg", "m4a", "opus", "aac")),
+    ("document", ("pdf", "txt", "doc", "docx", "epub", "md", "html", "htm", "odt", "rtf")),
+    ("image", ("jpg", "jpeg", "png", "gif", "webp", "avif", "svg", "heic")),
+)
+
+
+def kind(filename):
+    """video, music, document, image or other."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    for k, exts in KINDS:
+        if ext in exts:
+            return k
+    return "other"
+
+
+def query_files(words=None, cat=None, sort="newest", limit=5):
+    """The shelf, filtered and sorted: [{"name", "size", "mtime", "cat"}].
+    words: topic words (folded, see librarian.py); a file matches when its
+    folded name holds one of them (or the start of a long one), and files
+    matching more words come first. cat: one kind() value. sort: newest,
+    oldest, name, small or large. Reads the folder listing and each file's
+    size and date, nothing else."""
+    import librarian
+    rows = []
+    for n in _list_files():
+        c = kind(n)
+        if cat and c != cat:
+            continue
+        score = 0
+        if words:
+            folded = librarian.fold(n)
+            for w in words:
+                if librarian.stem(w) in folded:
+                    score += 1
+            if not score:
+                continue
+        try:
+            st = os.stat(SHARED_DIR + "/" + n)
+            size, mtime = st[6], st[8]
+        except OSError:
+            size, mtime = 0, 0
+        rows.append({"name": n, "size": size, "mtime": mtime, "cat": c, "_s": score})
+    # One sort, best matches first, then the order asked for (MicroPython's
+    # sort isn't stable, so two passes wouldn't keep the first).
+    if sort == "name":
+        rows.sort(key=lambda r: (-r["_s"], r["name"].lower()))
+    elif sort == "small":
+        rows.sort(key=lambda r: (-r["_s"], r["size"]))
+    elif sort == "large":
+        rows.sort(key=lambda r: (-r["_s"], -r["size"]))
+    elif sort == "oldest":
+        rows.sort(key=lambda r: (-r["_s"], r["mtime"]))
+    else:
+        rows.sort(key=lambda r: (-r["_s"], -r["mtime"]))
+    for r in rows:
+        del r["_s"]
+    return rows[:limit] if limit else rows
+
+
 def credit_balance(identifier):
     if not sd_ok:
         return 0
+    if str(identifier).startswith("p:"):         # a registered profile (profiles.py)
+        import profiles
+        return profiles.balance(identifier[2:])
     return _ledger().get(identifier, 0)
 
 
@@ -200,10 +418,32 @@ def credit_add(identifier, amount):
     # every upload AND every download, for no result.
     if not sd_ok or not CREDITS_ENABLED or amount == 0:
         return 0
+    if str(identifier).startswith("p:"):
+        import profiles
+        return profiles.add_credits(identifier[2:], amount)
     ledger = _ledger()
     ledger[identifier] = ledger.get(identifier, 0) + amount
     _save_json(LEDGER_FILE, ledger)
     return ledger[identifier]
+
+
+def move_credits(src, dst):
+    """What `src` has in the ledger goes to `dst` (a visitor's address to
+    its browser ID, a visitor's balance into the profile they create).
+    Returns the amount moved."""
+    if not sd_ok:
+        return 0
+    ledger = _ledger()
+    amount = ledger.pop(src, 0)
+    if not amount:
+        return 0
+    if str(dst).startswith("p:"):
+        import profiles
+        profiles.add_credits(dst[2:], amount)
+    else:
+        ledger[dst] = ledger.get(dst, 0) + amount
+    _save_json(LEDGER_FILE, ledger)
+    return amount
 
 
 def mark_awaiting(hash_hex, note=""):
@@ -218,7 +458,7 @@ def mark_awaiting(hash_hex, note=""):
     return True
 
 
-async def stream_to_file(reader, dest, length, chunk=16384):
+async def stream_to_file(reader, dest, length, chunk=16384, max_bps=None):
     """
     Streams `length` bytes from an open socket reader straight into a
     file on the SD card, `chunk` bytes at a time -- the upload never
@@ -244,6 +484,7 @@ async def stream_to_file(reader, dest, length, chunk=16384):
     Returns (ok, bytes_written).
     """
     written = 0
+    t0 = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
     try:
         with open(dest, "wb") as f:
             # Accumulate into a buffer and flush in large blocks rather
@@ -268,12 +509,27 @@ async def stream_to_file(reader, dest, length, chunk=16384):
                 if len(buf) >= chunk:
                     f.write(buf)
                     buf = bytearray()
+                    cap = upload_max_bps() if max_bps is None else max_bps
+                    if cap:
+                        # Its share of the cap: reading slower makes the
+                        # sender slow down (TCP), and the airtime is shared.
+                        share = cap // max(1, uploads_now())
+                        due = written * 1000 // max(1, share)
+                        try:
+                            spent = time.ticks_diff(time.ticks_ms(), t0)
+                        except AttributeError:
+                            spent = int(time.time() * 1000) - t0
+                        if due > spent:
+                            await asyncio.sleep(min(2000, due - spent) / 1000)
             if buf:
                 f.write(buf)
     except Exception as e:
         _discard_partial(dest)
         print("[fserv] upload failed:", e)
         return False, written
+    except BaseException:
+        _discard_partial(dest)     # cut off (conn.py's reaper): nothing kept
+        raise
 
     if written < length:
         _discard_partial(dest)
@@ -298,8 +554,15 @@ async def drain(reader, length, chunk=2048):
     but there's no reason to hold any of it -- and no reason to let a
     rejected upload exhaust memory, which is exactly what buffering it
     first would do.
+
+    At most DRAIN_MAX: a refused upload claiming gigabytes isn't read to
+    its end (minutes of the Wi-Fi's airtime) -- the answer goes out and
+    the connection closes; a browser may then show a reset instead of the
+    message, a price worth paying.
     """
     read = 0
+    if length > DRAIN_MAX:
+        length = DRAIN_MAX
     while read < length:
         want = length - read
         if want > chunk:
@@ -326,14 +589,218 @@ def list_fw():
         return []
 
 
-def list_tools():
-    """Technician tools available for download from this node."""
+def _is_dir(path):
+    try:
+        return os.stat(path)[0] & 0x4000 != 0
+    except OSError:
+        return False
+
+
+def list_tools(section=""):
+    """The files in tools/ (section "") or in one of its folders."""
+    if not sd_ok:
+        return []
+    d = TOOLS_DIR + ("/" + section if section else "")
+    try:
+        return sorted(n for n in os.listdir(d) if not _is_dir(d + "/" + n))
+    except OSError:
+        return []
+
+
+# The Tools page is sectioned: each tool in its own folder of tools/,
+# with a README.md that says what it is (its first "# " line is the
+# section's title, the first paragraph under it the summary). Loose files
+# in tools/ itself are still offered, under "Other files". A README in
+# the visitor's language, README.fr.md / README.es.md, is shown instead
+# when there is one.
+README = "README.md"
+
+
+def _is_readme(n):
+    return n == README or (n.startswith("README.") and n.endswith(".md"))
+README_MAX = 8192            # shown on the page up to this size
+
+
+def tool_sections(lang=None):
+    """[{"dir", "title", "summary", "readme", "readme_file", "files":
+    [(name, size)]}], folders in name order, then the loose files (dir "")
+    if any. "readme" is the README's text (up to README_MAX), in `lang`
+    when the folder has one (README.<lang>.md), or None; the READMEs
+    aren't in "files"."""
     if not sd_ok:
         return []
     try:
-        return sorted(os.listdir(TOOLS_DIR))
+        names = sorted(os.listdir(TOOLS_DIR))
     except OSError:
         return []
+    out = []
+    for d in [n for n in names if _is_dir(TOOLS_DIR + "/" + n)] + [""]:
+        base = TOOLS_DIR + ("/" + d if d else "")
+        files = []
+        names_here = list_tools(d)
+        for n in names_here:
+            if d and _is_readme(n):
+                continue
+            try:
+                files.append((n, os.stat(base + "/" + n)[6]))
+            except OSError:
+                pass
+        rname = None
+        if d:
+            local = "README.%s.md" % lang if lang else None
+            rname = local if local in names_here else (README if README in names_here else None)
+        text = _read_readme(base + "/" + rname) if rname else None
+        if not files and not text:
+            continue
+        title, summary = _readme_head(text) if text else (None, "")
+        out.append({"dir": d, "title": title or d, "summary": summary,
+                    "readme": text, "readme_file": rname, "files": files})
+    return out
+
+
+def _read_readme(path):
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(README_MAX)
+        return raw.decode("utf-8", "ignore") if hasattr(raw, "decode") else raw
+    except OSError:
+        return None
+
+
+def _readme_head(text):
+    """(title, summary): the first "# " line, and the first paragraph of
+    plain text after it."""
+    title, para, seen_title = None, [], False
+    for line in text.split("\n"):
+        t = line.strip()
+        if title is None and t.startswith("# "):
+            title, seen_title = t[2:].strip(), True
+            continue
+        if not t:
+            if para:
+                break
+            continue
+        if t.startswith(("#", "```", "|", "-", "*", ">")) or t[0].isdigit() and t[1:2] == ".":
+            if para:
+                break
+            continue
+        if seen_title or title is None:
+            para.append(t)
+    return title, " ".join(para)
+
+
+# Cards provisioned before the Tools page had sections keep every tool
+# loose in tools/. At mount they're moved into their folders (a rename,
+# nothing copied), so the page is tidy and the Provisioner finds them in
+# place instead of copying them again at ~1 KB/s.
+_MIGRATE = (
+    ("provisioner", ("provisioner.py", "LICENSE", "Stump_Beta_A.zip"), ()),
+    ("flasher", ("esptool-bundle.js", "esptool-js-LICENSE.txt"), ()),
+    ("firefly", (), ("FireFly-",)),
+    ("rnfs", ("reticulum-LICENSE.txt",), ("rnfs-", "rnfs_", "lxmf-", "rnspure-")),
+)
+_MIGRATE_RENAME = {"README.md": ("provisioner", "Stump-README.md"),
+                   "rnfs-INSTALL.txt": ("rnfs", README)}
+
+
+def migrate_tools():
+    """Moves the old, loose tools into their folders. Returns how many."""
+    try:
+        names = [n for n in os.listdir(TOOLS_DIR) if not _is_dir(TOOLS_DIR + "/" + n)]
+    except OSError:
+        return 0
+    moved = 0
+    for n in names:
+        dest = _MIGRATE_RENAME.get(n)
+        if dest is None:
+            for d, exact, prefixes in _MIGRATE:
+                if n in exact or any(n.startswith(p) for p in prefixes):
+                    dest = (d, n)
+                    break
+        if dest is None:
+            continue
+        d, new = dest
+        try:
+            os.mkdir(TOOLS_DIR + "/" + d)
+        except OSError:
+            pass
+        src, dst = TOOLS_DIR + "/" + n, TOOLS_DIR + "/" + d + "/" + new
+        try:
+            try:
+                os.stat(dst)
+                os.remove(src)        # the folder already has its own copy
+            except OSError:
+                os.rename(src, dst)
+            moved += 1
+        except OSError as e:
+            print("[fserv] tools: couldn't move", n, e)
+    if moved:
+        print("[fserv] tools: moved %d file(s) into their folders" % moved)
+    return moved
+
+
+def _tool_rel_ok(rel):
+    parts = rel.split("/")
+    return 1 <= len(parts) <= 2 and not any(p in ("", ".", "..") for p in parts)
+
+
+def delete_tool(rel):
+    """Deletes one file from tools/ ("name" or "folder/name"), from
+    /admin. Strict: exactly that path, no fallback. True if deleted."""
+    if not sd_ok or not _tool_rel_ok(rel):
+        return False
+    path = TOOLS_DIR + "/" + rel
+    if _is_dir(path):
+        return False
+    try:
+        os.remove(path)
+        return True
+    except OSError:
+        return False
+
+
+def delete_tool_section(name):
+    """Deletes a whole section, its folder and every file in it (one
+    level: sections don't nest). Returns how many files went."""
+    if not sd_ok or not name or "/" in name or name in (".", ".."):
+        return 0
+    d = TOOLS_DIR + "/" + name
+    if not _is_dir(d):
+        return 0
+    n = 0
+    try:
+        for f in os.listdir(d):
+            try:
+                os.remove(d + "/" + f)
+                n += 1
+            except OSError:
+                pass
+        os.rmdir(d)
+    except OSError:
+        pass
+    return n
+
+
+def tool_path(rel):
+    """The card path for a tools-relative name ("rnfs/x.whl" or "x"), or
+    None if it isn't one: at most one folder deep, no "..". A name not
+    found in its folder is looked for loose in tools/ (a card the
+    migration hasn't reached)."""
+    parts = rel.split("/")
+    if len(parts) > 2 or any(p in ("", ".", "..") for p in parts):
+        return None
+    path = TOOLS_DIR + "/" + rel
+    if len(parts) == 2:
+        try:
+            os.stat(path)
+        except OSError:
+            alt = TOOLS_DIR + "/" + parts[1]
+            try:
+                os.stat(alt)
+                return alt
+            except OSError:
+                pass
+    return path
 
 
 # The FireFly apps a node can hand out, found in TOOLS_DIR by name so a
@@ -358,23 +825,22 @@ def find_apps():
     apps present -- the highest version of each, compared as numbers
     (0.2.11 beats 0.2.9)."""
     found = {}
-    for name in list_tools():
-        for key, prefix, suffix in APPS:
-            if name.startswith(prefix) and name.endswith(suffix):
-                version = name[len(prefix):-len(suffix)]
-                if not version:
-                    continue
-                best = found.get(key)
-                if best is None or _version_key(version) > _version_key(best["version"]):
-                    try:
-                        size = os.stat(TOOLS_DIR + "/" + name)[6]
-                    except OSError:
+    for sec in tool_sections():
+        for name, size in sec["files"]:
+            for key, prefix, suffix in APPS:
+                if name.startswith(prefix) and name.endswith(suffix):
+                    version = name[len(prefix):-len(suffix)]
+                    if not version:
                         continue
-                    found[key] = {"file": name, "version": version, "size": size}
+                    best = found.get(key)
+                    if best is None or _version_key(version) > _version_key(best["version"]):
+                        found[key] = {"file": (sec["dir"] + "/" if sec["dir"] else "") + name,
+                                      "name": name, "version": version, "size": size}
     return found
 
 
 def is_app_file(name):
+    name = name.rsplit("/", 1)[-1]
     return any(name.startswith(p) and name.endswith(s) for _, p, s in APPS)
 
 
@@ -478,24 +944,28 @@ def save_home_config(place, height, hidden):
 
 
 def home_status(lang):
-    """For /admin: what the node sees in home/, in plain words."""
+    """For /admin: what the node sees in home/, in plain words, in the
+    reader's language."""
+    import i18n
     if not sd_ok:
-        return "no SD card"
+        return i18n.t("home_st_no_sd", lang)
     files = _home_html_files()
     if files is None:
-        return "no home folder on the SD card"
+        return i18n.t("home_st_no_folder", lang)
     b = home_branding(lang)
     if b is None and home_config()["hidden"] and files:
-        return "hidden from the home page (turned off in /admin) -- the Stump logo shows"
+        return i18n.t("home_st_hidden", lang)
     if b is not None:
-        how = "a full page, in a %d px frame" % b["height"] if b["kind"] == "page" else "a section"
-        return "home/%s: %s, placed %s" % (b["name"], how, b["place"])
+        how = (i18n.t("home_st_page", lang, height=b["height"]) if b["kind"] == "page"
+               else i18n.t("home_st_section", lang))
+        return i18n.t("home_st_in_use", lang, name=b["name"], how=how,
+                      place=i18n.t("home_st_place_" + b["place"], lang))
     if not files:
-        return "home/ has no .html file"
+        return i18n.t("home_st_no_html", lang)
     big = [n for n in files if n.lower().startswith("home") and _size(HOME_DIR + "/" + n) > HOME_MAX_BYTES]
     if big:
-        return "home/%s is over %d KB: ignored (a piece of HTML must stay under that)" % (big[0], HOME_MAX_BYTES // 1024)
-    return "home/ has several .html files (%s): name the one to use home.html" % ", ".join(files)
+        return i18n.t("home_st_too_big", lang, name=big[0], kb=HOME_MAX_BYTES // 1024)
+    return i18n.t("home_st_several", lang, names=", ".join(files))
 
 
 def _size(path):
@@ -537,7 +1007,8 @@ def get_storage_stats():
         free = bsize * s[3]
         used = total - free
         return (total, free, used / total if total > 0 else 1.0)
-    except Exception:
+    except Exception as e:
+        print("[fserv] couldn't read the card's size:", repr(e))
         return (0, 0, 1.0)
 
 
@@ -580,6 +1051,15 @@ def make_room_fifo(incoming_length):
         except OSError:
             continue
     entries.sort(key=lambda e: e[0])   # oldest mtime first
+
+    # Shared in the last FRESH_S: not pushed out for someone else's upload
+    # (one visitor flooding the card can't wipe what was just shared). A
+    # time in the future -- the board's clock started again from 2000
+    # after a power cut, with no network time -- doesn't count as fresh,
+    # or nothing could ever make room.
+    now = time.time()
+    fresh = int(_cfg("FRESH_S", FRESH_S))
+    entries = [e for e in entries if not (0 <= now - e[0] < fresh)]
 
     for mtime, size, path in entries:
         try:

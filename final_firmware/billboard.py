@@ -400,8 +400,10 @@ def _prune_and_write(new_entry=None):
         else:
             taken.add(pid)
         kept.append((sig, text, body, pid))
+    new_id = None
     if new_entry is not None:
-        kept.append((new_entry[0], new_entry[1], new_entry[2], _new_post_id(now, taken)))
+        new_id = _new_post_id(now, taken)
+        kept.append((new_entry[0], new_entry[1], new_entry[2], new_id))
     # Safety-valve ceiling only, applied after time-based pruning above
     # -- oldest-first, matching MAX_DMS_PER_USER's own eviction order
     # and its own reasoning for why this is secondary, not primary.
@@ -419,10 +421,14 @@ def _prune_and_write(new_entry=None):
         # Best-effort: a full card or similar mid-rewrite failure
         # leaves the original file untouched rather than risking it --
         # the next post's prune attempt just tries again.
+        # The new post (if any) was NOT saved: say so, rather than let the
+        # poster believe it was.
         try:
             os.remove(tmp)
         except OSError:
             pass
+        return None
+    return new_id
 
 
 def _clean_title(text):
@@ -435,15 +441,20 @@ def _append_entry(title, body="", identifier="unknown"):
     A post with a body but no title (a client that only filled one
     field) takes the body's first line as its title rather than being
     rejected. Tabs become spaces everywhere, since tab is the field
-    separator on disk; the body keeps its line breaks."""
+    separator on disk; the body keeps its line breaks.
+
+    Returns (True, new_id), or (False, reason): "title_required" (nothing
+    to post) or "storage" (couldn't be written -- it wasn't saved)."""
     body = body.replace("\r", "").replace("\t", " ").strip()[:MAX_BODY_LEN]
     title = _clean_title(title)[:MAX_TITLE_LEN]
     if not title and body:
         title = _clean_title(body.split("\n", 1)[0])[:MAX_TITLE_LEN]
     if not title:
-        return False
-    _prune_and_write((_signature(identifier), title, body))
-    return True
+        return False, "title_required"
+    new_id = _prune_and_write((_signature(identifier), title, body))
+    if new_id is None:
+        return False, "storage"
+    return True, new_id
 
 
 def delete_entry(ts_str):
@@ -523,25 +534,80 @@ def delete_entry(ts_str):
     return found
 
 
-def _post_item(sig, title, body):
+def _live(ts, now=None):
+    """False for a post past its 72 hours (by a set clock); the page and
+    the search only show live ones, whether or not a rewrite has pruned
+    the file yet."""
+    if ts is None:
+        return True
+    now = time.time() if now is None else now
+    floor = _clock_floor()
+    if floor is not None and now < floor:
+        return True                     # no trustworthy clock: nothing expires
+    return now - ts <= BILLBOARD_TTL_SECONDS
+
+
+def search_entries(words=None, limit=3):
+    """Live posts whose title or body holds one of `words` (folded, see
+    librarian.py), most matches first, then newest: [{"id", "title",
+    "body", "snippet"}]. No words: the newest posts."""
+    import librarian
+    out = []
+    entries = _read_entries()
+    for i, (sig, title, body, ts, pid) in enumerate(entries):
+        if not _live(ts):
+            continue
+        score, snippet = 0, ""
+        if words:
+            ft, fb = librarian.fold(title), librarian.fold(body)
+            for w in words:
+                st = librarian.stem(w)
+                if st in ft:
+                    score += 2
+                elif st in fb:
+                    score += 1
+                    if not snippet:
+                        snippet = _snippet(body, w)
+            if not score:
+                continue
+        out.append((score, i, {"id": pid, "title": title, "body": body,
+                               "snippet": snippet or body[:80]}))
+    out.sort(key=lambda t: (-t[0], -t[1]))
+    return [t[2] for t in out[:limit]]
+
+
+def _snippet(body, word):
+    """About 80 characters of body around the first place `word` is."""
+    import librarian
+    at = librarian.fold(body).find(librarian.stem(word))
+    start = max(0, at - 30)
+    text = body[start:start + 80].replace("\n", " ")
+    return ("…" if start else "") + text + ("…" if start + 80 < len(body) else "")
+
+
+def _post_item(sig, title, body, pid=None):
     """One billboard row. With a body, the title is a native
     <details>/<summary> toggle -- tap to expand, no JavaScript, works
     on the kiosk and with screen readers. Without one, a plain row:
-    nothing to expand, so nothing that looks tappable."""
+    nothing to expand, so nothing that looks tappable. data-ts and
+    data-title are for the page's search and sort (in the browser)."""
     head = _esc(title) + " <small>&mdash; " + _esc(sig) + "</small>"
+    li = "<li data-ts='" + _esc(pid or "0") + "' data-title='" + _esc(title) + "'>"
     if not body:
-        return "<li>" + head + "</li>"
-    return ("<li><details class='post'><summary>" + head + "</summary>"
+        return li + head + "</li>"
+    return (li + "<details class='post'><summary>" + head + "</summary>"
             "<div class='post-body'>" + _esc(body) + "</div></details></li>")
 
 
-def _render_page(lang=None):
+def _render_page(lang=None, tools="", after_list=""):
+    """The billboard. tools: HTML put above the list (barkeep.py's search,
+    sort and Ask BarKeep); after_list: inside the panel, after the list."""
     if lang is None:
         lang = i18n.DEFAULT_LANG
-    entries = _read_entries()[-MAX_ENTRIES_SHOWN:]
+    entries = [e for e in _read_entries() if _live(e[3])][-MAX_ENTRIES_SHOWN:]
     entries.reverse()  # newest first
     items = "".join(
-        _post_item(sig, title, body) for sig, title, body, ts, pid in entries
+        _post_item(sig, title, body, pid) for sig, title, body, ts, pid in entries
     ) or ("<li>" + i18n.t("billboard_nothing_yet", lang) + "</li>")
     # Every translated string that lands inside a quoted attribute goes
     # through _esc -- an apostrophe in a translation would otherwise end
@@ -557,8 +623,9 @@ def _render_page(lang=None):
         + _esc(i18n.t("billboard_body_placeholder", lang)) + "'></textarea>"
         "<button type='submit'>" + i18n.t("billboard_post_button", lang) + "</button>"
         "</form>"
+        + tools +
         "<div class='panel'>"
-        "<ul>" + items + "</ul>"
+        "<ul class='board'>" + items + "</ul>" + after_list +
         "</div>"
     )
 

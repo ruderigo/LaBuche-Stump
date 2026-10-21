@@ -6,9 +6,9 @@
 from lora_boards import LORA_BOARDS
 
 # ---- Node settings ----
-WIFI_SSID = 'YOUR_WIFI_NAME'
-WIFI_PASS = 'YOUR_WIFI_PASSWORD'
-NODE_NAME = 'Labuche'
+WIFI_SSID = "Bob's Glitch"
+WIFI_PASS = 'SalutComment'
+NODE_NAME = 'LaBuche'
 
 # The walk-up hotspot's own name -- separate from NODE_NAME (the mesh
 # identity's display name) on purpose; these are different concerns.
@@ -50,7 +50,7 @@ BOT_NAME = 'Concierge'
 # with a paragraph and do it again for the next three words. A greeting
 # on first contact says who this node is and what it offers; after that
 # the conversation is the point.
-MESH_GREETING = 'Bonjour Hi! I am Concierge, a bot maintaining this Stump. Type !help for more. Tire toi une buche! https://LaBuche-Stump.web.app'
+MESH_GREETING = 'Bonjour Hi! I am Concierge, a bot, taking care of The Stump. https://LaBuche-Stump.web.app'
 MESH_GREETING_MAX = 200
 
 # How often this node announces its LXMF identity to the mesh, in
@@ -74,6 +74,14 @@ REANNOUNCE_INTERVAL = 120
 # if a deployment specifically needs to tune the throttle.
 ANNOUNCE_RATE_MAX = 6
 ANNOUNCE_RATE_WINDOW = 60
+
+# Speed limits for people (guard.py): chat lines that reach others (web
+# and mesh) -- CHAT_BURST at once, then one every CHAT_EVERY seconds --
+# and billboard posts per visitor per minute. Wrong passwords (/admin,
+# the fserv bot) lock that visitor out for 30 s after 5, doubling each time.
+CHAT_EVERY = 2
+CHAT_BURST = 3
+BILLBOARD_POSTS_PER_MIN = 3
 
 WEBREPL_PASSWORD = "changeme"
 
@@ -141,6 +149,16 @@ CONFIG = {
     ],
 }
 
+# ---- Chain: Stumps linked to each other over Wi-Fi (docs/CHAIN.md) ----
+# Big transfers between chained Stumps go over Wi-Fi, never LoRa.
+CHAIN_ENABLED = False
+CHAIN_UPLINK_SSID = ""     # the Wi-Fi name of the Stump before this one; "" = this is the first (root)
+CHAIN_UPLINK_PASS = ""
+CHAIN_SUBNET = 4           # this Stump's own Wi-Fi is 192.168.<this>.1: a different number on each Stump
+CHAIN_CHANNEL = 11         # first Stump only: the Wi-Fi channel the whole chain uses
+CHAIN_SECRET = ""          # the same on every Stump of the chain, so visitors can't join it
+CHAIN_LAN = True           # first Stump, with a secret: computers on the Wi-Fi it joined (WIFI_SSID) join there too
+
 # ---- Sensor Network config ----
 SENSOR_HUB = ""
 
@@ -157,15 +175,12 @@ CREDITS_ENABLED = False
 CREDIT_WEIGHTS = {'video': 3, 'music': 2, 'document': 1, 'other': 1}
 
 # ---- Plugin settings (added by the Provisioner) ----
-AUTH_ADMIN_PASSWORD = 'CHANGE_ME'
+AUTH_ADMIN_PASSWORD = 'TeK'
 AUTH_MODE = 'open'
-FSERVBOT_OP_PASSWORD = 'CHANGE_ME'
-
-# ---- LXMF propagation node: store-and-forward (added by the Provisioner) ----
-PROPAGATION_NODE = True
+FSERVBOT_OP_PASSWORD = 'TeK_Knoh'
 
 # ---- Features offered: any of chat, billboard, files, about (added by the Provisioner) ----
-FEATURES = ['chat', 'billboard', 'files', 'about']
+FEATURES = ['chat', 'billboard', 'files']
 
 # ---- Site theme: amber, phosphor, oled or paper (added by the Provisioner) ----
-THEME = 'amber'
+THEME = 'paper'

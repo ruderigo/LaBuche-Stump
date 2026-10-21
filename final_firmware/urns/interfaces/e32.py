@@ -64,6 +64,7 @@ class E32Interface(SerialInterface):
 
         # Now call parent — opens UART, sets online=True, starts interface
         super().__init__(config)
+        self.bulk_ok = False      # a radio: big transfers stay off it
 
         # Override bitrate with air rate (UART baud is irrelevant for throughput)
         self.bitrate = config["_e32_bitrate"]

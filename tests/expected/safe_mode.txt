@@ -1,0 +1,26 @@
+== reset
+
+== culprit
+[plugin] SAFE MODE: dice was starting when the node last stopped -- switched off (turn it back on in /admin)
+RUNNING ['fservbot', 'stumpid']
+SAFE {'on': False, 'reason': 'starting', 'culprit': 'dice', 'stable': False}
+OFF {'off': ['dice'], 'auto_off': {'dice': 'the node restarted while it was starting'}}
+MARKER None
+== normal
+RUNNING ['fservbot', 'stumpid']
+SAFE {'on': False, 'reason': '', 'culprit': None, 'stable': False}
+OFF {'off': ['dice'], 'auto_off': {'dice': 'the node restarted while it was starting'}}
+MARKER None
+== reset
+
+== running
+[plugin] SAFE MODE: the node stopped within 60 s of starting last time -- loading only stumpid, fservbot this boot
+RUNNING ['fservbot', 'stumpid']
+SAFE {'on': True, 'reason': 'running', 'culprit': None, 'stable': False}
+OFF {'off': [], 'auto_off': {}}
+MARKER None
+== normal
+RUNNING ['dice', 'fservbot', 'stumpid']
+SAFE {'on': False, 'reason': '', 'culprit': None, 'stable': False}
+OFF {'off': [], 'auto_off': {}}
+MARKER None
