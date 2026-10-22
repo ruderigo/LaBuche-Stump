@@ -11,7 +11,21 @@ check it (`sha256sum -c SHA256SUMS`, `gh attestation verify`, see
 What changed: [CHANGELOG.md](CHANGELOG.md). The stable line is
 [LaBuche-Stump](https://github.com/ruderigo/LaBuche-Stump).
 
-![demo](demo.gif)
+<p align="center">
+  <img src="1a.gif" alt="Demo 1a" width="500" /><br>
+</p>
+
+<p align="center">
+  <img src="1b.gif" alt="Demo 1b" width="500" /><br>
+</p>
+
+<p align="center">
+  <img src="1c.gif" alt="Demo 1c" width="500" /><br>
+</p>
+
+<p align="center">
+  <img src="1d.gif" alt="Demo 1d" width="500" /><br>
+</p>
 
 ## What a Stump is
 
