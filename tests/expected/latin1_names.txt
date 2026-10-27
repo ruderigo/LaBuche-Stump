@@ -1,8 +1,0 @@
-raw UTF-8 café.txt          -> HTTP/1.1 200 OK | stored as: ['café.txt']
-raw Latin-1 thé.txt       -> HTTP/1.1 200 OK | stored as: ['thé.txt']
-page: th%C3%A9.txt + url     -> HTTP/1.1 200 OK | stored as: ['thé (2).txt']
-page: Japanese name + url    -> HTTP/1.1 200 OK | stored as: ['日本.jpg']
-page: emoji + url            -> HTTP/1.1 200 OK | stored as: ['🔥fire.png']
-page: '100%+1.txt' encoded   -> HTTP/1.1 200 OK | stored as: ['100%+1.txt']
-raw '100%.txt', no encoding  -> HTTP/1.1 200 OK | stored as: ['100%.txt']
-Latin-1 byte in the path   -> HTTP/1.1 200 OK
