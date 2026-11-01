@@ -111,6 +111,12 @@ login altogether: `launchctl unload -w ~/Library/LaunchAgents/app.stump.node.pli
 (macOS), `schtasks /Delete /TN Stump /F` (Windows),
 `systemctl --user disable stump` (Linux).
 
+**Updating it** (`python3 provisioner.py --pc` again) while it runs is
+fine: once every new file is in place, the Provisioner touches `.updated`
+in the Stump folder, and the running Stump restarts on the new files
+within a few seconds (since 1.0.0-beta.46; before, it ran on with the old
+ones until the next restart, and `/admin` could show a blank page).
+
 ## The Heltec
 
 **On USB:** keep the Heltec's RNode firmware as it is and plug it in;
@@ -248,9 +254,11 @@ In the folder's `config.py` (the wizard writes them):
 | Setting | Default | |
 |---|---|---|
 | `PC_HOTSPOT_IP` | `'auto'` | The address visitors reach the computer on |
+| `PC_STA_IP` | `''` | With two networks (the hotspot, and Ethernet or a second Wi-Fi to the Stump above): its address on that other one. The computer then also takes Stumps below it on its hotspot, in the middle of a chain |
 | `PC_HTTP_PORT` | `80` | The web port (8080 is tried if it's taken) |
 | `PC_STORAGE_MB` | `2048` | The size of the "card" (the `sd/` folder), never more than your disk has free. As on a CAM, shared files fill it to 75%, then the oldest ones make room; the tools and firmware take a few MB. 2048 ≈ 1.5 GB of files people share; raise it for videos or big maps (8192 ≈ 6 GB). The Provisioner asks it (with the disk's free space); change it in `/admin` → Stump settings → Storage (at once), or with an update: `--pc`, then `s` at "Change something?" -- nothing else asked, nothing else changed |
-| `WATCHDOG_S` | `60` | If the Stump stops responding this long (its heartbeat, `.heartbeat` in the folder, goes stale), the supervisor restarts it. 0: off. Only when it runs under its supervisor (the Start file, start at login) |
+| `WATCHDOG_S` | `60` | If the Stump stops responding this long (its heartbeat, `.heartbeat` in the folder, goes stale), the supervisor restarts it. 0: off. Only when it runs under its supervisor (the Start file, start at login). The computer going to sleep (a laptop's lid, idle sleep) isn't counted: on waking, the Stump gets a full `WATCHDOG_S` to beat again (since 1.0.0-beta.45). A sleeping computer can't answer the chain or visitors, though: for a Stump that must stay reachable, keep the computer awake: `PC_KEEP_AWAKE` below |
+| `PC_KEEP_AWAKE` | `False` | Keeps the computer from sleeping by itself while the Stump runs (since 1.0.0-beta.45): macOS `caffeinate`, Linux `systemd-inhibit`, Windows the system's own call; it ends with the Stump. The screen may still turn off; a laptop with its lid closed on battery still sleeps. Turn it on in `/admin` → Stump settings → This computer (at once); `/admin` says whether it's held. Where nothing can hold it, set sleep in the system settings |
 | `PC_HOTSPOT_NAME` | | The Wi-Fi name the About page tells visitors to join |
 | `PC_CHAIN_PARENT_IP` | | The Stump this one joins (computer joining a CAM) |
 

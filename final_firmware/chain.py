@@ -71,7 +71,7 @@ def link_event():
 # than these, to spare the airtime.
 RADIO_UP_EVERY = 600
 NEW_STUMP_EVERY = 60
-_intro = {"radio": -10 ** 9, "stump": -10 ** 9}
+_intro = {"radio": -10 ** 9, "stump": -10 ** 9, "owed": None}
 
 
 def radio_up(now=None):
@@ -91,7 +91,25 @@ def stump_heard(now=None):
     now = time.time() if now is None else now
     if now - _intro["stump"] >= NEW_STUMP_EVERY:
         _intro["stump"] = now
+        _intro["owed"] = None
         link_event()
+        return True
+    # Too soon after the last answer: owed, and given when the minute is up
+    # (take_owed). Dropped, a Stump that restarted just then -- another
+    # Stump's restart had just been answered -- waited for the half-hourly
+    # beacon to learn this one.
+    _intro["owed"] = _intro["stump"] + NEW_STUMP_EVERY
+    return False
+
+
+def take_owed(now=None):
+    """An answer stump_heard() put off: True once its minute is up
+    (example_node's beacon_loop then introduces this Stump)."""
+    now = time.time() if now is None else now
+    due = _intro["owed"]
+    if due is not None and now >= due:
+        _intro["owed"] = None
+        _intro["stump"] = now
         return True
     return False
 
@@ -548,10 +566,34 @@ def status():
             "ip": up.listen_ip if up else None,
             "parent": up.forward_ip if up else None,
             "parent_heard_s": int(now - up.parent_seen) if up and up.parent_seen else None,
+            # True: the Stump above proved the chain secret; False: it answered
+            # plainly (a release before 1.0.0-beta.37); None: no answer yet.
+            "parent_verified": getattr(up, "parent_verified", None) if up else None,
         },
         "lan_ip": _state["lan_ip"],
         "chain": chain_id(s),
         "path": path(),
         "fallback": _state["fallback"],
         "below": sorted(set(ip for h in (_state["hubs"] or ([hub] if hub else [])) for ip in h.peers)),
+        # Who tried to join with another chain secret, lately.
+        "refused": [r for h in (_state["hubs"] or ([hub] if hub else [])) for r in h.refusals()],
+        # The other Stumps, from their beacons: release, chain protocol, what they have.
+        "stumps": _stumps(),
+        "proto": PROTO,
     }
+
+
+# The chain protocol this Stump speaks (in its beacon and /chain.json):
+#   1  before 1.0.0-beta.35 (beacons without it): names lists by nick only
+#      before beta.31, no capabilities
+#   2  1.0.0-beta.35: capabilities in the beacon, refusals shown
+# A Stump keeps working with older and newer ones; /admin says when they differ.
+PROTO = 2
+
+
+def _stumps():
+    try:
+        import discovery
+        return discovery.chain_stumps()
+    except Exception:
+        return []

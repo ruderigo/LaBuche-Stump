@@ -126,14 +126,21 @@ def packb(obj):
         raise TypeError("Cannot pack type: " + str(type(obj)))
 
 
+MAX_DEPTH = 32      # arrays and maps inside each other: no real packet comes near
+
+
 def unpackb(data):
     """Deserialize msgpack bytes to object"""
     obj, _ = _unpack(data, 0)
     return obj
 
 
-def _unpack(data, offset):
+def _unpack(data, offset, depth=0):
     """Unpack one object starting at offset, return (obj, new_offset)"""
+    if depth > MAX_DEPTH:
+        # Nested deeper than anything real: refused as invalid, before the
+        # stack runs out (on a CAM that's far fewer levels than here).
+        raise ValueError("msgpack nested too deep")
     b = data[offset]
 
     # Positive fixint (0x00 - 0x7f)
@@ -143,12 +150,12 @@ def _unpack(data, offset):
     # Fixmap (0x80 - 0x8f)
     elif 0x80 <= b <= 0x8f:
         n = b & 0x0f
-        return _unpack_map(data, offset + 1, n)
+        return _unpack_map(data, offset + 1, n, depth)
 
     # Fixarray (0x90 - 0x9f)
     elif 0x90 <= b <= 0x9f:
         n = b & 0x0f
-        return _unpack_array(data, offset + 1, n)
+        return _unpack_array(data, offset + 1, n, depth)
 
     # Fixstr (0xa0 - 0xbf)
     elif 0xa0 <= b <= 0xbf:
@@ -268,22 +275,22 @@ def _unpack(data, offset):
     # Array16
     elif b == 0xdc:
         n = struct.unpack_from(">H", data, offset + 1)[0]
-        return _unpack_array(data, offset + 3, n)
+        return _unpack_array(data, offset + 3, n, depth)
 
     # Array32
     elif b == 0xdd:
         n = struct.unpack_from(">I", data, offset + 1)[0]
-        return _unpack_array(data, offset + 5, n)
+        return _unpack_array(data, offset + 5, n, depth)
 
     # Map16
     elif b == 0xde:
         n = struct.unpack_from(">H", data, offset + 1)[0]
-        return _unpack_map(data, offset + 3, n)
+        return _unpack_map(data, offset + 3, n, depth)
 
     # Map32
     elif b == 0xdf:
         n = struct.unpack_from(">I", data, offset + 1)[0]
-        return _unpack_map(data, offset + 5, n)
+        return _unpack_map(data, offset + 5, n, depth)
 
     # Negative fixint (0xe0 - 0xff)
     elif b >= 0xe0:
@@ -293,18 +300,18 @@ def _unpack(data, offset):
         raise ValueError("Unknown msgpack byte: 0x{:02x}".format(b))
 
 
-def _unpack_array(data, offset, n):
+def _unpack_array(data, offset, n, depth=0):
     result = []
     for _ in range(n):
-        item, offset = _unpack(data, offset)
+        item, offset = _unpack(data, offset, depth + 1)
         result.append(item)
     return result, offset
 
 
-def _unpack_map(data, offset, n):
+def _unpack_map(data, offset, n, depth=0):
     result = {}
     for _ in range(n):
-        key, offset = _unpack(data, offset)
-        val, offset = _unpack(data, offset)
+        key, offset = _unpack(data, offset, depth + 1)
+        val, offset = _unpack(data, offset, depth + 1)
         result[key] = val
     return result, offset

@@ -95,7 +95,9 @@ itself.
 **A tree, not a line.** A new Stump joins whichever Stump is closest;
 any Stump takes several below it (its Wi-Fi holds 10 devices, phones
 included). A Stump on a computer further down only joins: it has one
-Wi-Fi radio.
+Wi-Fi radio -- unless it has two networks (its hotspot, and Ethernet or
+a second Wi-Fi to the Stump above): with `PC_STA_IP` set to its address
+on that other one, it takes Stumps below it too (docs/PC.md).
 
 **When the Stump above goes away** (off, moved, out of range) for a
 minute, a CAM looks for another Stump of the same chain in range and
@@ -138,6 +140,31 @@ keeps its internet. Only with a secret, since anyone on that network
 could reach it; `CHAIN_LAN = False` turns it off. `GET /chain.json`
 shows the address as `lan_ip`.
 
+## Who's who on the chain
+
+- **Everyone in `#wifi-mesh`, on every Stump.** Each Stump sends the
+  others who is in its `#wifi-mesh` (a names list, when it changes and
+  every 10 minutes), so someone quiet on a Stump two hops away is still
+  listed, and a DM contact, as `nick@thatstump` -- once, even when two
+  Stumps know them. (Before 1.0.0-beta.35 only who had spoken was.)
+- **What each Stump is.** Its beacon says its release, the chain
+  protocol it speaks, its access mode, whether its radio is online, its
+  storage, its plugins and this boot (`b`, since 1.0.0-beta.43: a new
+  value means it restarted). `/chain.json` → `stumps` lists them, and
+  `/admin` → Stump chain shows each Stump's release, and says when one
+  speaks an older protocol ("update it") or a newer one ("update this
+  one"). A Stump keeps working with older and newer ones; what an older
+  one lacks (its quiet people listed, its capabilities) is simply
+  missing.
+- **Who was refused.** A Stump that says hello with another chain
+  secret is refused, and stays out until its hello is right: a packet
+  alone never keeps a Stump in (one whose secret changed, or a device
+  that took over its address, used to stay in while it kept sending).
+  `/chain.json` → `refused` and `/admin` show who tried, how often, and
+  when, for 10 minutes.
+- **The chain protocol**, `/chain.json` → `proto` and `/node.json` →
+  `proto`: 1 before 1.0.0-beta.35, 2 since.
+
 ## Checking it
 
 - **From a computer:** `python3 provisioner.py --check-chain 192.168.<n>.1`,
@@ -151,7 +178,10 @@ shows the address as `lan_ip`.
 - **`GET /chain.json`:**
   `{"enabled", "role": "root"|"member", "ap_ip", "lan_ip", "channel",
   "secret", "uplink": {"ssid", "ip", "parent", "parent_heard_s"},
-  "below": [...]}` (`lan_ip`: see *On a shared network instead*).
+  "below": [...], "refused": [{"ip", "count", "last_s"}], "proto",
+  "stumps": [{"name", "lxmf", "release", "proto", "mode", "radio",
+  "storage", "plugins", "heard_s"}]}` (`lan_ip`: see *On a shared network
+  instead*; `refused`, `stumps`: see *Who's who on the chain*).
 
 ## Limits
 

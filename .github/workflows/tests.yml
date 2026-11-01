@@ -27,8 +27,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Packages for Stump on a computer
-        run: python3 -m pip install cryptography pyserial
+      - name: Packages for Stump on a computer, and mpy-cross
+        run: python3 -m pip install cryptography pyserial mpy-cross==1.28.0.post2
 
       - name: MicroPython (cached)
         id: mp-cache
@@ -48,10 +48,27 @@ jobs:
             ~/micropython-f32/micropython -c "compile(open('$f').read(), '$f', 'exec')" || exit 1
           done
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Playwright's Chromium (Arborist's test)
+        run: |
+          npm install --no-save --prefix "$HOME/pw" playwright@1.56.0
+          "$HOME/pw/node_modules/.bin/playwright" install --with-deps chromium
+          echo "NODE_PATH=$HOME/pw/node_modules" >> "$GITHUB_ENV"
+
       - name: Test suite
         run: |
           export MICROPYTHON=$HOME/micropython-f32/micropython
           python3 tests/run.py
+
+      - name: The firmware compiled (.mpy), as the Provisioner puts it on a board
+        run: |
+          export MICROPYTHON=$HOME/micropython-f32/micropython
+          export MPY_CROSS=$(python3 -c "import mpy_cross, os; print(os.path.join(os.path.dirname(mpy_cross.__file__), 'mpy-cross'))")
+          $MPY_CROSS --version
+          python3 tests/run.py chat_golden mesh_golden plugin_api packs_web json_api conn_limits identity_matrix hardening tools_sections
 
       - name: The release builds, reproducibly
         run: |
@@ -60,6 +77,15 @@ jobs:
           python3 scripts/build_release.py "$V" dist-b > /dev/null
           diff dist-a/SHA256SUMS dist-b/SHA256SUMS
           cat dist-a/SHA256SUMS
+
+      - name: Arborist, with MicroPython from micropython.org (to try on a board)
+        run: python3 scripts/build_arborist.py dist-arborist
+
+      - name: Keep Arborist
+        uses: actions/upload-artifact@v4
+        with:
+          name: Arborist
+          path: dist-arborist/*.html
 
   # µReticulum (final_firmware/urns) against the reference rns/lxmf: keys,
   # addresses, signatures, encryption and LXMF messages, both directions

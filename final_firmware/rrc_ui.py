@@ -18,6 +18,7 @@
 # which wiped whatever you were mid-typing every few seconds -- with a
 # real conversation happening that would be unusable.
 
+import webtext
 import ujson as json
 import rrc
 import theme
@@ -971,11 +972,7 @@ inp.focus();
 """
 
 
-def _attr(text):
-    """Escapes text for a single-quoted HTML attribute (an apostrophe in
-    a French label would otherwise end the attribute early)."""
-    return (text.replace("&", "&amp;").replace("'", "&#39;")
-                .replace("<", "&lt;").replace(">", "&gt;"))
+_attr = webtext.esc
 
 
 def _js(value):
@@ -1070,17 +1067,7 @@ def _nav_links(lang):
     )
 
 
-def _esc(s):
-    """HTML-escapes text going into markup.
-
-    The nick below is already restricted by rrc.clean_nick's allowlist,
-    which currently excludes every HTML-special character -- but that
-    allowlist lives in a different module. Relying on it means a future
-    edit there (allowing apostrophes, say, which IRC sometimes does)
-    would silently open an injection here, in a file nobody thought to
-    re-check. Escaping at the point of use removes that coupling."""
-    return (s.replace("&", "&amp;").replace("<", "&lt;")
-             .replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;"))
+_esc = webtext.esc
 
 
 def render_page(room, nick, lang=None, rec_url=None):

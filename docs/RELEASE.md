@@ -7,7 +7,7 @@ build-provenance attestation.
 
 ```
 sha256sum -c SHA256SUMS                       # the files are what was published
-gh attestation verify Stump-1.0.0-beta.21.zip --repo ruderigo/SandBox_Stump_On
+gh attestation verify Stump-1.0.0-beta.21.zip --repo ruderigo/LaBuche-Stump
 ```
 
 The second proves the file was built by this repository's release

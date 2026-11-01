@@ -243,6 +243,16 @@ class LXMessage:
         packed_payload = lxmf_bytes[2 * DL + SL:]
 
         unpacked_payload = umsgpack.unpackb(packed_payload)
+        # What a radio sends isn't always an LXMF payload: anything that
+        # isn't [timestamp, title, content, fields, (stamp)] is refused here,
+        # as a parsing error, rather than tripping later code (fuzzing found
+        # AttributeErrors from a payload of the wrong shape).
+        if (not isinstance(unpacked_payload, list) or len(unpacked_payload) < 4
+                or not isinstance(unpacked_payload[0], (int, float))
+                or not isinstance(unpacked_payload[1], (bytes, str))
+                or not isinstance(unpacked_payload[2], (bytes, str))
+                or not isinstance(unpacked_payload[3], (dict, type(None)))):
+            raise ValueError("not an LXMF payload")
 
         # Extract stamp if present (5th element)
         stamp = None

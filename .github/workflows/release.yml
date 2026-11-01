@@ -5,6 +5,9 @@ name: Release
 #
 #   Stump-<version>.zip     provisioner.py + final_firmware/ + packs/, one folder
 #   provisioner.py          on its own
+#   Arborist-<v>.html       makes and looks after a Stump (a CAM on USB) from
+#                           Chrome or Edge, saved and opened on the computer
+#                           (scripts/build_arborist.py)
 #   <pack>-pack-<v>.zip     each pack
 #   MANIFEST.json           size and SHA-256 of every file inside every zip
 #   SHA256SUMS              SHA-256 of each release file
@@ -71,6 +74,11 @@ jobs:
         run: |
           export MICROPYTHON=$HOME/micropython-f32/micropython
           python3 tests/run.py
+
+      - name: Arborist (Arborist-<version>.html; MicroPython from micropython.org, its SHA-256 checked)
+        run: |
+          pip install --quiet mpy-cross==1.28.0.post2
+          python3 scripts/build_arborist.py dist
 
       - name: Build the release files (reproducible)
         run: python3 scripts/build_release.py "${{ steps.v.outputs.version }}" dist

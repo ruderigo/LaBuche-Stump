@@ -13,13 +13,6 @@
 # security boundary. Credit tracked per identifier, class-weighted (a
 # real upload/download economy, not just a counter).
 #
-# Regulated mode, same mechanism: a slot gets marked "awaiting hash X" by
-# whoever has permission (e.g. a practitioner), while THEY are physically
-# at Stump. The matching person later provides that same hash -- still
-# just a local lookup key typed into a web form, never sent anywhere over
-# RNS -- to unlock upload into that specific slot. One code path handles
-# both modes; regulated is just neutral-mode-plus-a-slot-check.
-#
 # STORAGE: SD card, not internal flash -- real file sizes need real
 # storage. Pins confirmed from Freenove's own official SDMMC tutorial
 # (CMD=38, CLK=39, D0=40, 1-bit bus). machine.SDCard()'s parameter names
@@ -48,8 +41,7 @@ import uasyncio as asyncio
 import ujson as json
 import os
 import time
-
-import billboard
+import store
 
 SD_MOUNT = "/sd"
 SHARED_DIR = SD_MOUNT + "/shared"
@@ -77,12 +69,11 @@ HOME_DIR = SD_MOUNT + "/home"
 HOME_MAX_BYTES = 32768
 HOME_PLACES = ("top", "bottom", "left", "right")
 LEDGER_FILE = SD_MOUNT + "/fserv_ledger.json"
-AWAITING_FILE = SD_MOUNT + "/fserv_awaiting.json"
 
 # The ceiling storage stays under, as a fraction of the card's total
 # capacity -- not "keep N bytes free", which stops making sense the
 # moment someone swaps in a card of a different size. 75% leaves real
-# headroom on any card: room for the ledger/awaiting JSON files, the
+# headroom on any card: room for the ledger JSON file, the
 # filesystem's own bookkeeping, and enough slack that eviction (below)
 # is never fighting the FAT allocator over the last few blocks.
 MAX_SD_RATIO = 0.75
@@ -263,7 +254,7 @@ def sweep_tmp(paths=None):
     Only those names -- never anything else that happens to end in .tmp
     (a visitor's upload can). Returns how many were removed."""
     if paths is None:
-        paths = [LEDGER_FILE, AWAITING_FILE]
+        paths = [LEDGER_FILE]
         try:
             import billboard
             paths.append(billboard.storage_file())
@@ -282,49 +273,15 @@ def sweep_tmp(paths=None):
 
 
 def _save_json(path, data):
-    """Writes data as JSON. Returns True/False rather than letting a
-    write failure propagate -- confirmed as a real, reported bug
-    without this: an upload's actual bytes could already be safely on
-    disk (stream_to_file finished fine) and the credit-ledger rewrite
-    right after it is what threw (a card at or near capacity, or any
-    other transient I/O hiccup), uncaught, all the way out through
-    barkeep.py's own outer exception handler -- which logs the error
-    server-side but was never designed to send a response for an
-    exception this deep, so the client got nothing back at all: no
-    success, no error, just a connection that closed with no HTTP
-    response. Paired with the client's fetch() having no .catch() of
-    its own (fixed alongside this), that combination left the upload
-    UI showing "Sending..." forever with zero indication anything had
-    gone wrong -- indistinguishable from the upload having silently
-    failed even when the file itself made it onto the card intact.
-    Every caller here already treats "couldn't persist this" as
-    recoverable rather than fatal to the surrounding request."""
-    # Whole or not at all: written to a temporary file, then renamed over
-    # the old one (MicroPython's FAT rename replaces, as billboard.py's
-    # saves rely on). Writing in place meant a power cut mid-write left a
-    # truncated file -- and an unreadable ledger reads as empty, so
-    # everyone's credits were gone.
-    tmp = path + ".tmp"
-    try:
-        with open(tmp, "w") as f:
-            json.dump(data, f)
-        os.rename(tmp, path)
-        return True
-    except OSError as e:
-        print("[fserv] failed to save", path, "--", e)
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        return False
+    """Saves data as JSON, whole or not at all (store.py). True/False,
+    never raises: an upload already on the card must still get its
+    answer when the ledger rewrite after it fails (a full card) -- it
+    once left the browser on "Sending..." forever."""
+    return store.save_json(path, data, "fserv")
 
 
 def _ledger():
     return _load_json(LEDGER_FILE, {})
-
-
-def _awaiting():
-    return _load_json(AWAITING_FILE, {})
 
 
 def guess_class(filename):
@@ -446,18 +403,6 @@ def move_credits(src, dst):
     return amount
 
 
-def mark_awaiting(hash_hex, note=""):
-    """Called (locally, by whoever has permission) to open a regulated
-    slot for a specific hash. hash_hex is just a lookup key here --
-    nothing about this touches RNS."""
-    if not sd_ok:
-        return False
-    table = _awaiting()
-    table[hash_hex] = {"note": note, "fulfilled": False}
-    _save_json(AWAITING_FILE, table)
-    return True
-
-
 async def stream_to_file(reader, dest, length, chunk=16384, max_bps=None):
     """
     Streams `length` bytes from an open socket reader straight into a
@@ -574,21 +519,6 @@ async def drain(reader, length, chunk=2048):
     return read
 
 
-def _esc(s):
-    return (s.replace("&", "&amp;").replace("<", "&lt;")
-             .replace(">", "&gt;").replace('"', "&quot;"))
-
-
-def list_fw():
-    """Firmware images and catalog available for the kiosk flasher."""
-    if not sd_ok:
-        return []
-    try:
-        return sorted(os.listdir(FW_DIR))
-    except OSError:
-        return []
-
-
 def _is_dir(path):
     try:
         return os.stat(path)[0] & 0x4000 != 0
@@ -694,8 +624,7 @@ def _readme_head(text):
 # nothing copied), so the page is tidy and the Provisioner finds them in
 # place instead of copying them again at ~1 KB/s.
 _MIGRATE = (
-    ("provisioner", ("provisioner.py", "LICENSE", "Stump_Beta_A.zip"), ()),
-    ("flasher", ("esptool-bundle.js", "esptool-js-LICENSE.txt"), ()),
+    ("provisioner", ("provisioner.py", "LICENSE", "Stump_Beta_A.zip"), ("Stump-",)),
     ("firefly", (), ("FireFly-",)),
     ("rnfs", ("reticulum-LICENSE.txt",), ("rnfs-", "rnfs_", "lxmf-", "rnspure-")),
 )
@@ -934,12 +863,8 @@ def save_home_config(place, height, hidden):
         os.mkdir(HOME_DIR)
     except OSError:
         pass
-    try:
-        import ujson as json
-        with open(HOME_DIR + "/home.json", "w") as f:
-            json.dump({"place": place, "height": height, "hidden": bool(hidden)}, f)
-    except OSError as e:
-        return str(e)
+    if not store.save_json(HOME_DIR + "/home.json", {"place": place, "height": height, "hidden": bool(hidden)}, "fserv"):
+        return "couldn't save"
     return None
 
 
@@ -1089,7 +1014,7 @@ def delete_file(filename):
 # NOTE: no HTTP server here either -- same reason as billboard.py.
 # barkeep.py owns port 80 and calls this module's storage/credit
 # functions (mount_sd, stream_to_file, drain, credit_cost, credit_add,
-# credit_balance, guess_class, _list_files, _awaiting, _save_json,
+# credit_balance, guess_class, _list_files, _save_json,
 # get_storage_stats, make_room_fifo, delete_file) directly. Keeping a
 # second copy of the upload/download handler here meant fixes landed
 # in one file and rotted in the other.

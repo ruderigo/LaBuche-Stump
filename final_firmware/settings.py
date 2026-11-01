@@ -27,7 +27,8 @@ GREETING_MAX = 200
 WEIGHT_MAX = 99
 
 # Applied to the running Stump at once; the others need a restart.
-LIVE = ("CREDITS_ENABLED", "CREDIT_WEIGHTS", "AUTH_MODE", "FEATURES", "LIBRARIAN", "PC_STORAGE_MB")
+LIVE = ("CREDITS_ENABLED", "CREDIT_WEIGHTS", "AUTH_MODE", "FEATURES", "LIBRARIAN", "PC_STORAGE_MB",
+        "PC_KEEP_AWAKE")
 
 # A computer's "card": the sd/ folder, PC_STORAGE_MB in size (never more
 # than the disk has free). Uploads fill it to fserv.MAX_SD_RATIO, then the
@@ -128,9 +129,23 @@ def _storage_now():
         return {}
     try:
         import stump_host
-        return {"PC_STORAGE_MB": int(stump_host.setting("PC_STORAGE_MB", STORAGE_DEFAULT_MB))}
+        return {"PC_STORAGE_MB": int(stump_host.setting("PC_STORAGE_MB", STORAGE_DEFAULT_MB)),
+                "PC_KEEP_AWAKE": bool(stump_host.setting("PC_KEEP_AWAKE", False))}
     except Exception:
-        return {"PC_STORAGE_MB": STORAGE_DEFAULT_MB}
+        return {"PC_STORAGE_MB": STORAGE_DEFAULT_MB, "PC_KEEP_AWAKE": False}
+
+
+def awake():
+    """A computer's keep-awake: {"on": asked for, "how": what holds it now
+    (None: nothing), "possible": can anything here}. None on the CAM."""
+    if not on_computer():
+        return None
+    try:
+        import stump_host
+        return {"on": bool(stump_host.setting("PC_KEEP_AWAKE", False)), "how": stump_host.awake_status(),
+                "possible": stump_host.awake_possible()}
+    except Exception:
+        return None
 
 
 def economy(s=None):
@@ -194,6 +209,8 @@ def parse_form(fields):
         if mb < STORAGE_MIN_MB or mb > st["max_mb"]:
             return None, "storage_mb"
         out["PC_STORAGE_MB"] = mb
+    if fields.get("computer") and on_computer():          # (the This computer group was on the form)
+        out["PC_KEEP_AWAKE"] = bool(fields.get("keep_awake"))
     return out, None
 
 
@@ -310,6 +327,12 @@ def apply(changes):
         # with the Stump.
         if ("chat" in before["FEATURES"]) != ("chat" in changed["FEATURES"]):
             later.append("FEATURES")
+    if "PC_KEEP_AWAKE" in changed:
+        try:
+            import stump_host
+            stump_host.keep_awake(changed["PC_KEEP_AWAKE"])
+        except Exception:
+            pass
     out = []
     for k in later:
         if k not in out:

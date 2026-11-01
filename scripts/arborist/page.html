@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arborist</title>
+<style>
+  :root { --bg:#f6f3ee; --text:#222; --muted:#666; --ok:#1f7a3a; --bad:#a3271f; --warn:#8a5a00; --panel:#fff; --line:#ddd; --accent:#c8641e; --accent-text:#fff; --field:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1b1916; --text:#eee; --muted:#aaa; --ok:#5fcf86; --bad:#ff7a6e; --warn:#f0b54a; --panel:#26231f; --line:#3a352f; --accent:#e07a32; --accent-text:#1b1916; --field:#1f1d1a; } }
+  * { box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font:16px/1.5 system-ui, sans-serif; max-width:660px; margin:0 auto; padding:20px 16px 56px; }
+  h1 { font-size:1.5rem; margin:0; }
+  h2 { font-size:1.05rem; margin:0 0 8px; }
+  h3 { font-size:.98rem; margin:16px 0 4px; }
+  .sub { color:var(--muted); margin:2px 0 14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:12px 0; }
+  label { display:block; margin:10px 0 2px; font-weight:600; font-size:.95rem; }
+  .hint { color:var(--muted); font-size:.88rem; margin:2px 0 0; font-weight:400; }
+  input[type=text], input[type=password], input[type=number], select { font:inherit; width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--field); color:var(--text); }
+  .choice { display:flex; gap:8px; align-items:flex-start; font-weight:400; margin:6px 0; }
+  .choice input { margin-top:5px; }
+  .inline { display:inline-flex; gap:6px; align-items:center; font-weight:400; margin:4px 14px 4px 0; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  @media (max-width:520px) { .two { grid-template-columns:1fr; } }
+  button { font:inherit; padding:11px 20px; border-radius:8px; border:0; background:var(--accent); color:var(--accent-text); cursor:pointer; font-weight:600; }
+  button.plain { background:transparent; color:var(--accent); border:1px solid var(--accent); padding:8px 14px; }
+  button.small { padding:5px 10px; font-size:.88rem; }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  .err { color:var(--bad); font-weight:600; }
+  .ok { color:var(--ok); font-weight:600; }
+  .warn { color:var(--warn); }
+  nav { display:flex; gap:4px; border-bottom:1px solid var(--line); margin:6px 0 0; }
+  nav button { background:transparent; color:var(--muted); border-radius:8px 8px 0 0; padding:9px 14px; font-weight:600; border:1px solid transparent; border-bottom:0; margin-bottom:-1px; }
+  nav button[aria-selected=true] { color:var(--text); background:var(--panel); border-color:var(--line); }
+  ol.steps { list-style:none; padding:0; margin:0; }
+  ol.steps li { padding:5px 0 5px 28px; position:relative; color:var(--muted); }
+  ol.steps li::before { content:"○"; position:absolute; left:4px; }
+  ol.steps li.now { color:var(--text); font-weight:600; }
+  ol.steps li.now::before { content:"◐"; color:var(--accent); }
+  ol.steps li.done { color:var(--text); }
+  ol.steps li.done::before { content:"✓"; color:var(--ok); }
+  ol.steps li.failed::before { content:"✕"; color:var(--bad); }
+  .bar { height:10px; background:var(--line); border-radius:5px; overflow:hidden; margin:10px 0 4px; }
+  .bar > div { height:100%; width:0; background:var(--accent); transition:width .2s; }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; white-space:pre-wrap; word-break:break-word; max-height:260px; overflow:auto; font-size:12.5px; margin:6px 0 0; }
+  details summary { cursor:pointer; color:var(--muted); margin-top:8px; }
+  details.more > summary { color:var(--accent); font-weight:600; margin-top:14px; }
+  dl.sum { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; margin:8px 0; }
+  dl.sum dt { color:var(--muted); } dl.sum dd { margin:0; }
+  .hidden { display:none !important; }
+  code { font-size:.92em; }
+</style>
+</head>
+<body>
+<h1>Arborist</h1>
+<p class="sub">Makes and looks after a Stump: a Freenove ESP32-S3-CAM on this computer's USB. Stump @@RELEASE@@ · MicroPython @@MICROPYTHON@@</p>
+
+<div class="card hidden" id="gate">
+  <h2 class="err">This browser can't reach a board</h2>
+  <p id="gate-why"></p>
+  <p>Open this file in <b>Chrome</b> or <b>Edge</b> on a computer (Windows, macOS, Linux, ChromeOS). Save it first, then open the saved file.</p>
+</div>
+
+<div id="main">
+<nav role="tablist">
+  <button type="button" role="tab" data-tab="make" aria-selected="true">Make or update</button>
+  <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+  <button type="button" role="tab" data-tab="check" aria-selected="false">Check</button>
+</nav>
+
+<!-- Make or update ---------------------------------------------------------- -->
+<section class="card" id="tab-make" style="border-top-left-radius:0">
+  <p style="margin-top:0" class="hint">You need the board, a USB cable that carries data (not a charge-only one), and this page in Chrome or Edge.</p>
+  <label class="choice"><input type="radio" name="mode" value="new" checked> <span><b>A new Stump</b><br><span class="hint">Erases the board and puts everything on it: about 5 minutes.</span></span></label>
+  <label class="choice"><input type="radio" name="mode" value="update"> <span><b>Update a Stump</b> to @@RELEASE@@<br><span class="hint">Keeps its settings, its name on the mesh and what's on its card.</span></span></label>
+  <div id="make-slot"></div>
+  <p class="err" id="make-err"></p>
+  <button type="button" id="make-go">Make my Stump</button>
+</section>
+
+<!-- Settings ------------------------------------------------------------------ -->
+<section class="card hidden" id="tab-settings">
+  <p style="margin-top:0">Change a Stump's settings: its name, passwords, Wi-Fi, the radio, a chain. Its identity on the mesh, its chat and its files stay as they are.</p>
+  <button type="button" id="set-read">Read its settings</button>
+  <div id="set-loaded" class="hidden">
+    <p class="hint" id="set-from"></p>
+    <div id="set-slot"></div>
+    <p class="err" id="set-err"></p>
+    <div class="row">
+      <button type="button" id="set-save">Save to the Stump</button>
+      <button type="button" class="plain" id="set-download">Keep a copy of its config.py</button>
+    </div>
+  </div>
+  <details><summary>Put a config.py from this computer back on it</summary>
+    <p class="hint">A copy kept earlier (from here, from the Provisioner's backups, or by hand). It replaces the one on the board as it is; the old one stays there as <code>config.py.bak</code>.</p>
+    <input type="file" id="set-file" accept=".py,text/x-python,text/plain">
+    <div class="row"><button type="button" class="plain" id="set-put" disabled>Put it on the Stump</button></div>
+  </details>
+</section>
+
+<!-- Check ---------------------------------------------------------------------- -->
+<section class="card hidden" id="tab-check">
+  <p style="margin-top:0">Restarts the Stump and listens to it start, for a minute: what it runs, whether its pages came up, anything that went wrong.</p>
+  <button type="button" id="chk-go">Watch it start</button>
+  <div id="chk-out" class="hidden">
+    <dl class="sum" id="chk-sum"></dl>
+    <div id="chk-problems"></div>
+    <pre id="chk-log"></pre>
+    <div class="row"><button type="button" class="plain small" id="chk-save">Save what it said</button></div>
+  </div>
+</section>
+
+<!-- the settings form: shown in Make (a new Stump) or Settings -->
+<div id="form">
+  <label for="f-name">Its name <span class="hint">· what people see on the mesh, 20 characters at most</span></label>
+  <input type="text" id="f-name" maxlength="20" value="Stump">
+
+  <div class="two">
+    <div><label for="f-pw">Admin password</label><input type="password" id="f-pw" maxlength="64"></div>
+    <div><label for="f-pw2">Once more</label><input type="password" id="f-pw2" maxlength="64"></div>
+  </div>
+  <p class="hint" id="f-pw-hint">For its <code>/admin</code> page. Keep it somewhere.</p>
+
+  <label for="f-opw">BarKeep operator password <span class="hint">· optional</span></label>
+  <input type="password" id="f-opw" maxlength="64">
+  <p class="hint" id="f-opw-hint">Lets an operator edit BarKeep's replies from chat. Blank: editing off, and <code>/admin</code> uses the admin password above.</p>
+
+  <label for="f-ssid">Home Wi-Fi <span class="hint">· optional</span></label>
+  <div class="two">
+    <div><input type="text" id="f-ssid" maxlength="32" placeholder="Its name"></div>
+    <div><input type="password" id="f-wpass" maxlength="63" placeholder="Its password"></div>
+  </div>
+  <p class="hint">Not needed: the Stump makes its own Wi-Fi. For a LoRa radio on the home Wi-Fi, or a chain that reaches it.</p>
+
+  <label>LoRa radio (a Heltec running RNode)</label>
+  <label class="choice"><input type="radio" name="f-radio" value="none" checked> <span>None for now</span></label>
+  <label class="choice"><input type="radio" name="f-radio" value="ap"> <span>It joins this Stump's Wi-Fi <span class="hint" id="f-ap-addr">(at 192.168.4.2)</span></span></label>
+  <label class="choice"><input type="radio" name="f-radio" value="lan"> <span>It's on the home Wi-Fi, at <input type="text" id="f-hhost" placeholder="192.168.1.50" style="width:11em;padding:3px 6px"></span></label>
+  <p class="hint">The Heltec itself is set up with the Provisioner (<code>rnodeconf</code>); this page only does the CAM.</p>
+
+  <div id="f-radio-params" class="hidden">
+    <label>Radio settings <span class="hint">· the CAM sets these on the Heltec</span></label>
+    <div class="two">
+      <div><label for="f-freq" class="hint">Frequency (MHz)</label><input type="text" id="f-freq" inputmode="decimal" value="868.8"></div>
+      <div><label for="f-bw" class="hint">Bandwidth (kHz)</label><select id="f-bw"></select></div>
+    </div>
+    <div class="two">
+      <div><label for="f-sf" class="hint">Spreading factor</label><select id="f-sf"></select></div>
+      <div><label for="f-cr" class="hint">Coding rate</label><select id="f-cr"></select></div>
+    </div>
+    <label for="f-txp" class="hint">TX power (dBm)</label>
+    <input type="number" id="f-txp" min="0" max="22" value="22" style="width:7em">
+    <p class="hint warn">These must match every other Stump on your mesh, or they won't hear each other.</p>
+  </div>
+
+  <details class="more" id="f-more"><summary>More settings</summary>
+    <h3>What it offers</h3>
+    <label class="inline"><input type="checkbox" name="f-feat" value="chat" checked> Chat</label>
+    <label class="inline"><input type="checkbox" name="f-feat" value="billboard" checked> Billboard</label>
+    <label class="inline"><input type="checkbox" name="f-feat" value="files" checked> Files</label>
+    <label class="inline"><input type="checkbox" name="f-feat" value="about"> About page</label>
+    <div class="two">
+      <div><label for="f-theme">Look</label><select id="f-theme"><option value="paper">Paper</option><option value="amber">Amber</option><option value="phosphor">Phosphor</option><option value="oled">OLED</option></select></div>
+      <div><label for="f-mode">Who may come in</label><select id="f-mode"><option value="open">Anyone</option><option value="hybrid">Anyone; some rooms for verified people</option><option value="mandatory">Verified people only</option></select></div>
+    </div>
+    <div class="two">
+      <div><label for="f-bot">The bot's name</label><input type="text" id="f-bot" maxlength="24" value="BarKeep"></div>
+      <div><label for="f-hotspot">Its Wi-Fi's name <span class="hint">· blank: @@SSID@@</span></label><input type="text" id="f-hotspot" maxlength="32"></div>
+    </div>
+    <label for="f-greet">Greeting <span class="hint">· sent once to each new person on the mesh; blank: none</span></label>
+    <input type="text" id="f-greet" maxlength="200">
+
+    <h3>A chain of Stumps <span class="hint">· linked over Wi-Fi, files go between them</span></h3>
+    <label class="choice"><input type="radio" name="f-chain" value="none" checked> <span>Not in a chain</span></label>
+    <label class="choice"><input type="radio" name="f-chain" value="first"> <span>The first Stump (the others join it)</span></label>
+    <label class="choice"><input type="radio" name="f-chain" value="member"> <span>It joins another Stump's Wi-Fi</span></label>
+    <div id="f-chain-first" class="hidden">
+      <label for="f-channel">The chain's Wi-Fi channel <span class="hint">· 1 to 13; 1, 6 and 11 don't overlap</span></label>
+      <input type="number" id="f-channel" min="1" max="13" value="11" style="width:7em">
+    </div>
+    <div id="f-chain-member" class="hidden">
+      <div class="two">
+        <div><label for="f-up">The Stump it joins: its Wi-Fi</label><input type="text" id="f-up" maxlength="32" value="@@SSID@@"></div>
+        <div><label for="f-uppass">Its password <span class="hint">· blank if open</span></label><input type="password" id="f-uppass" maxlength="63"></div>
+      </div>
+      <label for="f-subnet">This Stump's number <span class="hint">· 5 to 254, a different one on each; its Wi-Fi is 192.168.&lt;number&gt;.1</span></label>
+      <input type="number" id="f-subnet" min="5" max="254" value="5" style="width:7em">
+    </div>
+    <div id="f-chain-secret" class="hidden">
+      <label for="f-secret">Chain secret <span class="hint">· the same on every Stump of the chain: note it down</span></label>
+      <div class="row" style="margin-top:0"><input type="text" id="f-secret" maxlength="64" style="flex:1"><button type="button" class="plain small" id="f-newsecret">New one</button></div>
+    </div>
+  </details>
+</div>
+
+<!-- progress, for whatever runs -->
+<div class="card hidden" id="work">
+  <h2 id="worktitle">Working</h2>
+  <p class="warn" id="keep">Keep the cable in and this page open until it says done.</p>
+  <ol class="steps" id="steps"></ol>
+  <div class="bar"><div id="bar"></div></div>
+  <p class="hint" id="barlabel">&nbsp;</p>
+  <div id="again" class="hidden"><p id="againtext"></p><button type="button" id="againbtn">Choose the board again</button></div>
+  <div id="result"></div>
+  <details><summary>Details</summary><pre id="log"></pre></details>
+</div>
+</div>
+
+<details class="card"><summary>About this page</summary>
+<p>Everything is in this one file: nothing is downloaded or sent anywhere. It holds the Stump @@RELEASE@@, MicroPython @@MICROPYTHON@@ (MIT licence, micropython.org) for the ESP32-S3 with octal PSRAM, and esptool-js (Apache-2.0, Espressif), which writes it. Each file's SHA-256 is checked on the board after it's copied. Settings are written by the Stump's own <code>settings.py</code>, as from <code>/admin</code>.</p>
+<details><summary>esptool-js licence</summary><pre>@@ESPTOOL_LICENSE@@</pre></details>
+</details>
+
+<script type="application/octet-stream" id="payload">@@PAYLOAD@@</script>
+<script type="module">/*@@ESPTOOL@@*/</script>
+<script>/*@@REPL@@*/</script>
+<script>
+"use strict";
+var $ = function (id) { return document.getElementById(id); };
+var qa = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
+var SSID = "@@SSID@@";
+var R = window.StumpRepl;
+var BUSY = false;
+
+// -- the gate --------------------------------------------------------------
+if (!("serial" in navigator)) {
+  $("gate").classList.remove("hidden");
+  $("main").classList.add("hidden");
+  $("gate-why").textContent = !window.isSecureContext
+    ? "This page was opened from the web, where boards can't be reached. Saved on the computer and opened from there, it can."
+    : "This browser has no Web Serial (Firefox and Safari don't).";
+}
+
+// -- tabs ------------------------------------------------------------------------
+var TAB = "make";
+function showTab(t) {
+  if (BUSY) return;
+  TAB = t;
+  qa("nav button").forEach(function (b) { b.setAttribute("aria-selected", b.dataset.tab === t ? "true" : "false"); });
+  ["make", "settings", "check"].forEach(function (x) { $("tab-" + x).classList.toggle("hidden", x !== t); });
+  placeForm();
+}
+qa("nav button").forEach(function (b) { b.onclick = function () { showTab(b.dataset.tab); }; });
+
+// -- the settings form ------------------------------------------------------------
+function mode() { return document.querySelector("input[name=mode]:checked").value; }
+function val(name) { var r = document.querySelector("input[name=" + name + "]:checked"); return r ? r.value : ""; }
+function setVal(name, v) { qa("input[name=" + name + "]").forEach(function (r) { r.checked = r.value === v; }); }
+var EDITING = null;     // what was read from a Stump (Settings), or null (a new one)
+function placeForm() {
+  var f = $("form");
+  if (TAB === "make" && mode() === "new") { EDITING = null; formFor(null); $("make-slot").appendChild(f); f.classList.remove("hidden"); }
+  else if (TAB === "settings" && SETTINGS) {
+    EDITING = SETTINGS.answers;
+    if (f.dataset.filled !== "edit") formFor(EDITING);
+    $("set-slot").appendChild(f); f.classList.remove("hidden");
+  }
+  else f.classList.add("hidden");
+  $("make-go").textContent = mode() === "update" ? "Update my Stump" : "Make my Stump";
+}
+qa("input[name=mode]").forEach(function (r) { r.onchange = placeForm; });
+function chainView() {
+  var c = val("f-chain");
+  $("f-chain-first").classList.toggle("hidden", c !== "first");
+  $("f-chain-member").classList.toggle("hidden", c !== "member");
+  $("f-chain-secret").classList.toggle("hidden", c === "none");
+  if (c !== "none" && !$("f-secret").value) $("f-secret").value = R.randomSecret();
+  $("f-ap-addr").textContent = "(at 192.168." + (c === "member" ? ($("f-subnet").value || "5") : "4") + ".2)";
+}
+qa("input[name=f-chain]").forEach(function (r) { r.onchange = chainView; });
+$("f-subnet").oninput = chainView;
+$("f-newsecret").onclick = function () { $("f-secret").value = R.randomSecret(); };
+$("f-hhost").onfocus = function () { setVal("f-radio", "lan"); radioView(); };
+
+// the radio drop-downs, once
+(function () {
+  function opt(sel, v, label, chosen) { var o = document.createElement("option"); o.value = v; o.textContent = label; if (chosen) o.selected = true; $(sel).appendChild(o); }
+  R.RADIO_BW.forEach(function (hz) { opt("f-bw", hz, (hz / 1000) + "", hz === 125000); });
+  for (var s = 5; s <= 12; s++) opt("f-sf", s, "SF" + s, s === 8);
+  for (var c = 5; c <= 8; c++) opt("f-cr", c, "4/" + c, c === 5);
+})();
+function radioView() { $("f-radio-params").classList.toggle("hidden", val("f-radio") === "none"); }
+qa("input[name=f-radio]").forEach(function (r) { r.onchange = radioView; });
+function fillRadio(a) {
+  a = a || R.radioAnswers(null);
+  $("f-freq").value = a.freqMhz; $("f-bw").value = a.bandwidth; $("f-sf").value = a.sf; $("f-cr").value = a.cr; $("f-txp").value = a.txpower;
+}
+
+// The form for a new Stump (a) = null, or filled with what a Stump has.
+function formFor(a) {
+  if (!a) {
+    if ($("form").dataset.filled === "edit") {          // from a Stump's settings back to a new one: its defaults
+      $("f-name").value = "Stump"; $("f-bot").value = "BarKeep"; $("f-greet").value = ""; $("f-ssid").value = "";
+      $("f-hhost").value = ""; setVal("f-radio", "none"); setVal("f-chain", "none"); $("f-hotspot").value = "";
+      qa("input[name=f-feat]").forEach(function (c) { c.checked = c.value !== "about"; });
+      $("f-theme").value = "paper"; $("f-mode").value = "open"; $("f-channel").value = 11; $("f-up").value = SSID;
+      $("f-uppass").value = ""; $("f-subnet").value = 5; $("f-secret").value = ""; $("f-more").open = false;
+      fillRadio(null);
+    }
+    if ($("form").dataset.filled !== "new") {
+      $("form").dataset.filled = "new";
+      ["f-pw", "f-pw2", "f-opw", "f-wpass"].forEach(function (id) { $(id).value = ""; $(id).placeholder = ""; });
+    }
+    $("f-pw-hint").textContent = "Unlocks /admin. Blank: /admin uses the BarKeep password below.";
+    $("f-opw-hint").textContent = "Lets an operator edit BarKeep's replies from chat. Blank: editing off.";
+    $("f-wpass").placeholder = "Its password";
+    chainView(); radioView();
+    return;
+  }
+  $("form").dataset.filled = "edit";
+  $("f-name").value = a.name; $("f-bot").value = a.bot; $("f-greet").value = a.greeting;
+  $("f-ssid").value = a.ssid; $("f-hhost").value = a.hhost; setVal("f-radio", a.radio);
+  qa("input[name=f-feat]").forEach(function (c) { c.checked = a.features.indexOf(c.value) >= 0; });
+  $("f-theme").value = R.THEMES.indexOf(a.theme) >= 0 ? a.theme : "paper";
+  $("f-mode").value = R.MODES.indexOf(a.mode) >= 0 ? a.mode : "open";
+  $("f-hotspot").value = a.hotspot; setVal("f-chain", a.chain);
+  $("f-channel").value = a.channel; $("f-up").value = a.upSsid || SSID; $("f-uppass").value = a.upPass;
+  $("f-subnet").value = a.subnet; $("f-secret").value = a.secret;
+  ["f-pw", "f-pw2", "f-opw", "f-wpass"].forEach(function (id) { $(id).value = ""; });
+  $("f-pw").placeholder = $("f-pw2").placeholder = a.hasPw ? "unchanged" : "";
+  $("f-pw-hint").textContent = a.hasPw ? "Blank: the admin password stays as it is."
+    : "It has none yet — give it one, or set the BarKeep password for /admin to reuse.";
+  $("f-opw").placeholder = a.hasOpPw ? "unchanged" : "";
+  $("f-opw-hint").textContent = a.hasOpPw ? "Blank: the BarKeep password stays as it is."
+    : "Lets an operator edit BarKeep's replies from chat. Blank: editing off.";
+  $("f-wpass").placeholder = a.hasWifiPass ? "unchanged" : "Its password";
+  fillRadio(a.radioAnswers);
+  if (a.chain !== "none" || a.hotspot || a.mode !== "open" || a.greeting) $("f-more").open = true;
+  chainView(); radioView();
+}
+function answers(editing) {
+  return {
+    name: $("f-name").value, bot: $("f-bot").value, greeting: $("f-greet").value,
+    pw: $("f-pw").value, pw2: $("f-pw2").value, opw: $("f-opw").value,
+    hasPw: !!(editing && editing.hasPw), hasOpPw: !!(editing && editing.hasOpPw), requireAdmin: !editing,
+    ssid: $("f-ssid").value, wpass: $("f-wpass").value, keepWifiPass: !!(editing && editing.hasWifiPass),
+    radio: val("f-radio"), hhost: $("f-hhost").value,
+    freqMhz: $("f-freq").value, bandwidth: $("f-bw").value, sf: $("f-sf").value, cr: $("f-cr").value, txpower: $("f-txp").value,
+    features: qa("input[name=f-feat]:checked").map(function (c) { return c.value; }),
+    theme: $("f-theme").value, mode: $("f-mode").value, hotspot: $("f-hotspot").value,
+    chain: val("f-chain"), channel: $("f-channel").value, upSsid: $("f-up").value, upPass: $("f-uppass").value,
+    subnet: $("f-subnet").value, secret: $("f-secret").value
+  };
+}
+
+// -- progress ---------------------------------------------------------------------
+var STEPS;
+function steps(title, list) {
+  STEPS = list;
+  $("work").classList.remove("hidden");
+  $("keep").classList.remove("hidden");
+  $("result").innerHTML = ""; $("log").textContent = "";
+  $("worktitle").textContent = title;
+  $("steps").innerHTML = "";
+  list.forEach(function (s, i) { var li = document.createElement("li"); li.id = "st" + i; li.textContent = s; $("steps").appendChild(li); });
+  bar(0, "");
+}
+function step(i) {
+  STEPS.forEach(function (_, j) { $("st" + j).className = j < i ? "done" : j === i ? "now" : ""; });
+  bar(0, "");
+}
+function bar(frac, label) { $("bar").style.width = Math.round(Math.max(0, Math.min(1, frac)) * 100) + "%"; $("barlabel").innerHTML = label ? "" : "&nbsp;"; if (label) $("barlabel").textContent = label; }
+function log(t) { var l = $("log"); l.textContent += t + "\n"; if (l.textContent.length > 60000) l.textContent = l.textContent.slice(-40000); l.scrollTop = l.scrollHeight; }
+function done(html) {
+  step(STEPS.length); bar(1, "");
+  $("keep").classList.add("hidden");
+  $("worktitle").innerHTML = "<span class='ok'>Done</span>";
+  $("result").innerHTML = html;
+}
+function para(text, cls) { var p = document.createElement("p"); if (cls) p.className = cls; p.textContent = text; return p; }
+function download(name, data, type) {
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([data], { type: type || "text/plain" }));
+  a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+async function sha256(u8) {
+  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", u8))).map(function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
+}
+function stamp() { var d = new Date(); return d.getFullYear() + ("0" + (d.getMonth() + 1)).slice(-2) + ("0" + d.getDate()).slice(-2) + "-" + ("0" + d.getHours()).slice(-2) + ("0" + d.getMinutes()).slice(-2); }
+function fileName(s) { return String(s || "stump").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 40); }
+
+// -- what's in the page --------------------------------------------------------------
+var PAYLOAD = null;
+async function payload() {
+  if (PAYLOAD) return PAYLOAD;
+  var s = atob($("payload").textContent.trim()), u = new Uint8Array(s.length);
+  for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  var raw = new Uint8Array(await new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+  var n = raw[0] | (raw[1] << 8) | (raw[2] << 16) | (raw[3] << 24);
+  var head = JSON.parse(new TextDecoder().decode(raw.subarray(4, 4 + n))), body = raw.subarray(4 + n);
+  var files = {};
+  head.files.forEach(function (f) { files[f[0]] = { data: body.subarray(f[1], f[1] + f[2]), sha256: f[3] }; });
+  PAYLOAD = { head: head, files: files };
+  return PAYLOAD;
+}
+
+// -- the serial port ----------------------------------------------------------------
+var port = null, reader = null, writer = null, CURRENT = null;
+async function choosePort() {
+  if (port) {
+    var known = await navigator.serial.getPorts();
+    if (known.indexOf(port) >= 0) return;          // the board chosen before, still here
+  }
+  port = await navigator.serial.requestPort();
+}
+async function closePort() {
+  try { if (reader) { await reader.cancel(); reader.releaseLock(); } } catch (e) {}
+  try { if (writer) writer.releaseLock(); } catch (e) {}
+  reader = writer = null;
+  try { if (port) await port.close(); } catch (e) {}
+}
+function waitClick(text) {
+  return new Promise(function (ok) {
+    $("againtext").textContent = text;
+    $("again").classList.remove("hidden");
+    $("againbtn").onclick = async function () {
+      try { port = await navigator.serial.requestPort(); $("again").classList.add("hidden"); ok(); }
+      catch (e) { log("not chosen: " + e.message); }
+    };
+  });
+}
+// The port at 115200, the board's REPL on it. After a reset a board on its
+// own USB (no USB-serial chip) comes back as a new port: the same one is
+// looked for, else the person picks it again.
+async function openRepl(onText) {
+  var info = port.getInfo ? port.getInfo() : {};
+  for (var i = 0; ; i++) {
+    try { await port.open({ baudRate: 115200 }); break; }
+    catch (e) {
+      if (/already open/i.test(e.message)) break;
+      if (i < 12) { await R.sleep(500); continue; }
+      var same = (await navigator.serial.getPorts()).filter(function (p) {
+        var x = p.getInfo ? p.getInfo() : {};
+        return p !== port && x.usbVendorId === info.usbVendorId && x.usbProductId === info.usbProductId;
+      });
+      if (same.length === 1 && i < 14) { port = same[0]; continue; }
+      await waitClick("The board restarted as a new USB device. Choose it again (the same name, or a new one that just appeared).");
+      i = 0;
+    }
+  }
+  try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch (e) {}
+  writer = port.writable.getWriter();
+  reader = port.readable.getReader();
+  var repl = new R.Repl(function (u8) { return writer.write(u8); });
+  CURRENT = repl;
+  var dec = new TextDecoder();
+  (async function () {
+    try {
+      for (;;) {
+        var r = await reader.read();
+        if (r.done) break;
+        repl.feed(r.value);
+        var t = dec.decode(r.value, { stream: true });
+        if (onText) onText(t);
+        t = t.replace(/[\x00-\x08\x0e-\x1f]/g, "");
+        if (t.trim() && t.length < 400) log(t.replace(/\r/g, "").replace(/\n$/, ""));
+      }
+    } catch (e) { log("serial: " + e.message); }
+    repl.closed(new Error("the board went away (cable out?)"));
+  })();
+  return repl;
+}
+// The REPL, the board ready for it (it restarts when the port opens): a
+// running Stump stopped, its watchdog quieted, a clean interpreter.
+async function readyRepl() {
+  var repl = await openRepl(), until = Date.now() + 40000, last;
+  await R.sleep(1500);
+  while (Date.now() < until) {
+    try { await R.prepare(repl, 4000); return repl; }
+    catch (e) { last = e; if (repl.dead) throw repl.dead; log("waiting for the board: " + e.message); }
+  }
+  throw new Error("The board doesn't answer on USB. " + (last ? last.message : ""));
+}
+async function hasStump(repl) {
+  return /YES/.test(await repl.run("import os\ntry:\n os.stat('config.py')\n print('YES')\nexcept OSError:\n print('NO')\n"));
+}
+
+// -- MicroPython ------------------------------------------------------------------
+async function flashMicroPython(P) {
+  var E = window.esptool;
+  var transport = new E.Transport(port, false);
+  var esp = new E.ESPLoader({ transport: transport, baudrate: 460800, romBaudrate: 115200,
+    terminal: { clean: function () {}, writeLine: log, write: function () {} } });
+  var chip;
+  try { chip = await esp.main(); }
+  catch (e) {
+    try { await transport.disconnect(); } catch (x) {}
+    throw new Error("Couldn't start the board's loader (" + e.message + "). Hold its BOOT button, press and release RESET, let go of BOOT, then start again.");
+  }
+  log("chip: " + chip);
+  if (!/ESP32-S3/i.test(String(chip))) {
+    try { await transport.disconnect(); } catch (x) {}
+    throw new Error("This board is a " + chip + ". This page is for the Freenove ESP32-S3-CAM.");
+  }
+  step(2);
+  bar(0, "Erasing the board (about half a minute)…");
+  var img = P.files["micropython.bin"];
+  await esp.writeFlash({
+    fileArray: [{ data: img.data, address: 0 }], flashSize: "keep", flashMode: "keep", flashFreq: "keep",
+    eraseAll: true, compress: true,
+    reportProgress: function (i, written, size) { bar(written / size, "Writing MicroPython… " + Math.round(written / size * 100) + "%"); }
+  });
+  step(3);
+  await esp.after("hard_reset");
+  await transport.disconnect();
+}
+
+// -- Make or update ------------------------------------------------------------------
+async function make() {
+  var upd = mode() === "update", s = null, rad = null;
+  if (!upd) {
+    var a = answers(null);
+    s = R.settingsFrom(a);
+    if (s.error) { $("make-err").textContent = s.error; return false; }
+    if (a.radio !== "none") {
+      rad = R.radioFrom(a);
+      if (rad.error) { $("make-err").textContent = rad.error; return false; }
+    }
+    if (s.warn.length && !confirm(s.warn.join("\n") + "\n\nGo ahead anyway?")) return false;
+    if (!confirm("This erases everything on the board. Go ahead?")) return false;
+  }
+  steps(upd ? "Updating the Stump" : "Making the Stump",
+        upd ? ["Choose the board", "Connect", "Copy the Stump @@RELEASE@@", "Restart"]
+            : ["Choose the board", "Connect", "Erase it, write MicroPython", "Restart", "Copy the Stump", "Its settings", "Restart"]);
+  var P = await payload();
+  step(0);
+  await choosePort();
+  step(1);
+  if (!upd) await flashMicroPython(P);
+  var repl = await readyRepl();
+  var info = await R.boardInfo(repl);
+  log("MicroPython " + info.release + ", .mpy " + info.mpy);
+  if (upd && P.head.mpy && info.mpy !== P.head.mpy)
+    throw new Error("This board has MicroPython " + info.release + "; this Stump needs " + P.head.micropython +
+                    ". Choose “A new Stump” (it erases the board: the Stump gets a new name on the mesh).");
+  if (upd && !(await hasStump(repl))) throw new Error("There's no Stump on this board to update (no config.py). Choose “A new Stump”.");
+  step(upd ? 2 : 4);
+  var files = Object.keys(P.files).filter(function (k) { return k.indexOf("app/") === 0; }).map(function (k) {
+    return { path: k.slice(4), data: P.files[k].data, sha256: P.files[k].sha256 };
+  });
+  var t0 = Date.now();
+  await R.upload(repl, files, function (d, total, path) {
+    var sec = (Date.now() - t0) / 1000, left = d > 0 && sec > 5 ? Math.round((total - d) / (d / sec)) : null;
+    bar(d / total, Math.round(d / 1024) + " of " + Math.round(total / 1024) + " KB" +
+        (left !== null ? " · about " + (left > 90 ? Math.round(left / 60) + " min" : left + " s") + " left" : "") + (path ? " · " + path : ""));
+  });
+  if (!upd) {
+    step(5);
+    var tpl = new TextEncoder().encode(P.head.config_template);
+    await R.upload(repl, [{ path: "config.py", data: tpl, sha256: await sha256(tpl) }]);
+    await R.writeSettings(repl, s.values);
+    if (rad && !(await R.writeRadio(repl, rad.values))) log("note: the radio settings weren't saved to the board");
+  }
+  step(upd ? 3 : 6);
+  await R.restart(repl);
+  await closePort();
+  var r = document.createElement("div");
+  if (upd) r.appendChild(para("The Stump restarts with @@RELEASE@@, its settings as they were. You can unplug it."));
+  else {
+    r.appendChild(para("Your Stump is starting (about a minute the first time). On a phone, look for the Wi-Fi “" +
+                       (s.values.SSID_NAME || SSID) + "”, join it, and a page opens. Its admin page is /admin, with the password you chose."));
+    r.appendChild(para("You can unplug it from the computer and power it from any USB charger. To see it start, use Check."));
+  }
+  done(""); $("result").appendChild(r);
+  return true;
+}
+
+// -- Settings -------------------------------------------------------------------------
+var SETTINGS = null;        // {answers, file (the config.py bytes read), sha, name}
+async function readIt() {
+  steps("Reading its settings", ["Choose the board", "Connect", "Read", "Restart"]);
+  step(0); await choosePort();
+  step(1); var repl = await readyRepl();
+  step(2);
+  if (!(await hasStump(repl))) throw new Error("There's no Stump on this board (no config.py). Use Make or update first.");
+  var c = await R.readSettings(repl), file = await R.readConfigFile(repl), radio = await R.readRadio(repl);
+  step(3); await R.restart(repl); await closePort();
+  var ans = R.answersFrom(c);
+  ans.radioAnswers = R.radioAnswers(radio);
+  SETTINGS = { answers: ans, file: file, sha: await sha256(file), name: c.NODE_NAME };
+  EDITING = SETTINGS.answers;
+  formFor(EDITING);
+  $("set-loaded").classList.remove("hidden");
+  $("set-from").textContent = "Read from “" + (c.NODE_NAME || "a Stump") + "” at " + new Date().toLocaleTimeString() + ". Change what you like, then save.";
+  placeForm();
+  done("");
+  $("result").appendChild(para("Its settings are in the form above. It's running again meanwhile."));
+}
+async function saveIt() {
+  var a = answers(SETTINGS.answers), s = R.settingsFrom(a), rad = null;
+  if (s.error) { $("set-err").textContent = s.error; return false; }
+  if (a.radio !== "none") {
+    rad = R.radioFrom(a);
+    if (rad.error) { $("set-err").textContent = rad.error; return false; }
+  }
+  if (s.warn.length && !confirm(s.warn.join("\n") + "\n\nSave anyway?")) return false;
+  steps("Saving its settings", ["Choose the board", "Connect", "Save", "Restart"]);
+  step(0); await choosePort();
+  step(1); var repl = await readyRepl();
+  step(2);
+  var now = await R.readConfigFile(repl);
+  if ((await sha256(now)) !== SETTINGS.sha)
+    throw new Error("This isn't the config.py read earlier (another board, or it changed since). Read its settings again, then save.");
+  await R.writeSettings(repl, s.values);
+  if (rad && !(await R.writeRadio(repl, rad.values))) log("note: the radio settings weren't saved to the board");
+  var after = await R.readConfigFile(repl);
+  step(3); await R.restart(repl); await closePort();
+  SETTINGS.file = after; SETTINGS.sha = await sha256(after);
+  var c2 = SETTINGS.answers;
+  c2.hasPw = c2.hasPw || "AUTH_ADMIN_PASSWORD" in s.values; c2.hasWifiPass = c2.hasWifiPass || !!s.values.WIFI_PASS;
+  done("");
+  $("result").appendChild(para("Saved. The Stump restarts with them; the old settings are on it as config.py.bak."));
+  return true;
+}
+$("set-download").onclick = function () {
+  if (SETTINGS) download("config-" + fileName(SETTINGS.name) + "-" + stamp() + ".py", SETTINGS.file, "text/x-python");
+};
+$("set-file").onchange = function () { $("set-put").disabled = !$("set-file").files.length; };
+async function putIt() {
+  var f = $("set-file").files[0];
+  if (!f) return false;
+  var data = new Uint8Array(await f.arrayBuffer());
+  if (data.length > 64 * 1024) throw new Error("That file is too big for a config.py.");
+  if (!confirm("Replace the Stump's config.py with " + f.name + "?")) return false;
+  steps("Putting " + f.name + " back", ["Choose the board", "Connect", "Put it on", "Restart"]);
+  step(0); await choosePort();
+  step(1); var repl = await readyRepl();
+  step(2); await R.putConfigFile(repl, data, await sha256(data));
+  step(3); await R.restart(repl); await closePort();
+  SETTINGS = null; $("set-loaded").classList.add("hidden"); placeForm();
+  done(""); $("result").appendChild(para("Done. The Stump restarts with it; the one it had is config.py.bak."));
+  return true;
+}
+
+// -- Check -------------------------------------------------------------------------------
+var BOOTLOG = "";
+async function checkIt() {
+  steps("Watching it start", ["Choose the board", "Connect", "Restart", "Listen (a minute)"]);
+  $("chk-out").classList.remove("hidden");
+  $("chk-sum").innerHTML = ""; $("chk-problems").innerHTML = ""; $("chk-log").textContent = "";
+  BOOTLOG = "";
+  var listening = false;
+  function heard(t) { if (!listening) return; BOOTLOG += t; var l = $("chk-log"); l.textContent = BOOTLOG.replace(/\r/g, "").slice(-30000); l.scrollTop = l.scrollHeight; }
+  step(0); await choosePort();
+  step(1);
+  var repl = await openRepl(heard);
+  await R.sleep(800);
+  await R.prepare(repl, 8000);
+  step(2);
+  listening = true;
+  await R.restart(repl);
+  step(3);
+  var t0 = Date.now(), until = t0 + 60000, served = 0;
+  while (Date.now() < until) {
+    await R.sleep(500);
+    bar((Date.now() - t0) / 60000, "Listening… " + Math.round((until - Date.now()) / 1000) + " s");
+    if (repl.dead) {                      // its own USB: it came back as a new port
+      await closePort();
+      try { repl = await openRepl(heard); } catch (e) { log("reopen: " + e.message); }
+    }
+    repl.drain();
+    if (!served && /\[web\] serving/.test(BOOTLOG)) { served = Date.now(); until = Math.min(until, served + 8000); }
+  }
+  await closePort();
+  var s = R.bootSummary(BOOTLOG), dl = $("chk-sum");
+  function row(k, v, cls) { var dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = k; dd.textContent = v; if (cls) dd.className = cls; dl.appendChild(dt); dl.appendChild(dd); }
+  row("Stump", s.release || "didn't say", s.release ? "" : "warn");
+  row("MicroPython", s.micropython || "didn't say");
+  row("Its pages", s.serving ? "up" : "not up within a minute", s.serving ? "ok" : "err");
+  s.notes.forEach(function (n) { row("", n); });
+  if (s.problems.length) {
+    $("chk-problems").appendChild(para("What looks wrong:", "err"));
+    var pre = document.createElement("pre"); pre.textContent = s.problems.join("\n"); $("chk-problems").appendChild(pre);
+  }
+  done("");
+  $("result").appendChild(para(s.serving && !s.problems.length ? "It started fine." : "Have a look at what it said, below the summary."));
+}
+$("chk-save").onclick = function () { download("stump-start-" + stamp() + ".txt", BOOTLOG.replace(/\r/g, "")); };
+
+// -- running an action --------------------------------------------------------------
+async function act(fn, errId) {
+  if (BUSY) return;
+  CURRENT = null;
+  if (errId) $(errId).textContent = "";
+  BUSY = true;
+  qa("#main button, #main input, #main select").forEach(function (i) { if (i.id !== "againbtn") i.disabled = true; });
+  try {
+    await fn();
+  } catch (e) {
+    log("error: " + (e && e.stack || e));
+    // Never leave a Stump stopped at its prompt: start it again (before
+    // saying it stopped, so the page is ready again when it says so).
+    if (CURRENT && !CURRENT.dead && reader) { try { await R.restart(CURRENT); log("restarted the board"); } catch (x) {} }
+    await closePort();
+    var cur = document.querySelector("ol.steps li.now");
+    if (cur) cur.className = "failed";
+    $("worktitle").innerHTML = "<span class='err'>Stopped</span>";
+    $("result").innerHTML = "";
+    $("result").appendChild(para(/No port selected|requestPort/.test(e.message) ? "No board chosen." : e.message, "err"));
+    $("result").appendChild(para("Nothing is lost by trying again. A board that keeps failing: another USB cable or port, or open the Details below."));
+  } finally {
+    BUSY = false;
+    qa("#main button, #main input, #main select").forEach(function (i) { i.disabled = false; });
+    $("set-put").disabled = !$("set-file").files.length;
+  }
+}
+$("make-go").onclick = function () { act(make, "make-err"); };
+$("set-read").onclick = function () { act(readIt, "set-err"); };
+$("set-save").onclick = function () { act(saveIt, "set-err"); };
+$("set-put").onclick = function () { act(putIt); };
+$("chk-go").onclick = function () { act(checkIt); };
+placeForm();
+</script>
+</body>
+</html>

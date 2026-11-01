@@ -25,6 +25,8 @@ import rrc
 import ujson as json
 import os
 
+import webtext
+import store
 from urns.identity import Identity
 
 try:
@@ -75,12 +77,7 @@ _loaded = False
 # Persistence
 # ---------------------------------------------------------------------
 
-def _sd_available():
-    try:
-        os.stat("/sd")
-        return True
-    except OSError:
-        return False
+_sd_available = webtext.sd_available
 
 
 from urns.identity import Identity as _Identity   # for exact size constants only
@@ -152,11 +149,7 @@ def _load():
 def _save():
     if not _sd_available():
         return
-    try:
-        with open(STORAGE_FILE, "w") as f:
-            json.dump(_identities, f)
-    except Exception as e:
-        print("[stumpid] could not save identity table:", e)
+    store.save_json(STORAGE_FILE, _identities, "stumpid")
 
 
 # ---------------------------------------------------------------------
@@ -433,7 +426,7 @@ def check_admin_password(pw):
     password is unset.
     """
     if AUTH_ADMIN_PASSWORD:
-        return bool(pw) and pw == AUTH_ADMIN_PASSWORD
+        return bool(pw) and webtext.same(pw, AUTH_ADMIN_PASSWORD)
     try:
         import fservbot.core as fservbot_core
     except ImportError:
@@ -473,13 +466,7 @@ def _save_state():
     if not STATE_FILE:
         return
     data = {"mode": AUTH_MODE, "rooms": {r: p["tier"] for r, p in _room_policy.items()}}
-    tmp = STATE_FILE + ".tmp"
-    try:
-        with open(tmp, "w") as f:
-            json.dump(data, f)
-        os.rename(tmp, STATE_FILE)       # replaces, on FAT too (MicroPython)
-    except OSError as e:
-        print("[stumpid] couldn't save the access settings:", e)
+    store.save_json(STATE_FILE, data, "stumpid")
 
 
 def load_state():

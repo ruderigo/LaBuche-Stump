@@ -225,6 +225,8 @@ class Transport:
                     if (_path is not None and _path[const.IDX_PT_HOPS] > 1
                             and interface is not _path[const.IDX_PT_RECV_IF]):
                         continue
+                    if getattr(interface, "no_peers", False):
+                        continue        # a chain link with nobody on it: nothing to send, nothing failed
                     if len(raw) > getattr(interface, "HW_MTU", const.MTU):
                         # Big-MTU link traffic fanning out past a small-MTU
                         # interface (16K TCP parts hitting LoRa/serial): skip

@@ -64,7 +64,7 @@ def _on_line(ctx):
     _activity["room"], _activity["at"] = ctx.room, time.time()
     reply = core.maybe_respond(ctx.room, ctx.nick, ctx.text.strip())
     if reply:
-        rrc.post(ctx.room, core.bot_name(), reply)
+        rrc.post(ctx.room, core.bot_name(), reply, bot=True)
         _activity["at"] = 0      # the bot just spoke here: no notice on top
 
 
@@ -74,5 +74,5 @@ def _notice():
         return
     ad = core.maybe_broadcast(room)
     if ad:
-        rrc.post(room, core.bot_name(), ad)
+        rrc.post(room, core.bot_name(), ad, bot=True)
         _activity["at"] = 0      # wait for someone to speak again

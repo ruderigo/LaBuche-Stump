@@ -1,12 +1,12 @@
-# Browser flasher
+# esptool-js (build input for Arborist)
 
-What the node's /flash page uses to flash firmware to a board plugged into your computer, from Chrome or Edge, with nothing installed.
+These two files — `esptool-bundle.js` (esptool-js, Apache-2.0) and
+`esptool-js-LICENSE.txt` — are **not shipped to the board**. They are read
+at build time by `scripts/build_arborist.py` to embed the flashing code
+into `Arborist-<release>.html`.
 
-## What's here
-
-- `esptool-bundle.js` — esptool-js, the flashing code the /flash page
-  loads into your browser.
-- `esptool-js-LICENSE.txt` — its licence (Apache-2.0).
-
-You don't need to download these: open /flash on this node instead.
-The firmware images it offers are in the card's `fw/` folder.
+The old on-device flasher (`/flash`, HF-001) was retired in
+1.0.0-beta.41: it couldn't flash over the Stump's plain-HTTP Wi-Fi
+(Web Serial needs a secure context), and Arborist — a page saved on the
+computer and opened from `file://` — replaces it. See
+`final_firmware/docs/ARBORIST.md`.

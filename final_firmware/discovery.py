@@ -234,29 +234,157 @@ async def watch_loop():
             pass
 
 
+def caps():
+    """What this Stump is and has, for the others (the beacon's sixth item,
+    kept short: it goes over LoRa too): {"p": chain protocol, "r": release,
+    "m": access mode, "rad": radio online, "s": [storage kind, free MB],
+    "pl": [plugins]}. The groundwork for the chain sharing work (storage)."""
+    out = {}
+    try:
+        import chain
+        out["p"] = chain.PROTO
+    except Exception:
+        out["p"] = 2
+    try:
+        import rrc
+        out["r"] = (rrc.NODE_INFO or {}).get("release") or ""
+    except Exception:
+        out["r"] = ""
+    try:
+        import sys
+        core = sys.modules.get("stumpid.core")
+        out["m"] = getattr(core, "AUTH_MODE", "open") if core else "open"
+    except Exception:
+        out["m"] = "open"
+    try:
+        import radio
+        st = radio.hw()["state"]
+        out["rad"] = st == "online"
+        out["rh"] = st != "none"          # it has a radio, online or not (1.0.0-beta.38)
+    except Exception:
+        out["rad"] = False
+    try:
+        import fserv
+        if fserv.sd_ok:
+            total, free, _ = fserv.get_storage_stats()
+            try:
+                import stump_host  # noqa: F401
+                kind = "pc"
+            except ImportError:
+                kind = "sd"
+            out["s"] = [kind, int(free // (1024 * 1024))]
+        else:
+            out["s"] = ["none", 0]
+    except Exception:
+        out["s"] = ["none", 0]
+    try:
+        import plugins
+        out["pl"] = [n for n in plugins._order if plugins._active(n)][:8]
+    except Exception:
+        out["pl"] = []
+    out["b"] = BOOT                       # this boot (since 1.0.0-beta.43)
+    return out
+
+
 def beacon_data(version, node_name, lxmf_hash):
     """The "stump.node" beacon's announce data: ["stump", version, name,
-    <16-byte LXMF hash>, [web addresses]] (msgpack)."""
+    <16-byte LXMF hash>, [web addresses], caps()] (msgpack). Older Stumps
+    read the first four or five items and ignore the rest."""
     from urns import umsgpack
     try:
         http = urls()
     except Exception:
         http = []
-    return umsgpack.packb(["stump", version, node_name, bytes(lxmf_hash), http])
+    try:
+        c = caps()
+    except Exception:
+        c = {}
+    return umsgpack.packb(["stump", version, node_name, bytes(lxmf_hash), http, c])
 
 
-# Other Stumps' addresses, from their beacons: LXMF hex -> {"name", "http", "at"}.
+# This boot, in the beacon ("b"): a Stump that hears another's change knows
+# that one restarted -- and forgot everyone -- so it introduces itself again,
+# as to a Stump it never met (rrc_mesh). Random, so a CAM with its clock not
+# set yet has one too.
+try:
+    import os as _os
+    BOOT = "".join("%02x" % b for b in _os.urandom(3))
+except Exception:
+    BOOT = "%06x" % (int(time.time() * 1000) & 0xFFFFFF)
+
+
+def restarted(lxmf_hex, c):
+    """True when a Stump heard before now beacons another boot."""
+    old = _known.get(lxmf_hex)
+    if not old or not isinstance(c, dict) or not c.get("b"):
+        return False
+    before = (old.get("caps") or {}).get("b")
+    return bool(before) and before != c.get("b")
+
+
+# Other Stumps, from their beacons: LXMF hex -> {"name", "http", "at", "caps"}.
 _known = {}
 KNOWN_MAX = 64
 
 
-def heard(lxmf_hex, name, http):
+def heard(lxmf_hex, name, http, c=None):
     if not lxmf_hex:
         return
-    _known[lxmf_hex] = {"name": name or "", "http": [str(u) for u in (http or [])][:6], "at": time.time()}
+    _known[lxmf_hex] = {"name": name or "", "http": [str(u) for u in (http or [])][:6], "at": time.time(),
+                        "caps": c if isinstance(c, dict) else {}}
     if len(_known) > KNOWN_MAX:
         oldest = sorted(_known.items(), key=lambda kv: kv[1]["at"])[0][0]
         del _known[oldest]
+    _say_version(lxmf_hex)
+
+
+_said = set()
+
+
+def _say_version(lxmf_hex):
+    """Once per Stump per boot: a log line when another Stump speaks an
+    older or newer chain protocol than this one."""
+    if lxmf_hex in _said:
+        return
+    v = _known[lxmf_hex]
+    try:
+        import chain
+        mine = chain.PROTO
+    except Exception:
+        return
+    theirs = _int((v["caps"] or {}).get("p"), 1)
+    if theirs != mine:
+        _said.add(lxmf_hex)
+        print("[chain] %s speaks chain protocol %d, this Stump %d (%s): %s" % (
+            v["name"] or lxmf_hex[:8], theirs, mine, (v["caps"] or {}).get("r") or "an older release",
+            "update it" if theirs < mine else "update this one"))
+
+
+def _int(x, default):
+    try:
+        return int(x) if not isinstance(x, bool) else default
+    except Exception:
+        return default
+
+
+def chain_stumps():
+    """The other Stumps heard, for /chain.json and /admin: name, LXMF,
+    release, chain protocol (1 when their beacon doesn't say: before
+    1.0.0-beta.35), access mode, radio, storage, plugins, heard_s."""
+    now = time.time()
+    out = []
+    for k, v in sorted(_known.items(), key=lambda kv: -kv[1]["at"]):
+        c = v.get("caps") if isinstance(v.get("caps"), dict) else {}
+        s = c.get("s") if isinstance(c.get("s"), (list, tuple)) and len(c.get("s")) == 2 else None
+        pl = c.get("pl") if isinstance(c.get("pl"), (list, tuple)) else []
+        out.append({"name": v["name"], "lxmf": k, "release": str(c.get("r") or "")[:40],
+                    "proto": max(1, _int(c.get("p"), 1)),
+                    "mode": str(c.get("m") or "")[:12], "radio": bool(c.get("rad")),
+                    "has_radio": bool(c.get("rh") or c.get("rad")),
+                    "storage": {"kind": str(s[0])[:8], "free_mb": max(0, _int(s[1], 0))} if s else None,
+                    "plugins": [str(p)[:24] for p in pl][:8],
+                    "heard_s": int(now - v["at"])})
+    return out
 
 
 def directory():

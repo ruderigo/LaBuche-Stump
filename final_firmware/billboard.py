@@ -16,8 +16,8 @@
 
 import os
 import time
-import uasyncio as asyncio
 import i18n
+import webtext
 
 SD_STORAGE_FILE = "/sd/billboard.txt"
 FLASH_STORAGE_FILE = "/billboard.txt"
@@ -48,18 +48,7 @@ BILLBOARD_TTL_SECONDS = 72 * 3600
 MAX_ENTRIES_STORED = 150
 
 
-def _sd_available():
-    """True when the SD card is mounted and writable.
-
-    Checked directly rather than by importing fserv -- fserv already
-    imports THIS module (for _extract_ip), so importing it back would be
-    a circular import. os.stat on the mountpoint is enough: /sd only
-    exists once something has actually been mounted there."""
-    try:
-        os.stat("/sd")
-        return True
-    except OSError:
-        return False
+_sd_available = webtext.sd_available
 
 
 def storage_file():
@@ -128,56 +117,10 @@ def _extract_ip(peername):
     return "unknown"
 
 
-def _esc(s):
-    """Minimal HTML escaping -- MicroPython has no html.escape built in.
-
-    Escapes both quote characters, not just double quotes. Every
-    attribute in this codebase is written single-quoted (value='...'),
-    and a value containing an apostrophe -- confirmed directly against
-    a real admin password -- closed that attribute early, silently
-    truncating whatever came before the apostrophe. The truncated value
-    is what a browser then actually submits back, which fails
-    server-side re-validation and looks exactly like "delete doesn't
-    work" from the outside: no error a user would notice, just a
-    password that quietly isn't the one they typed. &#39; (the decimal
-    numeric reference) rather than &apos;, since the latter isn't
-    recognized in all HTML parsers -- the numeric form always is.
-    """
-    return (s.replace("&", "&amp;").replace("<", "&lt;")
-             .replace(">", "&gt;").replace('"', "&quot;")
-             .replace("'", "&#39;"))
+_esc = webtext.esc
 
 
-def _url_decode(s):
-    """Decodes application/x-www-form-urlencoded text as UTF-8.
-
-    Browsers percent-encode each UTF-8 BYTE of a character -- "é" is
-    sent as %C3%A9. The previous version turned each %XX into its own
-    character, so "café" arrived as "cafÃ©". French is this node's
-    default language, so this garbled every accented billboard post,
-    and anything else decoded here (admin passwords, file-delete
-    checkboxes, download names). Collects the bytes first and decodes
-    them once. Falls back to one character per byte only if the input
-    isn't valid UTF-8 at all, so a malformed request can't raise.
-    """
-    s = s.replace("+", " ")
-    buf = bytearray()
-    i = 0
-    n = len(s)
-    while i < n:
-        if s[i] == "%" and i + 2 < n:
-            try:
-                buf.append(int(s[i + 1:i + 3], 16))
-                i += 3
-                continue
-            except ValueError:
-                pass
-        buf.extend(s[i].encode("utf-8"))
-        i += 1
-    try:
-        return bytes(buf).decode("utf-8")
-    except Exception:
-        return "".join(chr(b) for b in buf)
+_url_decode = webtext.url_decode
 
 
 def _escape_body(text):

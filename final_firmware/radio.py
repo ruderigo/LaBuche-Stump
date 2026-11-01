@@ -202,13 +202,8 @@ def chat_edit():
 
 
 def set_chat_edit(on):
-    try:
-        with open(CHAT_FILE, "w") as f:
-            json.dump({"on": bool(on)}, f)
-        return True
-    except OSError as e:
-        print("[radio] could not save the chat setting:", e)
-        return False
+    import store
+    return store.save_json(CHAT_FILE, {"on": bool(on)}, "radio")
 
 
 def load():
@@ -277,13 +272,8 @@ def parse_form(fields):
 
 
 def save(settings):
-    try:
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(settings, f)
-        return True
-    except OSError as e:
-        print("[radio] could not save settings:", e)
-        return False
+    import store
+    return store.save_json(SETTINGS_FILE, settings, "radio")
 
 
 def apply(settings):
@@ -420,11 +410,8 @@ def switch_link(kind, target="auto"):
     except Exception as e:
         print("[radio] couldn't switch:", e)
         return "failed"
-    try:
-        with open(LINK_FILE, "w") as f:
-            json.dump({"link": kind, "target": target or "auto", "port": port or "auto"}, f)
-    except OSError as e:
-        print("[radio] couldn't keep the choice:", e)
+    import store
+    store.save_json(LINK_FILE, {"link": kind, "target": target or "auto", "port": port or "auto"}, "radio")
     return "done"
 
 
