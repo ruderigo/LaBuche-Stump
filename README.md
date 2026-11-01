@@ -172,12 +172,18 @@ asks before touching the board, and ends with done, skipped or what
 went wrong. The run ends on a summary: each section's result, and what
 to keep (addresses, the chain secret, the next command).
 
+**Optional, recommended:** `pip3 install mpy-cross==1.28.0.post2`. With it,
+the Provisioner sends the CAM its modules compiled (`.mpy`): less than
+half the bytes over USB, and nothing for the board to compile at each
+boot. Without it, or on a board with an older MicroPython, they go as
+source, as before.
+
 Everywhere below, `PORT` means the board's USB serial port, not the
 word itself — find it with `--scan` (on a Mac it looks like
 `/dev/cu.usbmodem5C372383661`).
 
 ```bash
-python3 provisioner.py --check-tools      # verify esptool/mpremote/rnodeconf
+python3 provisioner.py --check-tools      # verify esptool/mpremote/rnodeconf (and mpy-cross)
 python3 provisioner.py --scan             # list connected boards and their ports
 python3 provisioner.py --upload-app PORT  # update the CAM's code only, no erase; keeps its config.py
 python3 provisioner.py --get-ip PORT      # query LAN + hotspot addresses
@@ -348,7 +354,6 @@ final_firmware/              the CAM's firmware (core files hashed in provisione
 ├── billboard.py                 bulletin board storage + rendering
 ├── fserv.py                      file storage, streaming I/O, credit economy, home branding
 ├── captive_portal.py              AP bring-up + DNS redirect
-├── flasher_ui.py                   browser-based board flasher (WebSerial)
 ├── lora_boards.py                   LoRa pinout presets (native SPI radio boards)
 ├── fservbot/                         PLUGIN — channel bot
 ├── stumpid/                           PLUGIN — identity verification + room + mesh access
@@ -428,7 +433,7 @@ by default.
 
 ```
 example_node → captive_portal, barkeep, fserv, billboard, rrc_mesh, node_common, config
-barkeep      → billboard, fserv, rrc, rrc_ui, flasher_ui, i18n
+barkeep      → billboard, fserv, rrc, rrc_ui, i18n
 rrc_mesh     → rrc, stumpid.core (soft -- see below)
 stumpid.core → rrc, i18n
 rrc_ui       → rrc, i18n
@@ -538,9 +543,9 @@ from `/tools`:
 
 - **`provisioner/`** — `provisioner.py` itself (the exact version the
   node was set up with), this README as `Stump-README.md`, `LICENSE`,
-  and `Stump_Beta_A.zip`, the firmware built fresh from the technician's
+  and `Stump-<release>.zip` (`Stump-1.0.0-beta.35.zip`), the firmware built fresh from the technician's
   own `final_firmware/`;
-- **`flasher/`** — the browser flasher's assets (hidden feature HF-001).
+- **`flasher/`** — `esptool-bundle.js` + its licence, build inputs for Arborist (`scripts/build_arborist.py`); no longer shipped to the board (HF-001 retired, beta.41).
   It holds no firmware images: staging a GPL-3.0 RNode image there would
   make the node *convey* it, which needs its source offered alongside
   (see `tools_payload/images/README.txt`);
@@ -1264,7 +1269,7 @@ The Heltec Bridge role runs
 µReticulum above, by a different author). Both are used as pre-built
 binaries pulled directly from their own upstream releases and flashed
 as-is; neither is included as source anywhere in this repository or in
-`Stump_Beta_A.zip`, so this project's own code remains MIT throughout —
+`Stump-<release>.zip`, so this project's own code remains MIT throughout —
 true today, and worth keeping true: see "What ends up in `/sd/tools/`"
 above for the one place that claim would need re-checking if it ever
 changes (staging a real firmware binary for the browser flasher).
@@ -1283,19 +1288,13 @@ See `LICENSE` for this build's own terms and the full third-party list.
 
 ## Hidden features
 
-Two things exist fully in the code, still work if you know the URL,
-but are deliberately unlinked from the visible UI — not deleted,
-because the actual remove-vs-keep decision was left open for a future
-JIRA epic rather than made silently. Full detail, code locations, and
-what each decision would need, in `docs/HIDDEN_FEATURES.md`:
+Features the code has but the pages don't link, with what each would
+need, in `docs/HIDDEN_FEATURES.md`:
 
-- **`HF-001`** — the browser-based WebSerial flasher (`/flash`, `/fw`).
-  `/tools` briefly showed plain CLI steps in its place; those are gone
-  from the page too now, replaced by pushing `README.md` itself to the
-  node instead (see "What ends up in `/sd/tools/`" above).
-- **`HF-002`** — the "awaiting-slot" upload hash field. The field
-  itself is unrelated to the file-deletion feature documented above —
-  that's a separate capability that shipped since this entry was
-  written, and doesn't touch the awaiting-slot mechanism at all.
+- **`HF-001`** — the on-device WebSerial flasher (`/flash`, `/fw`): **retired in beta.41**, replaced by Arborist (`docs/ARBORIST.md`). Historical:
+  still works by URL; to be brought back, linked from `/tools` (roadmap,
+  step 4).
+- **`HF-002`** — the "awaiting-slot" upload: **removed** in
+  1.0.0-beta.35 (nothing could open a slot).
 - **`HF-003`** — the Concierge (BarKeep) chat box: **brought back** as
   the librarian (above), on the Files and Billboard pages.

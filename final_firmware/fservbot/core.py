@@ -196,13 +196,8 @@ def _save():
     fserv's ledger and the billboard's flash fallback."""
     if not billboard._sd_available():
         return False
-    try:
-        with open(STORAGE_FILE, "w") as f:
-            json.dump({"custom": _custom, "disabled": _disabled,
-                       "opts": _opts}, f)
-        return True
-    except OSError:
-        return False
+    import store
+    return store.save_json(STORAGE_FILE, {"custom": _custom, "disabled": _disabled, "opts": _opts}, "fservbot")
 
 
 def _persist_note(ok):
@@ -335,7 +330,8 @@ def check_op_password(pw):
     a node that was never set up cannot be reconfigured by a passer-by
     who simply omits the argument.
     """
-    return bool(FSERVBOT_OP_PASSWORD) and pw == FSERVBOT_OP_PASSWORD
+    import webtext
+    return bool(FSERVBOT_OP_PASSWORD) and webtext.same(pw, FSERVBOT_OP_PASSWORD)
 
 
 # Old name, kept as a direct alias rather than a deprecated wrapper --

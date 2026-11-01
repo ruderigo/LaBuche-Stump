@@ -590,6 +590,11 @@ is the highest message `id` you already have.
 - `kind`: `msg`, `system` (room activity, written as symbols — see
   *Room activity and DMs are symbols* below; `nick` is `"*"`),
   `action` (`/me`), or `dm`.
+- A message may carry `"bot": true` (since 1.0.0-beta.36): said by a bot
+  or a plugin (BarKeep, the Tavernier), not a person. Show it as you
+  like; don't offer it as a DM contact. `"via"` (hex) marks a line
+  relayed from another Stump of the chain. Ignore any other key you
+  don't know.
 - `messages` and `dms` share one id sequence — one `since` covers both.
 - `users` is the people in your room **plus** mesh peers reachable by
   DM only (see RRC over LXMF) and, on a chain, people on the other
@@ -603,7 +608,16 @@ is the highest message `id` you already have.
   French); the nick itself is unchanged.
 - `hw`: `{"state": "none"|"online"|"connecting"|"error", "title"}` — the
   node's radio, for a status light (`title`: the port, board and RNode
-  firmware, or the problem, one line per radio). Details: `GET /hw.json`.
+  firmware, or the problem, one line per radio). Details: `GET /hw.json`,
+  which also has `"lora": {"state", "down_s"}` (since 1.0.0-beta.38): the
+  radio here **or along the chain** -- `up`, `connecting` (lost for less
+  than 2 minutes: its own reconnect), `down` (longer: `down_s` seconds),
+  or `none` (no radio here nor along the chain). While it's `connecting`
+  or `down`, lines and DMs for LoRa wait and go out when it's back (up
+  to an hour); past the 2 minutes, a line to `#lora-mesh` or a DM to
+  someone on LoRa is answered, once a minute, `⧗ — the radio has been
+  down for N min: your message will go out when it's back (kept up to an
+  hour)`.
   When `/admin` lets the chat change the radio, it also has `settings`
   (`{"frequency", "bandwidth", "sf", "cr", "txpower"}`, in Hz) and
   `edit` (whether this client may: the computer's owner or an `/admin`
@@ -815,12 +829,28 @@ identity, aspect **`stump.node`**, alongside its normal LXMF address.
 Its announce data is a msgpack list:
 
 ```
-["stump", <firmware version>, <node name>, <16-byte LXMF delivery hash>]
+["stump", <firmware version>, <node name>, <16-byte LXMF delivery hash>,
+ [<web addresses>], {<capabilities>}]
 ```
 
 The version is a free-text label (`"Beta A"` today), for showing, not
 parsing. Read the first four elements and ignore any more: later
-firmware may append fields.
+firmware may append fields. Since 1.0.0-beta.21 the fifth is the list
+of web addresses; since 1.0.0-beta.35 the sixth is what the Stump is
+and has, a map with short keys (it goes over LoRa too):
+
+| Key | Value |
+|---|---|
+| `p` | The chain protocol it speaks (2 since 1.0.0-beta.35; a beacon without it is 1) |
+| `r` | Its release, `"1.0.0-beta.35"` |
+| `m` | Its access mode: `open`, `hybrid`, `mandatory` |
+| `rad` | Its own radio is online |
+| `s` | `[kind, free MB]`: `sd` (a CAM's card), `pc` (a computer's folder), `none` |
+| `pl` | The plugins running (at most 8 names) |
+| `rh` | It has a radio, online or not (since 1.0.0-beta.38; `rad` says whether it's online) |
+| `b` | This boot: a short random id, fixed until the Stump restarts (since 1.0.0-beta.43). A new value for a Stump you've seen means it restarted. |
+
+Treat every field as optional, and its value as untrusted.
 
 So any LXMF address that has a `stump.node` announce on the same
 identity is a Stump; everything else is a person (or another app).
@@ -855,7 +885,13 @@ RNS.Transport.request_path(beacon)
 
 Beacons go out at boot, every 30 minutes (`STUMP_ANNOUNCE_INTERVAL`)
 and within seconds of a new chain link, so on first sight of a peer,
-asking is faster than waiting. Only CAM
+asking is faster than waiting. Since 1.0.0-beta.43 a Stump also answers
+at once when a peer it knows restarts (its `b` changed) or beacons for
+the first time since this Stump started -- so after a restart (a reboot,
+install or update) a Stump re-lists the others (`/stumps.json`,
+`/chain.json` `stumps`) and re-names them in `#wifi-mesh` within seconds,
+not at the next half-hourly beacon and 2-minute announce. A client needs
+no change for this; it only makes the lists fill in faster. Only CAM
 nodes beacon: a standalone Heltec transport runs different firmware and
 has no chat of its own.
 
@@ -983,6 +1019,26 @@ upstream delivers locally.
 
 ## Billboard
 
+**Over LoRa (or from the chat), since 1.0.0-beta.38** -- for a LoRa
+Board tab: three RRC commands, sent as LXMF message content to the
+Stump and answered over LXMF, like `/rooms`:
+
+| Send | Answer |
+|---|---|
+| `/board` | The newest notices, at most 5, one per line: `#482193 Marché samedi` |
+| `/board <words>` | The same, those about the words (titles and bodies, accents and case ignored); none: `nothing on the billboard about "<words>"` |
+| `/board <id>` | `#<id> <title>`, then the body on the following lines; gone: `no notice #<id> (expired?)` |
+| `/post <title> \| <body>` | `✓ #<id>`; or `⧗ — …` (posting limit), `a title is required`, `the notice couldn't be saved`, `no billboard on this Stump` |
+
+The `<id>` there is the short one: 6 digits, the start of the part after
+the dot in `/billboard.json`'s `id` (`1790978231.612803836` → `612803`).
+The full id works in `/board <id>` too. The same rules as posting over
+Wi-Fi: title 80 characters, body 600 (its line breaks kept), the
+billboard's posting limit; a signed LXMF message counts as verified, so
+the access mode applies as for chat. Answers are in the person's
+language, the `#<id>` and `✓` forms never translated. Five titles fit
+one or two packets on air; a body of 600 goes as a resource.
+
 **`GET /billboard.json`** — the billboard as data, newest first:
 
 ```json
@@ -1062,13 +1118,12 @@ With `Accept: application/json`: `{"reply": "<HTML>", "found": {"intents",
 "body", "snippet"}`. Both JSON endpoints answer `404` when their
 feature is off on the node. `GET /files` is the rendered HTML page.
 
-**`POST /upload`** — raw body, not multipart; filename and optional
-slot hash in headers:
+**`POST /upload`** — raw body, not multipart; the filename in a
+header:
 
 ```
 POST /upload
 X-Filename: photo.jpg
-X-Hash: <optional, see "regulated upload" below>
 Content-Length: <n>
 
 <raw file bytes>
@@ -1080,7 +1135,7 @@ codes:
 
 | Status | `error` | Meaning |
 |---|---|---|
-| `200` | — | `{"ok": true, "name", "size", "slot", "balance", "message"}` — `name` is the stored (sanitized) name; `balance` is `null` with credits off or for a slot delivery; `"warning": "bookkeeping"` if the file is saved but the balance couldn't be updated |
+| `200` | — | `{"ok": true, "name", "size", "slot", "balance", "message"}` — `name` is the stored (sanitized) name; `balance` is `null` with credits off; `slot` is always `false` (kept for older clients: awaiting-slot uploads were removed in 1.0.0-beta.35); `"warning": "bookkeeping"` if the file is saved but the balance couldn't be updated |
 | `400` | `no_filename` / `empty` | No `X-Filename`, or an empty body |
 | `503` | `no_card` | No SD card mounted |
 | `507` | `full` | Card at its 75% ceiling with nothing evictable (files shared in the last hour aren't pushed out for someone else's) |
@@ -1134,12 +1189,6 @@ disables them per node). Weight by extension: video (`mp4 mkv avi
 mov`) 3, music (`mp3 flac wav ogg m4a`) 2, documents (`pdf txt doc
 docx`) 1, anything else 1. Uploads credit that weight; downloads debit
 it. All zero when credits are off.
-
-**Regulated upload ("awaiting slot")**: a hash can be marked, locally
-on the node, as awaiting one specific upload. Send that hash as
-`X-Hash` and the file goes to its own one-shot slot instead of the
-shared pool, marked fulfilled only once the bytes are on disk. Omit
-`X-Hash` (or send it empty) for ordinary uploads.
 
 ## Apps and tools
 

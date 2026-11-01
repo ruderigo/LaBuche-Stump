@@ -13,7 +13,7 @@
 # messages. It does NOT cover: fservbot's dialogue CONTENT (that's
 # operator-authored text set via /fsadd -- translating an operator's
 # own words for them doesn't make sense; if they want a bilingual bot,
-# that's a separate feature, not this one), the Tools/Flash pages
+# that's a separate feature, not this one), the Tools page
 # (technician-facing, not the community-facing surface this exists
 # for), or every rare edge-case error string in the codebase. Anything
 # not in STRINGS falls back to English via t()'s own missing-key
@@ -60,21 +60,8 @@ def reset():
     _prefs.clear()
 
 
-def _url_encode(s):
-    """Minimal percent-encoding, matching barkeep.py's own encoder
-    exactly. Duplicated rather than imported: barkeep.py already
-    imports THIS module, so importing barkeep's encoder back would be
-    a circular import -- the same kind this project has deliberately
-    avoided elsewhere (billboard.py/fserv.py). A ~5-line duplication is
-    the smaller cost."""
-    safe = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
-    out = ""
-    for ch in s:
-        if ch in safe:
-            out += ch
-        else:
-            out += "%%%02X" % ord(ch)
-    return out
+import webtext
+_url_encode = webtext.url_encode
 
 
 def switcher_html(lang, current_path, css_class="langbar"):
@@ -148,7 +135,6 @@ STRINGS = {
     "nav_board": {"fr": "Babillard", "en": "Board", "es": "Tablón"},
     "nav_files": {"fr": "Fichiers", "en": "Files", "es": "Archivos"},
     "nav_tools": {"fr": "Outils", "en": "Tools", "es": "Herramientas"},
-    "nav_flash": {"fr": "Flasher", "en": "Flash", "es": "Grabar"},
     "tile_chat_sub": {
         "fr": "clavarder avec les gens ici",
         "en": "talk to whoever's here",
@@ -216,7 +202,6 @@ STRINGS = {
         "en": "Direct Messages",
         "es": "Mensajes directos",
     },
-    "rrc_you_are": {"fr": "tu es", "en": "you are", "es": "eres"},
     "rrc_not_sent": {
         "fr": "non envoyé — problème de connexion",
         "en": "not sent — connection problem",
@@ -224,11 +209,6 @@ STRINGS = {
     },
 
     # ---- rrc.py command replies ----
-    "help_header": {
-        "fr": "Voici ce que j'ai\u00a0:",
-        "en": "Here's what I've got:",
-        "es": "Esto es lo que tengo:",
-    },
     "help_msg": {
         "fr": "message privé, seul(e) cette personne le voit",
         "en": "private message, only they see it",
@@ -409,11 +389,6 @@ STRINGS = {
         "en": "Everyone's in here &mdash; <a href='/rrc'>open RRC</a>.",
         "es": "Todos están aquí — <a href='/rrc'>abre RRC</a>.",
     },
-    "bot_billboard_pointer": {
-        "fr": "Juste là — <a href='/billboard'>le babillard</a>.",
-        "en": "Right through there &mdash; <a href='/billboard'>the billboard</a>.",
-        "es": "Justo ahí — <a href='/billboard'>el tablón</a>.",
-    },
     "bot_files_no_card": {
         "fr": "L'étagère est vide pour l'instant — pas de carte dans le lecteur.",
         "en": "Shelf's empty right now &mdash; no card in the slot.",
@@ -451,16 +426,6 @@ STRINGS = {
     },
     "bot_credit_singular": {"fr": "crédit", "en": "credit", "es": "crédito"},
     "bot_credit_plural": {"fr": "crédits", "en": "credits", "es": "créditos"},
-    "bot_unknown": {
-        "fr": "Je ne connais pas celle-là. Essaie <b>menu</b>.",
-        "en": "Don't know that one. Try <b>menu</b>.",
-        "es": "No conozco esa. Prueba <b>menu</b>.",
-    },
-    "home_say_something": {
-        "fr": "Dis quelque chose…",
-        "en": "Say something...",
-        "es": "Di algo…",
-    },
     "home_you_label": {"fr": "Toi", "en": "You", "es": "Tú"},
     "home_bring_something": {
         "fr": "Envie de partager quelque chose\u00a0?",
@@ -468,11 +433,6 @@ STRINGS = {
         "es": "¿Quieres compartir algo?",
     },
     "home_upload_button": {"fr": "Envoyer", "en": "Upload", "es": "Subir"},
-    "home_awaiting_hash": {
-        "fr": "Jeton d'attente (optionnel)",
-        "en": "Awaiting-slot hash (optional)",
-        "es": "Código de espera (opcional)",
-    },
     "home_sending": {"fr": "Envoi…", "en": "Sending...", "es": "Enviando…"},
     # Default topics of the two built-in rooms, shown in each reader's
     # language until someone sets a real topic.
@@ -520,6 +480,23 @@ STRINGS = {
     "admin_chain_trying": {"fr": "En train de rejoindre « {ssid} »…", "en": "Trying to join '{ssid}'…", "es": "Intentando unirse a «{ssid}»…"},
     "admin_chain_below": {"fr": "Reliés en dessous : {list}", "en": "Linked below this one: {list}", "es": "Enlazados debajo: {list}"},
     "admin_chain_none_below": {"fr": "Rien n'est encore relié en dessous.", "en": "Nothing has linked below this one yet.", "es": "Nada se ha enlazado debajo todavía."},
+    "admin_chain_parent_plain": {"fr": "Le Stump du dessus ne prouve pas le secret de chaîne (une version antérieure à 1.0.0-beta.37) : mettez-le à jour.",
+                                 "en": "The Stump above doesn't prove the chain secret (a release before 1.0.0-beta.37): update it.",
+                                 "es": "El Stump de arriba no demuestra el secreto de cadena (una versión anterior a 1.0.0-beta.37): actualízalo."},
+    "admin_chain_refused": {"fr": "Refusé : {ip} a essayé de rejoindre avec un autre secret de chaîne ({n} fois, il y a {ago})",
+                            "en": "Refused: {ip} tried to join with another chain secret ({n} times, {ago} ago)",
+                            "es": "Rechazado: {ip} intentó unirse con otro secreto de cadena ({n} veces, hace {ago})"},
+    "admin_chain_stumps": {"fr": "Les autres Stumps :", "en": "The other Stumps:", "es": "Los otros Stumps:"},
+    "admin_chain_older": {"fr": "version antérieure à 1.0.0-beta.35", "en": "a release before 1.0.0-beta.35",
+                          "es": "una versión anterior a 1.0.0-beta.35"},
+    "admin_chain_update_it": {"fr": "plus ancien que celui-ci : à mettre à jour (les noms peuvent apparaître en double)",
+                              "en": "older than this one: update it (names may show twice)",
+                              "es": "más antiguo que este: actualízalo (los nombres pueden aparecer dos veces)"},
+    "admin_chain_update_me": {"fr": "plus récent que celui-ci : mettez celui-ci à jour",
+                              "en": "newer than this one: update this one",
+                              "es": "más reciente que este: actualiza este"},
+    "admin_chain_ago_s": {"fr": "{n} s", "en": "{n} s", "es": "{n} s"},
+    "admin_chain_ago_min": {"fr": "{n} min", "en": "{n} min", "es": "{n} min"},
     "admin_chain_nosecret": {"fr": "Pas de secret de chaîne : n'importe qui sur ce Wi-Fi pourrait s'y joindre. Réglez CHAIN_SECRET.", "en": "No chain secret: anyone on this Wi-Fi could join the chain. Set CHAIN_SECRET.", "es": "Sin secreto de cadena: cualquiera en este Wi-Fi podría unirse. Configure CHAIN_SECRET."},
     "help_legend": {
         "fr": "✓ arrivé · ✗ parti · ✎ changé · → vers · ⊖ personne de ce nom · ~ sur le maillage · [DM] message privé · = déjà là · ? commande inconnue · ⊘ refusé · ♪ note vocale · ⧗ ralentis",
@@ -613,6 +590,13 @@ STRINGS = {
     "admin_rescue_try": {"fr": "Démarrer normalement", "en": "Start normally", "es": "Arrancar normalmente"},
     "admin_watchdog_note": {"fr": "Le Stump ne répondait plus : le chien de garde l'a redémarré.", "en": "The Stump had stopped responding: the watchdog restarted it.", "es": "El Stump dejó de responder: el perro guardián lo reinició."},
     "admin_setup_storage": {"fr": "Stockage", "en": "Storage", "es": "Almacenamiento"},
+    "admin_setup_computer": {"fr": "Cet ordinateur", "en": "This computer", "es": "Este ordenador"},
+    "admin_setup_awake_on": {"fr": "gardé éveillé", "en": "kept awake", "es": "se mantiene despierto"},
+    "admin_setup_awake_off": {"fr": "peut se mettre en veille", "en": "may sleep", "es": "puede suspenderse"},
+    "admin_setup_awake_failed": {"fr": "éveil demandé, sans effet", "en": "awake asked for, not held", "es": "despierto pedido, sin efecto"},
+    "admin_setup_keep_awake": {"fr": "Garder l'ordinateur éveillé tant que le Stump tourne", "en": "Keep the computer awake while the Stump runs", "es": "Mantener el ordenador despierto mientras el Stump funciona"},
+    "admin_setup_keep_awake_note": {"fr": "En veille, le Stump ne répond à personne : la chaîne le perd, les visiteurs n'ont rien. L'écran peut encore s'éteindre. Un portable fermé sur batterie se met quand même en veille.", "en": "Asleep, the Stump answers nobody: the chain loses it, visitors get nothing. The screen may still turn off. A laptop closed on battery still sleeps.", "es": "Suspendido, el Stump no responde a nadie: la cadena lo pierde, los visitantes no reciben nada. La pantalla aún puede apagarse. Un portátil cerrado con batería se suspende igualmente."},
+    "admin_setup_awake_none": {"fr": "Rien sur cet ordinateur ne peut le garder éveillé (ni caffeinate ni systemd-inhibit) : réglez la veille dans ses paramètres.", "en": "Nothing on this computer can keep it awake (no caffeinate or systemd-inhibit): set sleep in its system settings.", "es": "Nada en este ordenador puede mantenerlo despierto (ni caffeinate ni systemd-inhibit): ajuste la suspensión en su configuración."},
     "admin_setup_storage_mb": {"fr": "Taille de la « carte » de cet ordinateur (le dossier sd/), en Mo", "en": "Size of this computer's \"card\" (the sd/ folder), in MB", "es": "Tamaño de la «tarjeta» de este ordenador (la carpeta sd/), en MB"},
     "admin_setup_storage_note": {"fr": "Environ {share} pour les fichiers partagés : ils la remplissent jusqu'à {pct} %, puis les plus anciens font de la place. Dedans maintenant : {used}. Le disque a {free} de libre. Plus petit que ce qu'elle contient : les plus anciens partent au prochain dépôt.", "en": "About {share} for shared files: they fill it to {pct}%, then the oldest make room. In it now: {used}. The disk has {free} free. Smaller than what it holds: the oldest go at the next upload.", "es": "Unos {share} para archivos compartidos: la llenan hasta el {pct} %, y luego los más antiguos dejan sitio. Dentro ahora: {used}. El disco tiene {free} libres. Más pequeña que lo que contiene: los más antiguos se van en la próxima subida."},
     "admin_setup_access": {"fr": "Qui peut entrer", "en": "Who may enter", "es": "Quién puede entrar"},
@@ -905,6 +889,20 @@ STRINGS = {
     "rec_refused": {"fr": "Le micro n'est pas permis : autorise-le pour ce site, ou ferme cette fenêtre et utilise l'enregistreur du téléphone.", "en": "The microphone isn't allowed: allow it for this site, or close this window and use the phone's recorder.", "es": "El micrófono no está permitido: permítelo para este sitio, o cierra esta ventana y usa la grabadora del teléfono."},
     "rec_no_opener": {"fr": "Ouvre l'enregistreur depuis le bouton ♪ du clavardage.", "en": "Open the recorder from the chat's ♪ button.", "es": "Abre la grabadora desde el botón ♪ del chat."},
     "chat_rate": {"fr": "tu écris trop vite — attends un peu", "en": "you're typing too fast — wait a little", "es": "escribes demasiado rápido — espera un poco"},
+    "lora_down_waits": {"fr": "la radio est coupée depuis {min} min : ton message partira à son retour (gardé jusqu'à une heure)",
+                        "en": "the radio has been down for {min} min: your message will go out when it's back (kept up to an hour)",
+                        "es": "la radio lleva {min} min caída: tu mensaje saldrá cuando vuelva (se guarda hasta una hora)"},
+    "board_off": {"fr": "pas de babillard sur ce Stump", "en": "no billboard on this Stump", "es": "no hay tablón en este Stump"},
+    "board_empty": {"fr": "rien au babillard pour l'instant", "en": "nothing on the billboard yet", "es": "nada en el tablón por ahora"},
+    "board_none_about": {"fr": "rien au babillard sur « {words} »", "en": "nothing on the billboard about \"{words}\"", "es": "nada en el tablón sobre «{words}»"},
+    "board_not_found": {"fr": "pas d'annonce #{id} (expirée ?)", "en": "no notice #{id} (expired?)", "es": "no hay anuncio #{id} (¿caducado?)"},
+    "post_usage": {"fr": "/post <titre> | <texte> -- le texte est facultatif", "en": "/post <title> | <text> -- the text is optional", "es": "/post <título> | <texto> -- el texto es opcional"},
+    "post_title_required": {"fr": "il faut un titre", "en": "a title is required", "es": "hace falta un título"},
+    "post_not_saved": {"fr": "l'annonce n'a pas pu être enregistrée", "en": "the notice couldn't be saved", "es": "no se pudo guardar el anuncio"},
+    "help_board": {"fr": "les dernières annonces (ou celles sur ces mots) ; /board <n°> en ouvre une", "en": "the newest notices (or those about the words); /board <id> opens one", "es": "los últimos anuncios (o los de esas palabras); /board <n.º> abre uno"},
+    "help_post": {"fr": "une nouvelle annonce au babillard", "en": "a new notice on the billboard", "es": "un nuevo anuncio en el tablón"},
+    "help_arg_words": {"fr": "[mots]", "en": "[words]", "es": "[palabras]"},
+    "help_arg_title": {"fr": "<titre>", "en": "<title>", "es": "<título>"},
     "post_rate": {"fr": "trop d'annonces d'un coup — réessaie dans une minute", "en": "too many posts at once — try again in a minute", "es": "demasiados anuncios seguidos — vuelve a intentarlo en un minuto"},
     "admin_locked": {"fr": "trop de mots de passe erronés — réessaie dans {s} s", "en": "too many wrong passwords — try again in {s} s", "es": "demasiadas contraseñas incorrectas — vuelve a intentarlo en {s} s"},
     "voice_needs_target": {
@@ -962,7 +960,6 @@ STRINGS = {
         "es": "tu mensaje llegó con {minutes} min de retraso (dejado en un nodo de propagación) — no se hizo nada; reenvíalo directamente",
     },
     "voice_unplayable": {"fr": "format non pris en charge", "en": "format not supported", "es": "formato no compatible"},
-    "sym_voice": {"fr": "note vocale", "en": "voice note", "es": "nota de voz"},
     "sym_rate": {"fr": "ralentis", "en": "slow down", "es": "más despacio"},
     "about_tab_about": {
         "fr": "Projet (v1)",
@@ -1129,11 +1126,6 @@ STRINGS = {
         "en": "Read me",
         "es": "Léeme",
     },
-    "tools_tech_h2": {
-        "fr": "Outils du technicien",
-        "en": "Technician tools",
-        "es": "Herramientas del técnico",
-    },
     "admin_home_header": {"fr": "Section de la page d'accueil", "en": "Home page section", "es": "Sección de la página de inicio"},
     "admin_home_place": {
         "fr": "Où la placer",
@@ -1202,16 +1194,6 @@ STRINGS = {
     },
 
     # ---- Billboard ----
-    "billboard_shelf_empty": {
-        "fr": "Rien sur le babillard pour l'instant.",
-        "en": "Nothing on the shelf yet.",
-        "es": "Todavía no hay nada en el tablón.",
-    },
-    "billboard_post_placeholder": {
-        "fr": "écris un avis…",
-        "en": "write a notice...",
-        "es": "escribe un aviso…",
-    },
     "billboard_post_button": {"fr": "Publier", "en": "Post", "es": "Publicar"},
     "billboard_title_placeholder": {
         "fr": "titre de l'avis",
@@ -1324,9 +1306,9 @@ STRINGS = {
     },
     "admin_tools_header": {"fr": "Page Outils", "en": "Tools page", "es": "Página de herramientas"},
     "admin_tools_intro": {
-        "fr": "Coche ce qu'il faut retirer de la page Outils ; c'est effacé de la carte SD. Le Provisioner remet ses propres outils (Provisioner, flasheur, applis FireFly) à la prochaine mise à jour, sauf avec --skip-tools.",
-        "en": "Tick what to take off the Tools page; it's deleted from the SD card. The Provisioner puts its own tools (Provisioner, flasher, FireFly apps) back at its next update, unless run with --skip-tools.",
-        "es": "Marca lo que quieras quitar de la página de herramientas; se borra de la tarjeta SD. El Provisioner vuelve a poner sus propias herramientas (Provisioner, flasheador, apps FireFly) en su próxima actualización, salvo con --skip-tools.",
+        "fr": "Coche ce qu'il faut retirer de la page Outils ; c'est effacé de la carte SD. Le Provisioner remet ses propres outils (Provisioner, applis FireFly) à la prochaine mise à jour, sauf avec --skip-tools.",
+        "en": "Tick what to take off the Tools page; it's deleted from the SD card. The Provisioner puts its own tools (Provisioner, FireFly apps) back at its next update, unless run with --skip-tools.",
+        "es": "Marca lo que quieras quitar de la página de herramientas; se borra de la tarjeta SD. El Provisioner vuelve a poner sus propias herramientas (Provisioner, apps FireFly) en su próxima actualización, salvo con --skip-tools.",
     },
     "admin_tools_whole": {
         "fr": "toute la section ({n} fichiers)",
@@ -1417,16 +1399,6 @@ STRINGS = {
 
     # ---- stumpid: identity + room access (human-readable text only --
     # never the AUTH-CHALLENGE/OK/FAIL markers themselves) ----
-    "whoami_not_verified": {
-        "fr": "pas vérifié(e) — envoie /auth pour prouver une identité",
-        "en": "not verified -- send /auth to prove an identity",
-        "es": "no verificado — envía /auth para probar una identidad",
-    },
-    "whoami_verified": {
-        "fr": "vérifié(e) comme {hash}  surnom\u00a0: {nick}",
-        "en": "verified as {hash}  nick={nick}",
-        "es": "verificado como {hash}  apodo={nick}",
-    },
     "room_needs_verified": {
         "fr": "cette salle exige une identité vérifiée — envoie /auth d'abord",
         "en": "that room requires a verified identity -- send /auth first",

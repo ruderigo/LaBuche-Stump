@@ -94,10 +94,6 @@ def _load_admin_file():
         return None, 0
 
 
-def _load_admin_choice():
-    return _load_admin_file()[0]
-
-
 # _STAMP counts the admin's "for everyone" changes. A browser's own pick
 # (the per-browser buttons in /admin) is saved with the stamp it was made
 # under; once the admin changes the theme for everyone, the stamp moves
@@ -128,13 +124,10 @@ def set_site_theme(name):
     """Saves an admin's choice for everyone (None: back to config.py's).
     Returns True if it was saved."""
     global _ADMIN_CHOICE, _STAMP
-    import json
     if name is not None and name not in THEMES:
         return False
-    try:
-        with open(SITE_THEME_FILE, "w") as f:
-            json.dump({"theme": name, "stamp": _STAMP + 1}, f)
-    except OSError:
+    import store
+    if not store.save_json(SITE_THEME_FILE, {"theme": name, "stamp": _STAMP + 1}, "theme"):
         return False
     _ADMIN_CHOICE, _STAMP = name, _STAMP + 1
     return True

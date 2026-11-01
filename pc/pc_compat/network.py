@@ -33,6 +33,13 @@ class WLAN:
             return None                    # the OS sets addresses, not Stump
         ip = stump_host.hotspot_ip()
         gw = stump_host.parent_ip() if self._if == STA_IF else ""
+        if self._if == STA_IF:
+            # A computer with two networks -- its hotspot for visitors, and
+            # another (Ethernet, a second Wi-Fi) it reaches the Stump above
+            # on -- can sit in the middle of a chain: PC_STA_IP is its
+            # address on that other network. Unset: the hotspot's (one
+            # network for both, the usual case).
+            ip = stump_host.setting("PC_STA_IP", "") or ip
         return (ip, "255.255.255.0", gw or ip, ip)
 
     def config(self, *args, **kwargs):

@@ -50,6 +50,8 @@ def main():
     sys.path[:0] = [os.path.join(HERE, "pc_compat"), HERE]
     import stump_host
     stump_host.install(HERE)
+    if stump_host.setting("PC_KEEP_AWAKE", False):          # (/admin, This computer)
+        stump_host.keep_awake(True)
     print("[stump] on a computer: %s, Python %s" % (sys.platform, sys.version.split()[0]))
     print("[stump] folder: " + HERE)
     print("[stump] visitors reach it at http://%s/" % stump_host.hotspot_ip())
@@ -58,6 +60,12 @@ def main():
     except KeyboardInterrupt:
         raise
     except BaseException as e:
+        if _STOPPING:
+            # A stop was asked for (SIGTERM): what comes out of asyncio
+            # cancelling the tasks is the stop, not a crash (it printed a
+            # traceback now and then, docs/TODO.md).
+            print("[stump] stopped (%s while stopping)" % type(e).__name__)
+            return
         # Kept for /admin's next start (keepalive.py): what made it stop.
         try:
             import keepalive
@@ -94,12 +102,15 @@ def _close_radios():
                 pass
 
 
+_STOPPING = []           # set once a stop was asked for (SIGTERM)
+
+
 def _stop_on_sigterm():
     """launchctl unload, systemctl stop, a scheduled task ending: SIGTERM,
     handled like Ctrl-C so the radio is switched off first."""
     import signal
 
-    stopping = []
+    stopping = _STOPPING
 
     def stop(signum, frame):
         # Once is enough: a second stop while it's already stopping would
@@ -117,6 +128,22 @@ def _stop_on_sigterm():
             threading.Timer(0.05, os.kill, (os.getpid(), signum)).start()
             return
         stopping.append(1)
+        # Inside the event loop: the stop goes in as the loop's next step,
+        # not wherever the signal happened to land -- raised in the middle
+        # of a request (a connection being counted out, a task being
+        # cancelled) it now and then left a traceback instead of a clean
+        # stop. It still comes out of asyncio.run as a KeyboardInterrupt,
+        # as a Ctrl-C does.
+        try:
+            import asyncio
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            def _stop_now():
+                raise KeyboardInterrupt
+            loop.call_soon_threadsafe(_stop_now)
+            return
         raise KeyboardInterrupt
     try:
         signal.signal(signal.SIGTERM, stop)
@@ -153,6 +180,9 @@ def _mark_watchdog():
         pass
 
 
+SLEPT_S = 10       # the watch loop late by this much: the computer slept
+
+
 def _wait_watched(child, t0, log):
     """child.wait(), but if the Stump's heartbeat (keepalive.py) goes stale
     -- its loop stopped -- it's ended, and "watchdog" returned so it's
@@ -160,11 +190,24 @@ def _wait_watched(child, t0, log):
     import time
     hb = os.path.join(HERE, ".heartbeat")
     limit = _watchdog_s()
+    last, woke = time.time(), 0
     while True:
         try:
             return child.wait(timeout=2)
         except Exception:
             pass
+        # This loop comes round every 2 s. Much longer since the last time
+        # means the whole computer was asleep (a laptop's lid, idle sleep):
+        # the Stump was suspended with it, not hung. It gets a full `limit`
+        # from now to beat again -- a real hang is still caught after that.
+        # (Before 1.0.0-beta.45 each wake-up restarted it as "stopped
+        # responding", and a night of sleeps ended in rescue starts.)
+        now = time.time()
+        if now - last > SLEPT_S:
+            woke = now
+            log.write("[stump] the computer was asleep (%d s): not a hang\n" % (now - last))
+            log.flush()
+        last = now
         if limit <= 0:
             continue
         try:
@@ -173,7 +216,7 @@ def _wait_watched(child, t0, log):
             continue
         if beat < t0:
             continue                 # not started beating yet (or an old file)
-        if time.time() - beat > limit:
+        if now - max(beat, woke) > limit:
             log.write("[stump] it stopped responding (no heartbeat for %d s): restarting it\n" % limit)
             log.flush()
             _mark_watchdog()
@@ -199,7 +242,8 @@ def service():
         child = None
         try:
             child = subprocess.Popen([sys.executable, "-u", os.path.abspath(__file__)],
-                                     cwd=HERE, stdout=log, stderr=subprocess.STDOUT)
+                                     cwd=HERE, stdout=log, stderr=subprocess.STDOUT,
+                                     env=dict(os.environ, STUMP_SUPERVISED="1"))  # (stump_host.restart)
             code = _wait_watched(child, t0, log)
         except KeyboardInterrupt:
             if child is not None and child.poll() is None:

@@ -55,18 +55,8 @@ def _load():
 
 
 def _save(d):
-    try:
-        tmp = STATE_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(d, f)
-        import os
-        try:
-            os.rename(tmp, STATE_FILE)
-        except OSError:
-            os.remove(STATE_FILE)
-            os.rename(tmp, STATE_FILE)
-    except Exception:
-        pass       # a full or read-only filesystem isn't worth failing over
+    import store
+    store.save_json(STATE_FILE, d, "watchdog")    # a full or read-only filesystem isn't worth failing over
 
 
 def _now():
@@ -113,6 +103,10 @@ def _say_reset():
     print("[watchdog] last reset: %s (code %s)" % (names.get(c, "?"), c))
 
 
+def _rest(s):
+    time.sleep(s)
+
+
 def begin():
     """At the start of every start: was the last run a failure? Returns
     "normal" or "rescue" (and may wait first: see the top)."""
@@ -133,9 +127,15 @@ def begin():
     # (d["wd"]: the computer's supervisor restarted it, its heartbeat stale)
     _st["cause"] = "watchdog" if d.get("wd") else _reset_cause()
     if short >= 2 * RESCUE_AFTER:
-        # Even the rescue start keeps failing: rest, then from scratch.
+        # Even the rescue start keeps failing: rest, then from scratch. Saved
+        # before resting, as not running: a stop during the rest (the Stop
+        # button, the Provisioner, a restart) must not count as one more
+        # failed start -- it did, so every start rested again and a Stump
+        # restarted within the rest never came back (1.0.0-beta.44).
         print("[watchdog] %d failed starts in a row: waiting %d s, then starting normally" % (short, RESCUE_WAIT_S))
-        time.sleep(RESCUE_WAIT_S)
+        _save({"running": False, "stable": False, "planned": False, "short": 0, "mode": "normal",
+               "crash": None, "last": last, "at": _now()})
+        _rest(RESCUE_WAIT_S)
         short = 0
     mode = "rescue" if short >= RESCUE_AFTER else "normal"
     last = last if short else None

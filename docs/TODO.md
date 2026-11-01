@@ -1,6 +1,6 @@
 # To do
 
-Things noted for later, newest first. Each with what was seen and what
+The plan, in order: [ROADMAP.md](ROADMAP.md). Things noted for later, newest first. Each with what was seen and what
 we think the fix is.
 
 ## Provisioner: uploads to a CAM restart the board now and then

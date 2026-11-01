@@ -21,6 +21,7 @@
 # off from /admin without a laptop, and a plugin that hangs or resets the
 # board while starting is switched off automatically at the next boot.
 
+import webtext
 import time
 
 try:
@@ -115,13 +116,8 @@ def _load_state():
 
 
 def _save_state(st):
-    try:
-        with open(STATE_FILE, "w") as f:
-            f.write(json.dumps(st))
-        return True
-    except Exception as e:
-        print("[plugin] could not save", STATE_FILE, e)
-        return False
+    import store
+    return store.save_json(STATE_FILE, st, "plugin")
 
 
 def _write_marker(d):
@@ -148,10 +144,6 @@ def clear_marker():
         os.remove(MARKER_FILE)
     except Exception:
         pass
-
-
-def is_off(name):
-    return name in _load_state()["off"]
 
 
 # ── the Api a plugin's setup() receives ───────────────────────────────
@@ -302,11 +294,7 @@ class Api:
         except Exception:
             return text
 
-    @staticmethod
-    def esc(text):
-        """Text made safe for a page's HTML (and attribute values)."""
-        return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                .replace('"', "&quot;").replace("'", "&#39;"))
+    esc = staticmethod(webtext.esc)   # text made safe for a page's HTML (and attribute values)
 
     def log(self, *args):
         _log(self.name, " ".join(str(a) for a in args))
@@ -395,7 +383,7 @@ def _post(plugin, nick, room, text):
         return False
     use[1] += 1
     import rrc
-    return rrc.post(room, nick, str(text)[:rrc.MAX_MESSAGE_LEN]) is not None
+    return rrc.post(room, nick, str(text)[:rrc.MAX_MESSAGE_LEN], bot=True) is not None
 
 
 def _lines(result):
@@ -608,7 +596,7 @@ class Request:
     def form(self):
         if self._form is None:
             try:
-                self._form = _form(self.body.decode())
+                self._form = _form(webtext.text(self.body))
             except Exception:
                 self._form = {}
         return self._form
@@ -757,11 +745,13 @@ def discover():
     for name in sorted(entries):
         if name.startswith(".") or name in NOT_PLUGINS:
             continue
-        try:
-            os.stat(name + "/install.py")
-        except OSError:
-            continue
-        found.append(name)
+        for f in ("/install.py", "/install.mpy"):      # .mpy: compiled by the Provisioner
+            try:
+                os.stat(name + f)
+                found.append(name)
+                break
+            except OSError:
+                pass
     return found
 
 

@@ -56,10 +56,6 @@ def tiles(available, all=False):
     return out if all else [k for k in out if k not in hidden("tiles")]
 
 
-def is_custom(kind):
-    return bool(_saved.get(kind)) or bool(_saved.get(kind + "_hidden"))
-
-
 def save(kind, keys):
     """Saves an order, or the hidden keys ("nav_hidden", "tiles_hidden");
     None or an empty list: back to the default. True if saved."""
@@ -68,7 +64,6 @@ def save(kind, keys):
 
 def save_many(changes):
     """Saves several of KINDS at once, {kind: keys or None}."""
-    import json
     new = dict(_saved)
     for kind, keys in changes.items():
         if kind not in KINDS:
@@ -82,10 +77,8 @@ def save_many(changes):
             new[kind] = seen[:40]
         else:
             new.pop(kind, None)
-    try:
-        with open(LAYOUT_FILE, "w") as f:
-            json.dump(new, f)
-    except OSError:
+    import store
+    if not store.save_json(LAYOUT_FILE, new, "layout"):
         return False
     _saved.clear()
     _saved.update(new)

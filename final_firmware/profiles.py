@@ -89,16 +89,8 @@ def _load():
 
 def _save():
     db = _load()
-    path = _file()
-    tmp = path + ".tmp"
-    try:
-        with open(tmp, "w") as f:
-            json.dump(db, f)
-        os.rename(tmp, path)
-        return True
-    except OSError as e:
-        print("[profiles] couldn't save:", e)
-        return False
+    import store
+    return store.save_json(_file(), db, "profiles")
 
 
 def reset(path=None):

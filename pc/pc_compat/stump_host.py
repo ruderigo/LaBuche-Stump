@@ -85,7 +85,17 @@ def restart():
         sys.stdout.flush()
     except Exception:
         pass
+    if os.environ.get(SUPERVISED) != "1":
+        # Run by hand (python3 stump_pc.py): no supervisor to start it
+        # again, so it starts itself again, the same way.
+        try:
+            os.execv(sys.executable, [sys.executable, "-u", os.path.join(ROOT or ".", "stump_pc.py")])
+        except OSError as e:
+            print("[stump] couldn't start again (%s): start it yourself" % e, flush=True)
     os._exit(RESTART_CODE)
+
+
+SUPERVISED = "STUMP_SUPERVISED"     # set by stump_pc's supervisor for the Stump it runs
 
 
 HEARTBEAT_FILE = ".heartbeat"     # in the Stump folder: touched by the running Stump (keepalive.py)
@@ -93,12 +103,40 @@ HEARTBEAT_FILE = ".heartbeat"     # in the Stump folder: touched by the running 
 
 def heartbeat():
     """The Stump's loop is alive: the supervisor (stump_pc.py --service)
-    restarts it when this file goes stale."""
+    restarts it when this file goes stale. Also where an update is noticed
+    (UPDATED_FILE)."""
     try:
         with open(os.path.join(ROOT or ".", HEARTBEAT_FILE), "w") as f:
             f.write("%d %d\n" % (int(time.time()), os.getpid()))
     except (OSError, TypeError):
         pass
+    if updated():
+        print("[stump] this folder was updated (the Provisioner): restarting on the new files", flush=True)
+        restart()
+
+
+# The Provisioner touches this file when it has updated the folder (after
+# every file is in place). A Stump already running would go on with the
+# old modules in memory and load others, new, later (/admin's on first use:
+# a mix that broke /admin in 1.0.0-beta.45), so it restarts on the new ones.
+UPDATED_FILE = ".updated"
+_upd = {"seen": None}
+
+
+def _updated_mtime():
+    try:
+        return os.stat(os.path.join(ROOT or ".", UPDATED_FILE)).st_mtime
+    except (OSError, TypeError):
+        return 0
+
+
+def updated():
+    """Has the folder been updated since this Stump started?"""
+    m = _updated_mtime()
+    if _upd["seen"] is None:
+        _upd["seen"] = m              # (the first look: what this start runs on)
+        return False
+    return m != _upd["seen"]
 
 
 def setting(name, default):
@@ -107,6 +145,94 @@ def setting(name, default):
         return getattr(config, name, default)
     except Exception:
         return default
+
+
+# ── keeping the computer awake (PC_KEEP_AWAKE, /admin) ──────────────
+#
+# Asleep, a Stump answers nobody: the chain drops it, visitors get nothing.
+# On: the computer doesn't go to sleep by itself while this Stump runs (the
+# screen may still turn off). A laptop with its lid closed on battery still
+# sleeps: no program can stop that.
+
+_awake = {"proc": None, "how": None}
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+
+
+def _awake_cmd(pid):
+    """The command that holds the computer awake until `pid` ends, and its
+    name; None where there's none. (Replaced in tests.)"""
+    import shutil
+    if os.name == "nt":
+        return None, "windows"          # (no command: SetThreadExecutionState, below)
+    if sys.platform == "darwin" and shutil.which("caffeinate"):
+        return ["caffeinate", "-i", "-s", "-w", str(pid)], "caffeinate"
+    if sys.platform.startswith("linux") and shutil.which("systemd-inhibit"):
+        return (["systemd-inhibit", "--what=idle:sleep", "--who=Stump", "--why=A Stump runs here",
+                 "--mode=block", "tail", "--pid=%d" % pid, "-f", "/dev/null"], "systemd-inhibit")
+    return None
+
+
+def keep_awake(on):
+    """Holds the computer awake (on) or lets it sleep again (off). Returns
+    how ("caffeinate", "systemd-inhibit", "windows"), or None: off, or
+    nothing on this computer can do it."""
+    _let_sleep()
+    if not on:
+        return None
+    found = _awake_cmd(os.getpid())
+    if not found:
+        print("[stump] nothing here keeps the computer awake (no caffeinate or systemd-inhibit)")
+        return None
+    cmd, how = found
+    if cmd is None:
+        try:
+            import ctypes
+            if ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED):
+                _awake["how"] = "windows"
+        except Exception as e:
+            print("[stump] couldn't keep the computer awake:", e)
+        return _awake["how"]
+    try:
+        import subprocess
+        _awake["proc"] = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                          stderr=subprocess.DEVNULL)
+        _awake["how"] = how
+        print("[stump] keeping the computer awake (%s)" % how)
+    except Exception as e:
+        print("[stump] couldn't keep the computer awake:", e)
+    return _awake["how"]
+
+
+def _let_sleep():
+    p, how = _awake["proc"], _awake["how"]
+    _awake["proc"] = _awake["how"] = None
+    if p is not None:
+        try:
+            p.terminate()
+            p.wait(5)
+        except Exception:
+            pass
+    elif how == "windows":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+        except Exception:
+            pass
+    if how:
+        print("[stump] the computer may sleep again")
+
+
+def awake_status():
+    """How the computer is held awake now ("caffeinate", ...), or None."""
+    p = _awake["proc"]
+    if p is not None and p.poll() is not None:          # (ended: someone killed it)
+        _awake["proc"] = _awake["how"] = None
+    return _awake["how"]
+
+
+def awake_possible():
+    """Can anything keep this computer awake?"""
+    return _awake_cmd(os.getpid()) is not None
 
 
 # ── the hotspot address ─────────────────────────────────────────────

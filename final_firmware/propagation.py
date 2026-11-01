@@ -117,13 +117,8 @@ def configured_on():
 
 
 def save_setting(on):
-    try:
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump({"enabled": bool(on)}, f)
-        return True
-    except OSError as e:
-        print("[pn] could not save setting:", e)
-        return False
+    import store
+    return store.save_json(SETTINGS_FILE, {"enabled": bool(on)}, "pn")
 
 
 # ---- announce ----

@@ -1,7 +1,7 @@
 {
   "plugin": "tavern",
   "title": "Tavern (dice, fortunes, quotes, !seen, polls, flood guard)",
-  "version": "1.0",
+  "version": "1.1",
   "plugin_api": 1,
   "summary": "The tavern's games and memory: !roll, !8ball, !slap, !seen, !quote and !vote, with a page for polls and quotes, and a flood guard that slows down anyone posting too fast. Text only, so it works for mesh users too.",
   "modifies_core_files": false,
@@ -55,7 +55,7 @@
   ],
   "hashes": {
     "tavern/__init__.py": "e6d8701248ccbe09",
-    "tavern/install.py": "abed5503dc6d3ef1",
+    "tavern/install.py": "1333d02a50992685",
     "tavern/strings.py": "d8ea5d852c692427"
   }
 }

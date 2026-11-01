@@ -180,6 +180,18 @@ def _folder_release(path=None):
     return None
 
 
+def firmware_zip_name(fw_dir=None):
+    """The firmware zip on the Tools page, named with its release:
+    Stump-1.0.0-beta.35.zip (it was Stump_Beta_A.zip, whatever the build)."""
+    r = _folder_release(fw_dir) or "unknown"
+    return "Stump-%s.zip" % re.sub(r"[^A-Za-z0-9._-]", "_", r)
+
+
+def _is_old_firmware_zip(name, current):
+    """A firmware zip from an earlier build, to remove beside the new one."""
+    return name != current and (name == "Stump_Beta_A.zip" or (name.startswith("Stump-") and name.endswith(".zip")))
+
+
 def checkout_status(fetch=None):
     """Is this download the latest? {"release", "git", "behind"}:
     release from final_firmware/example_node.py; outside a git checkout
@@ -310,34 +322,35 @@ DEFAULT_CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
 #    for f in sorted(Path('final_firmware').rglob('*')) if f.is_file()]"
 EXPECTED_FILE_HASHES = {
     "_sd_web/billboard.txt": "e3b0c44298fc1c14",
-    "barkeep.py": "61e724e4a377960c",
-    "billboard.py": "a7d1f3df668997ab",
+    "admin_web.py": "06adba592d839878",
+    "barkeep.py": "6490366e67dedb11",
+    "billboard.py": "73e95795f9430ea5",
     "boot_common.py": "dc95827c3989d1ca",
     "captive_portal.py": "35cb3a279ecc42db",
-    "chain.py": "3727f30a928f3478",
-    "config.py": "ed7b475134824fb3",
+    "chain.py": "465cfed4657ce70f",
+    "config.py": "0e84493cd2e4069f",
     "conn.py": "b17cf4fb4f80fbbf",
-    "discovery.py": "d01cc2a1bf23f2ac",
-    "docs/CHAIN.md": "7d168225a314cfba",
-    "docs/CLIENT_QUICKSTART.md": "4017b0226a8f2478",
-    "docs/COMMANDS.md": "1d443ec9b625aebe",
-    "docs/ENGINEERING_NOTES.md": "e2246f83f2912a8d",
+    "discovery.py": "c1808c59c1452dda",
+    "docs/ARBORIST.md": "240da3e47f9e1e2a",
+    "docs/CHAIN.md": "775bf418753c82ba",
+    "docs/CLIENT_QUICKSTART.md": "11f2fa95f8684c55",
+    "docs/COMMANDS.md": "a3ead3e29aa7eb61",
+    "docs/ENGINEERING_NOTES.md": "72f7d19d7c5f03a4",
     "docs/FIELD_TEST.md": "0511af24e1bd4cf4",
-    "docs/HIDDEN_FEATURES.md": "8f7ee17eabfd0b6a",
+    "docs/HIDDEN_FEATURES.md": "568bc132ab83a91b",
     "docs/HOME_BRANDING.md": "e1a1a9cf854dcdce",
     "docs/HTTPS_SETUP.md": "12cbbf2de7c38810",
     "docs/PACKS.md": "2e89e3c28d80d72d",
-    "docs/PC.md": "6f5e431869e8b075",
+    "docs/PC.md": "226bba891edcb5a6",
     "docs/PLUGINS.md": "3f5b4a5ee6844305",
-    "example_node.py": "fd3ac044cfbe5004",
+    "example_node.py": "010dc6fe843966d3",
     "features.py": "81e8af361c64a911",
-    "flasher_ui.py": "1d3035b1132bc87e",
-    "fserv.py": "125684b076cb46ad",
-    "fservbot/plugin.json": "4e0137362ff327d0",
+    "fserv.py": "14d07285fb7518d6",
+    "fservbot/plugin.json": "9442390694ac9bfd",
     "guard.py": "526fac7536abfe7f",
-    "i18n.py": "7b3dd8f62c2c3316",
-    "keepalive.py": "cd51c863a2284779",
-    "layout.py": "fb82a2d1ed9f00da",
+    "i18n.py": "d075348b38bb908c",
+    "keepalive.py": "1c7c55ecb362d569",
+    "layout.py": "e91796a128fff08f",
     "lib/bz2_fast_xtensawin.mpy": "ac55d9eda2126432",
     "lib/ed25519_fast_xtensawin.mpy": "96e74dac45f91687",
     "lib/ed25519_iram.mpy": "96e74dac45f91687",
@@ -347,17 +360,18 @@ EXPECTED_FILE_HASHES = {
     "node_common.py": "e1e748a3283da2f4",
     "peripherals/__init__.py": "d2bdac4de6de79de",
     "peripherals/adc_reader.py": "50a393bfa61641d4",
-    "plugins.py": "ed3db932a3d82f06",
-    "profiles.py": "6de48b5b3f2666c2",
-    "propagation.py": "e86471653a5036ec",
-    "radio.py": "46a5bce1b8a90405",
-    "rrc.py": "c94b67a8005d4d8e",
-    "rrc_mesh.py": "41b43f6b06e192f1",
-    "rrc_ui.py": "bce04bbc1653ae54",
-    "settings.py": "81fc227a176bea01",
+    "plugins.py": "829c99f60571ba4d",
+    "profiles.py": "af13b5e91b83d004",
+    "propagation.py": "99b4bcebeeeff8a7",
+    "radio.py": "56e01b273ceaab68",
+    "rrc.py": "758dccb2900835db",
+    "rrc_mesh.py": "3a2577aaa0f9dcec",
+    "rrc_ui.py": "7146777ddd5f6d6a",
+    "settings.py": "897b96b4560971f7",
+    "store.py": "625ba090410222cf",
     "stump_tls.py": "32a9394408ae392e",
-    "stumpid/plugin.json": "a096572446001706",
-    "theme.py": "79b1b8a3b636d07b",
+    "stumpid/plugin.json": "a419d598249430f1",
+    "theme.py": "f4012514d7f00016",
     "third_party/codec2/COPYING": "9ebb6f82b7380a62",
     "third_party/codec2/build_codec2_wasm.sh": "11aafe7aca8e7a71",
     "third_party/codec2/generated/codebook.c": "be54d9b8e15504d8",
@@ -484,16 +498,13 @@ EXPECTED_FILE_HASHES = {
     "tools_payload/apps/README.es.md": "26ec9046d7c4447a",
     "tools_payload/apps/README.fr.md": "afdbb2570e4cb770",
     "tools_payload/apps/README.md": "2e0f5a7aa18abdaf",
-    "tools_payload/flasher/README.es.md": "51131571a4aead12",
-    "tools_payload/flasher/README.fr.md": "3783d700c0d5a21f",
-    "tools_payload/flasher/README.md": "b5d9f0f3808bf523",
-    "tools_payload/flasher/catalog.json": "8dc38061d6bf49a3",
+    "tools_payload/flasher/README.md": "2c4d04f9fa3e4c39",
     "tools_payload/flasher/esptool-bundle.js": "ef7d5a237d3f273e",
     "tools_payload/flasher/esptool-js-LICENSE.txt": "1c25f29242785d63",
     "tools_payload/images/README.txt": "10dbf1ed3e3eee26",
-    "tools_payload/provisioner/README.es.md": "a11e1f5793fa473d",
-    "tools_payload/provisioner/README.fr.md": "65c68d1ca42a6c13",
-    "tools_payload/provisioner/README.md": "dbf678077919e6c2",
+    "tools_payload/provisioner/README.es.md": "1970fff96442e0b3",
+    "tools_payload/provisioner/README.fr.md": "0438740492774c4f",
+    "tools_payload/provisioner/README.md": "d841002d4d341d34",
     "urns/__init__.py": "4a83ee3f5cd42ca4",
     "urns/buffer.py": "b1da1d0723340421",
     "urns/bz2dec.py": "8149a39deee822c2",
@@ -517,7 +528,7 @@ EXPECTED_FILE_HASHES = {
     "urns/destination.py": "29eadd36dbfe9e3e",
     "urns/identity.py": "1a98f90e034bfb19",
     "urns/interfaces/__init__.py": "f058f69c73c34294",
-    "urns/interfaces/chain.py": "987643f122d08df9",
+    "urns/interfaces/chain.py": "8f79a4adf8292e1a",
     "urns/interfaces/e32.py": "4cc3c2994c2d7972",
     "urns/interfaces/lora.py": "34ce816fe69c0b43",
     "urns/interfaces/rnode_ble.py": "3f3e6f3f82eda820",
@@ -528,16 +539,17 @@ EXPECTED_FILE_HASHES = {
     "urns/interfaces/wifi_serial.py": "4ce7c80aa6bf0846",
     "urns/link.py": "ef808679cefb1ac0",
     "urns/log.py": "4b5576693991c7a6",
-    "urns/lxmf.py": "a67218b713580252",
+    "urns/lxmf.py": "e0b81de45fc4de60",
     "urns/packet.py": "d8a3a0c4a3a9ebbf",
     "urns/resource.py": "e54f10289b5a85e6",
     "urns/reticulum.py": "88295a083390bdc5",
-    "urns/transport.py": "7cbfcb1a78587056",
-    "urns/umsgpack.py": "7df3983d6abcf149",
+    "urns/transport.py": "ca8f0f641c111b04",
+    "urns/umsgpack.py": "b1616a439fa0e915",
     "web/codec2.js": "2caf391c54505c61",
     "web/codec2.wasm": "342264605478d63f",
     "web/opus.js": "1cb7a20504785a6d",
     "web/opus.wasm": "4aecdb72f03d2486",
+    "webtext.py": "45ae20e596326b83",
 }
 
 # The exact set of files (relative paths, including subdirectories) that
@@ -808,10 +820,39 @@ def plugin_files(plugin_dir, spec=None):
     spec = _plugin_spec(d) if spec is None else spec
     listed = spec.get("files")
     if listed:
-        return [f for f in listed if (d.parent / f).is_file()]
+        # Only the plugin's own folder: a listed "../config.py" or
+        # "tavern/../barkeep.py" would have been copied over the core.
+        return [f for f in listed if isinstance(f, str) and _inside_plugin(f, d.name)
+                and (d.parent / f).is_file()]
     return sorted(f.relative_to(d.parent).as_posix() for f in d.rglob("*")
                   if f.is_file() and "__pycache__" not in f.parts
                   and not any(f.name.endswith(s) for s in MANIFEST_EXCLUDE_SUFFIXES))
+
+
+def _inside_plugin(rel, name):
+    parts = rel.replace("\\", "/").split("/")
+    return len(parts) >= 2 and parts[0] == name and not any(p in ("", ".", "..") for p in parts) \
+        and ":" not in rel
+
+
+def plugin_name_problem(name, fw=None):
+    """Why a plugin can't be called this, or None. Not a core module or
+    folder's name (a folder "barkeep/" is imported instead of barkeep.mpy),
+    not a built-in plugin's (an update would replace stumpid, the access
+    control), and a plain lowercase name."""
+    import re as _re
+    if not isinstance(name, str) or not _re.match(r"^[a-z][a-z0-9_]{1,23}$", name):
+        return "a plugin's name is 2-24 lowercase letters, digits or _"
+    if name in ("urns", "lib", "peripherals", "web", "docs", "third_party", "tools_payload", "sd", "rns",
+                "tls", "plugins_state", "boot", "main", "config"):
+        return "a plugin can't be called %s" % name
+    core = set(Path(f).stem for f in STUMP_APP_FILES if "/" not in f)
+    if name in core:
+        return "%s is a part of the Stump's own code" % name
+    for d, _ in discover_plugins(Path(fw or STUMP_APP_DIR)):
+        if d == name:
+            return "%s is a built-in plugin: a pack can't replace it" % name
+    return None
 
 
 def verify_plugin(plugin_dir, spec=None):
@@ -967,10 +1008,15 @@ def check_pack(pack, fw_api):
         return ("needs plugin API %d; this firmware has %s" % (need, fw_api or "none (too old)")), []
     for name in spec.get("plugins", []):
         pd = d / name
+        why = plugin_name_problem(name)
+        if why:
+            return why, []
         if not (pd / "install.py").is_file():
             return ("plugin folder %s/ has no install.py" % name), []
-        if name in ("urns", "lib", "peripherals", "web", "docs", "third_party", "tools_payload"):
-            return ("a plugin can't be called %s" % name), []
+        listed = (_plugin_spec(pd) or {}).get("files") or []
+        outside = [f for f in listed if not (isinstance(f, str) and _inside_plugin(f, name))]
+        if outside:
+            return ("%s/plugin.json lists files outside its folder: %s" % (name, ", ".join(map(str, outside[:3])))), []
         problems, unhashed = verify_plugin(pd)
         for rel, why in problems:
             warnings.append("%s: %s" % (rel, why))
@@ -1107,18 +1153,21 @@ def upload_plugin_folder(port, plugin_dir):
     for sub in dirs:
         run(["mpremote", "connect", port, "fs", "mkdir", f":{sub}"], timeout=15)
     ok_all = True
-    for rel in files:
+    pairs = compile_for_board(port, d.parent, files)
+    for src, rel in pairs:
         print(f"    {rel} ...", end=" ", flush=True)
-        ok, out = run(["mpremote", "connect", port, "fs", "cp", str(d.parent / rel), f":{rel}"],
-                      timeout=_cp_timeout(d.parent / rel))
+        ok, out = run(["mpremote", "connect", port, "fs", "cp", str(src), f":{rel}"],
+                      timeout=_cp_timeout(src))
         print("ok" if ok else "FAILED: " + out.strip()[-70:])
         ok_all = ok_all and ok
     sizes = _get_device_file_sizes(port)
     if sizes is not None:
-        problems = _diff_against_device(d.parent, files, sizes)
+        problems = _diff_against_device(pairs, sizes)
         for rel, why in problems:
             print(f"    {rel}: {why}")
         ok_all = ok_all and not problems
+    if ok_all:
+        remove_shadowed(port, pairs)
     return ok_all
 
 
@@ -1187,12 +1236,17 @@ def remove_plugin(port, name):
             "  os.rmdir(p)\n"
             " except OSError:\n"
             "  os.remove(p)\n"
-            "try:\n"
-            " os.stat(%r + '/install.py')\n"
+            "def has(p):\n"
+            " try:\n"
+            "  os.stat(p)\n"
+            "  return True\n"
+            " except OSError:\n"
+            "  return False\n"
+            "if has(%r + '/install.py') or has(%r + '/install.mpy'):\n"
             " rm(%r)\n"
             " print('REMOVED')\n"
-            "except OSError:\n"
-            " print('NOPLUGIN')\n") % (name, name)
+            "else:\n"
+            " print('NOPLUGIN')\n") % (name, name, name)
     ok, out = run(["mpremote", "connect", port, "exec", code], timeout=60)
     if "REMOVED" in out:
         print(f"Removed {name}. Its saved data, if any, stays in /sd/plugins/{name}/.")
@@ -1528,11 +1582,6 @@ class Route:
         word = {"done": "done", "fail": "didn't work", "skip": "skipped"}[state]
         print("\n%s %s: %s%s%s" % (mark, name, word, (" in " + _span(took)) if took and state == "done" else "",
                                    (" -- " + why) if why else ""))
-
-    def skip_rest(self, why=""):
-        for i in range(len(self.state)):
-            if self.state[i] in ("todo", "now"):
-                self.state[i] = "skip"
 
     def note(self, label, value):
         self.notes.append((label, value))
@@ -2380,6 +2429,10 @@ def check_tools():
         print(f"  {tool:<14} {status}")
         if not path:
             all_ok = False
+    # Optional: compiles the board's modules (compile_for_board).
+    cmd, ver = _mpy_cross_cmd()
+    print(f"  {'mpy-cross':<14} " + (f"FOUND (makes .mpy {ver})" if cmd else
+                                     "not here (optional: pip3 install mpy-cross==1.28.0.post2)"))
     if not all_ok:
         print(
             "\nMissing tools can usually be installed with:\n"
@@ -2813,6 +2866,108 @@ def _check_local_files_current(resolved):
     return stale
 
 
+# ── Precompiled modules (.mpy) ─────────────────────────────────────────
+# The board used to get every module as source and compile it at each
+# boot: 1.4 MB of .py, about a third of it comments and docstrings, every
+# import a compile and a spike of RAM. Compiled here with mpy-cross, the
+# same code is about 40% of the size -- less to copy over USB, nothing to
+# compile at boot. The .mpy must match the board's MicroPython (its "mpy
+# version"), so it's checked on the board first; with no matching
+# mpy-cross here (`pip install mpy-cross==1.28.0.post2`), or an older
+# MicroPython on the board, the source goes as before. A module that
+# arrives compiled has its .py removed from the board (MicroPython would
+# load the .py first), and the other way round.
+MPY_SOURCE_ONLY = ("boot.py", "main.py", "config.py")     # run or read as source
+_MPY = {}
+
+
+def _mpy_cross_cmd():
+    """(command, mpy version "6.3") for an mpy-cross here, or (None, None)."""
+    if "cmd" not in _MPY:
+        _MPY["cmd"], _MPY["ver"] = None, None
+        cands = []
+        try:
+            import mpy_cross  # noqa: F401  (pip install mpy-cross)
+            cands.append([sys.executable, "-m", "mpy_cross"])
+        except ImportError:
+            pass
+        if shutil.which("mpy-cross"):
+            cands.append([shutil.which("mpy-cross")])
+        for c in cands:
+            try:
+                out = subprocess.run(c + ["--version"], capture_output=True, text=True, timeout=30).stdout
+            except Exception:
+                continue
+            m = re.search(r"mpy v(\d+)\.(\d+)", out)
+            if m:
+                _MPY["cmd"], _MPY["ver"] = c, "%s.%s" % m.groups()
+                break
+    return _MPY["cmd"], _MPY["ver"]
+
+
+def _board_mpy_version(port):
+    """The .mpy version the board's MicroPython loads ("6.3"), or None."""
+    ok, out = run(["mpremote", "connect", port, "exec",
+                   "import sys\nv = getattr(sys.implementation, '_mpy', 0)\n"
+                   "print('MPY:%d.%d' % (v & 0xff, (v >> 8) & 3))\n"], timeout=20)
+    m = re.search(r"MPY:(\d+\.\d+)", out or "") if ok else None
+    return m.group(1) if m and m.group(1) != "0.0" else None
+
+
+def compile_for_board(port, root, rels):
+    """[(local file, path on the board)] for these files of `root`: each
+    module compiled to .mpy when the board and an mpy-cross here agree on
+    the version, as it is otherwise. Says once which it is."""
+    cmd, ver = _mpy_cross_cmd()
+    board = _board_mpy_version(port) if cmd else None
+    use = bool(cmd) and board == ver
+    if "said" not in _MPY:
+        _MPY["said"] = True
+        if use:
+            print("  Modules go compiled (.mpy %s): smaller, and nothing to compile at boot." % ver)
+        elif cmd and board:
+            print("  The board's MicroPython loads .mpy %s, mpy-cross here makes %s: modules go as source."
+                  % (board, ver))
+        elif not cmd:
+            print("  Modules go as source (no mpy-cross here: pip install mpy-cross==1.28.0.post2"
+                  " makes them smaller and the boot faster).")
+    if not use:
+        return [(Path(root) / r, r) for r in rels]
+    out_dir = Path(tempfile.mkdtemp(prefix="stump-mpy-"))
+    pairs = []
+    for r in rels:
+        src = Path(root) / r
+        if not r.endswith(".py") or r.split("/")[-1] in MPY_SOURCE_ONLY:
+            pairs.append((src, r))
+            continue
+        dest = out_dir / (r[:-3] + ".mpy")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        p = subprocess.run(cmd + ["-o", str(dest), "-s", r, str(src)], capture_output=True, text=True)
+        if p.returncode == 0 and dest.is_file():
+            pairs.append((dest, r[:-3] + ".mpy"))
+        else:
+            print("  %s didn't compile, it goes as source: %s" % (r, (p.stderr or "").strip()[-120:]))
+            pairs.append((src, r))
+    return pairs
+
+
+def remove_shadowed(port, pairs):
+    """After a copy: the .py beside each module that arrived as .mpy goes
+    (MicroPython loads the .py first), and a stale .mpy beside each one
+    that arrived as .py."""
+    gone = []
+    for _, dest in pairs:
+        if dest.endswith(".mpy"):
+            gone.append(dest[:-4] + ".py")
+        elif dest.endswith(".py") and dest.split("/")[-1] not in MPY_SOURCE_ONLY:
+            gone.append(dest[:-3] + ".mpy")
+    if not gone:
+        return
+    run(["mpremote", "connect", port, "exec",
+         "import os\nfor p in %r:\n    try:\n        os.remove(p)\n    except OSError:\n        pass\n" % gone],
+        timeout=30)
+
+
 def _cp_timeout(path):
     """Seconds to allow one `mpremote fs cp`. A flat 60 s was too short for
     web/codec2.wasm (210 KB): copying to the board runs at roughly
@@ -2940,9 +3095,9 @@ def upload_stump_app(port, app_dir=None):
     for d in dest_dirs:
         run(["mpremote", "connect", port, "fs", "mkdir", f":{d}"], timeout=15)
 
+    pairs = compile_for_board(port, resolved, present)
     all_ok = True
-    for fname in present:
-        f = resolved / fname
+    for f, fname in pairs:
         size_kb = f.stat().st_size // 1024 if f.exists() else 0
         if size_kb >= 50:
             # The codec takes a minute or two: say so, or it looks hung.
@@ -2965,19 +3120,20 @@ def upload_stump_app(port, app_dir=None):
         print(f"  Could not verify (couldn't list device files) -- check manually with:")
         print(f"    mpremote connect {port} fs ls")
     else:
-        problems = _diff_against_device(resolved, present, device_sizes)
+        problems = _diff_against_device(pairs, device_sizes)
         if problems:
             all_ok = False
             print("  PROBLEMS after upload:")
             for fname, reason in problems:
                 print(f"    {fname}: {reason}")
             print("  Retrying these...")
+            local_of = {dest: local for local, dest in pairs}
             for fname, _ in problems:
-                f = resolved / fname
+                f = local_of[fname]
                 print(f"    retrying {fname} ...")
                 run(["mpremote", "connect", port, "fs", "cp", str(f), f":{fname}"], timeout=_cp_timeout(f))
             device_sizes2 = _get_device_file_sizes(port) or {}
-            still_bad = _diff_against_device(resolved, [f for f, _ in problems], device_sizes2)
+            still_bad = _diff_against_device([(local_of[f], f) for f, _ in problems], device_sizes2)
             if still_bad:
                 print(f"  STILL WRONG: {', '.join(f for f, _ in still_bad)}")
                 print(f"  Try again with: python3 provisioner.py --upload-app {port}")
@@ -2987,6 +3143,8 @@ def upload_stump_app(port, app_dir=None):
         else:
             print(f"  OK — all {len(present)} files confirmed present and matching local source.")
             install_tools_on_node(port)
+    if all_ok:
+        remove_shadowed(port, pairs)
 
     return all_ok
 
@@ -3009,12 +3167,6 @@ def _board_config_state(port):
     if m.group(1) == "1":
         return "yes"
     return "lost" if int(m.group(2)) else "fresh"
-
-
-def _board_has_config(port):
-    """True if the board already has a config.py (a node set up before),
-    or if that can't be told -- keeping a config is the safe mistake."""
-    return _board_config_state(port) != "fresh"
 
 
 def _backup_board_config(port):
@@ -3050,7 +3202,7 @@ def _config_summary(text):
 
 
 def _build_firmware_zip(dest_path, source_dir):
-    """Builds Stump_Beta_A.zip fresh from source_dir (final_firmware/,
+    """Builds the firmware zip (firmware_zip_name()) fresh from source_dir (final_firmware/,
     the SAME directory this run of provisioner.py is already using for
     everything else) rather than requiring the technician to have kept
     their original downloaded zip around. Two things that matters
@@ -3161,7 +3313,7 @@ def _tool_readmes(here):
     section this Provisioner knows: the built-in ones and each pack's."""
     out = []
     payload = here / "final_firmware" / "tools_payload"
-    for src, sec in (("provisioner", "provisioner"), ("flasher", "flasher"), ("apps", "firefly")):
+    for src, sec in (("provisioner", "provisioner"), ("apps", "firefly")):
         out += [(rd, sec) for rd in sorted((payload / src).glob("README*.md"))]
     for pack in discover_packs():
         tools = pack["dir"] / "tools"
@@ -3249,8 +3401,7 @@ def _install_tools_on_node(port):
     # own README.md. Mounting the card also moves tools left loose by
     # older Provisioners into their folders (fserv.migrate_tools), so
     # they're found in place below rather than copied again.
-    for d in (":/sd/tools", ":/sd/fw", ":/sd/tools/provisioner", ":/sd/tools/flasher",
-              ":/sd/tools/firefly"):
+    for d in (":/sd/tools", ":/sd/fw", ":/sd/tools/provisioner", ":/sd/tools/firefly"):
         run(["mpremote", "connect", port, "exec", MOUNT, "fs", "mkdir", d], timeout=25)
 
     installed, failed, by_card = [], [], []
@@ -3327,7 +3478,8 @@ def _install_tools_on_node(port):
     if fw_dir.is_dir():
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
-                zip_path = Path(tmpdir) / "Stump_Beta_A.zip"
+                zip_name = firmware_zip_name(fw_dir)
+                zip_path = Path(tmpdir) / zip_name
                 _build_firmware_zip(zip_path, fw_dir)
                 # A real run timed out pushing this at the same 180s
                 # every other, much smaller tool push uses -- confirmed
@@ -3338,9 +3490,14 @@ def _install_tools_on_node(port):
                 # since a silent multi-minute wait reads as a hang
                 # otherwise -- the other pushes are fast enough that
                 # nobody's watched the clock on them before now.
-                push(zip_path, ":/sd/tools/provisioner/Stump_Beta_A.zip", "Stump_Beta_A.zip")
+                push(zip_path, ":/sd/tools/provisioner/" + zip_name, zip_name)
+                # The zips of earlier builds go: one firmware on the page, the one it runs.
+                run(["mpremote", "connect", port, "exec", MOUNT +
+                     "import os\nfor n in os.listdir('/sd/tools/provisioner'):\n"
+                     "    if n != %r and (n == 'Stump_Beta_A.zip' or (n.startswith('Stump-') and n.endswith('.zip'))):\n"
+                     "        os.remove('/sd/tools/provisioner/' + n)\n" % zip_name], timeout=30)
         except Exception as e:
-            failed.append(("Stump_Beta_A.zip", str(e)[:70]))
+            failed.append(("firmware zip", str(e)[:70]))
 
     payload = here / "final_firmware" / "tools_payload"
     if not payload.is_dir():
@@ -3349,13 +3506,9 @@ def _install_tools_on_node(port):
         # Each section's README.md (what the Tools page shows about it).
         # Each in English (README.md) and, when there is one, the visitor's
         # language (README.fr.md, README.es.md).
-        for src, sec in (("provisioner", "provisioner"), ("flasher", "flasher"), ("apps", "firefly")):
+        for src, sec in (("provisioner", "provisioner"), ("apps", "firefly")):
             for rd in sorted((payload / src).glob("README*.md")):
                 push(rd, ":/sd/tools/%s/%s" % (sec, rd.name), sec + "/" + rd.name)
-        fl = payload / "flasher"
-        push(fl / "esptool-bundle.js", ":/sd/tools/flasher/esptool-bundle.js", "esptool-bundle.js")
-        push(fl / "esptool-js-LICENSE.txt", ":/sd/tools/flasher/esptool-js-LICENSE.txt", "licence")
-        push(fl / "catalog.json", ":/sd/fw/catalog.json", "catalog.json")
         img_dir = payload / "images"
         if img_dir.is_dir():
             for img in sorted(img_dir.glob("*.bin")):
@@ -3378,7 +3531,7 @@ def _install_tools_on_node(port):
                 push(app, ":/sd/tools/firefly/" + app.name, app.name)
     else:
         print("  (no tools_payload folder found next to the firmware --")
-        print("   the browser flasher won't be available on this node)")
+        print("   the FireFly apps and tool READMEs won't be installed on this node)")
     # Home-page branding (docs/HOME_BRANDING.md): a "home" folder next to
     # this provisioner goes to home/ on the card, like the tools. The node
     # creates that folder on the card when it mounts it (fserv.mount_sd).
@@ -3400,15 +3553,6 @@ def _install_tools_on_node(port):
     if installed:
         print("  Installed: " + ", ".join(installed))
         print("  Tools at   http://<node>/tools")
-        # Only claimed if the flasher's own assets are actually among
-        # what got installed -- this used to print unconditionally
-        # whenever ANYTHING installed, including a run where
-        # esptool-bundle.js never made it on at all (no tools_payload
-        # folder found, printed and confirmed directly above this very
-        # line). Telling someone the flasher is ready right next to a
-        # warning that it isn't was a real, self-contradicting bug.
-        if "esptool-bundle.js" in installed:
-            print("  Flasher at http://<node>/flash")
     for label, why in failed:
         print("  Could not copy %s: %s" % (label, why))
     if by_card:
@@ -3452,13 +3596,14 @@ def _get_device_file_sizes(port):
     return None
 
 
-def _diff_against_device(resolved, filenames, device_sizes):
-    """Compares local file sizes against what's actually on the device.
-    Returns a list of (filename, reason) for anything missing or
-    size-mismatched (stale)."""
+def _diff_against_device(pairs, device_sizes):
+    """Compares local file sizes against what's actually on the device:
+    pairs is [(local file, path on the board)] (compile_for_board()).
+    Returns a list of (path on the board, reason) for anything missing
+    or size-mismatched (stale)."""
     problems = []
-    for fname in filenames:
-        local_size = (resolved / fname).stat().st_size
+    for local, fname in pairs:
+        local_size = Path(local).stat().st_size
         device_size = device_sizes.get(fname)
         if device_size is None:
             problems.append((fname, "missing"))
@@ -4845,7 +4990,6 @@ def route_for(role):
 def start_menu(version=None):
     """What are you setting up? Returns a role from ROLES, or None.
     version: release_lines() for the top of the box."""
-    g = _glyphs()
     lines = (version or []) + ([""] if version else []) + [
              "Sets up Stump hardware step by step: it shows the route first,",
              "then goes through it one numbered section at a time, asking",
@@ -5226,6 +5370,17 @@ def _pc_copy_firmware(fw, folder):
     return changed
 
 
+def _pc_mark_updated(folder):
+    """Every file in place: a Stump already running in this folder restarts
+    on the new ones (stump_host.UPDATED_FILE, read at its heartbeat). It
+    used to go on with the old modules in memory and load new ones later:
+    /admin went blank after an update (1.0.0-beta.45)."""
+    try:
+        (Path(folder) / ".updated").write_text("%s %d\n" % (_folder_release(folder) or "?", int(time.time())), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _pc_install_packs(folder, packs):
     """Packs into a Stump folder: their plugins next to the firmware, their
     tools and home files in its sd/ folder, their themes in themes.json --
@@ -5265,25 +5420,25 @@ def _pc_install_tools(fw, folder):
     payload = fw / "tools_payload"
     for src, dst in ((here / "provisioner.py", "provisioner/provisioner.py"),
                      (here / "README.md", "provisioner/Stump-README.md"),
-                     (here / "LICENSE", "provisioner/LICENSE"),
-                     (payload / "flasher" / "esptool-bundle.js", "flasher/esptool-bundle.js"),
-                     (payload / "flasher" / "esptool-js-LICENSE.txt", "flasher/esptool-js-LICENSE.txt")):
+                     (here / "LICENSE", "provisioner/LICENSE")):
         if src.is_file():
             _copy_if_changed(src, tools / dst)
-    for src, sec in (("provisioner", "provisioner"), ("flasher", "flasher"), ("apps", "firefly")):
+    for src, sec in (("provisioner", "provisioner"), ("apps", "firefly")):
         for f in sorted((payload / src).glob("*")):
             if f.is_file() and (f.name.startswith("README") or src == "apps"):
                 _copy_if_changed(f, tools / sec / f.name)
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            z = Path(tmp) / "Stump_Beta_A.zip"
+            name = firmware_zip_name(fw)
+            z = Path(tmp) / name
             _build_firmware_zip(z, fw)
-            _copy_if_changed(z, tools / "provisioner" / "Stump_Beta_A.zip")
+            _copy_if_changed(z, tools / "provisioner" / name)
+            for old in (tools / "provisioner").glob("*.zip"):
+                if _is_old_firmware_zip(old.name, name):
+                    old.unlink()
     except Exception as e:
         print("  (firmware zip for the Tools page skipped: %s)" % e)
-    cat = payload / "flasher" / "catalog.json"
-    if cat.is_file():
-        _copy_if_changed(cat, folder / "sd" / "fw" / "catalog.json")
+    # (the on-device flasher was retired in 1.0.0-beta.41; no catalog.json)
 
 
 def _pc_config_block(profile):
@@ -5949,14 +6104,14 @@ def chain_live(folder, parent_ip, wait=60, get=_get_json):
     it, and does it list it below? A list of (ok, what, fix)."""
     cfg = _read_folder_config(folder) or {}
     port = int(cfg.get("PC_HTTP_PORT", 80) or 80)
-    status, url = None, None
+    status = None
     end = time.time() + wait
     print("  Waiting for the link (up to %d s)..." % wait)
     while time.time() < end:
         for p in dict.fromkeys((port, 8080)):
             u = "http://127.0.0.1:%d/chain.json" % p
             try:
-                status, url = get(u), u
+                status = get(u)
                 break
             except Exception:
                 pass
@@ -6220,6 +6375,7 @@ def setup_pc(folder=None, reconfigure=False):
         if r.state[r.index] == "now":
             r.end("fail", "fix what's marked, then: python3 provisioner.py --check-chain")
 
+    _pc_mark_updated(folder)
     r.start("Start")
     started = False
     run_cmd = "%s %s" % (_pc_python(folder), folder / "stump_pc.py")

@@ -786,7 +786,7 @@ def create_room(name):
     return slug, None
 
 
-def post(room, nick, body, kind="msg", via=None):
+def post(room, nick, body, kind="msg", via=None, bot=False):
     """Adds a line to a room. Returns the message, or None if rejected.
 
     Oldest messages are dropped past MAX_MESSAGES_PER_ROOM rather than
@@ -805,6 +805,11 @@ def post(room, nick, body, kind="msg", via=None):
         # Relayed from another Stump of the chain (rrc_mesh): never sent
         # on to other Stumps, which hear the original themselves.
         msg["via"] = via
+    if bot:
+        # Said by a bot or a plugin (BarKeep, the Tavernier): for the people
+        # here, not sent to the other Stumps -- there it looked like a
+        # person, "BarKeep@LaBuche", whom nobody could DM ("⊖ BarKeep").
+        msg["bot"] = True
     _next_id[0] += 1
     msgs = _rooms[room]
     msgs.append(msg)
@@ -960,6 +965,95 @@ def reset():
 # Command handling
 # ---------------------------------------------------------------------
 
+# ---- The billboard from the chat (and over LoRa) ----
+# /board [words]   the newest notices (or those about the words), at most
+#                  BOARD_LINES, one per line: "#<id> <title>"
+# /board <id>      that notice: "#<id> <title>", then its body
+# /post <title> | <body>   a new notice: "✓ #<id>", or why not
+# Answered like /rooms: to the sender only, so over LoRa it's an LXMF
+# reply -- what FireFly's LoRa Board tab is built on. The id is the
+# short one (6 digits of the notice's own id, which /billboard.json has
+# whole); the full id works too.
+BOARD_LINES = 5
+POST_CMD_MAX = 6 + 80 + 3 + 600 + 8     # "/post " + title + " | " + body, and some spaces
+
+
+# The radio down past its grace time (rrc_mesh.lora_status): someone
+# writing to LoRa hears it, once a minute, and their line waits. Set by
+# rrc_mesh (rrc doesn't know the radio).
+LORA_NOTICE = [None]
+
+
+def _lora_notice(client_id, kind, target=None):
+    f = LORA_NOTICE[0]
+    if f is None:
+        return []
+    try:
+        line = f(client_id, kind, target)
+    except Exception:
+        return []
+    return [line] if line else []
+
+
+def board_id(pid):
+    """The short id of a notice, for the chat and LoRa."""
+    pid = str(pid or "")
+    return pid.split(".", 1)[1][:6] if "." in pid else pid
+
+
+def _board_find(ref):
+    import billboard
+    ref = ref.lstrip("#")
+    for sig, title, body, ts, pid in billboard._read_entries():
+        if pid and billboard._live(ts) and (ref == pid or ref == board_id(pid)):
+            return pid, title, body
+    return None
+
+
+def board_command(client_id, cmd, arg, lang):
+    import features
+    if not features.enabled("billboard"):
+        return [i18n.t("board_off", lang)]
+    import billboard
+    arg = (arg or "").strip()
+    if cmd == "board":
+        if arg and (arg.lstrip("#").isdigit() or "." in arg) and " " not in arg:
+            found = _board_find(arg)
+            if found is None:
+                return [i18n.t("board_not_found", lang, id=arg.lstrip("#"))]
+            pid, title, body = found
+            return ["#" + board_id(pid) + " " + title] + ([body] if body else [])
+        import librarian
+        words = (librarian.parse(arg)[1] or [librarian.fold(arg).strip()]) if arg else None
+        posts = [p for p in billboard.search_entries(words, BOARD_LINES * 3) if p.get("id")][:BOARD_LINES]
+        if not posts:
+            return [i18n.t("board_none_about", lang, words=arg) if arg else i18n.t("board_empty", lang)]
+        return ["#" + board_id(p["id"]) + " " + p["title"] for p in posts]
+    # /post <title> | <body>
+    if not arg:
+        return [i18n.t("post_usage", lang)]
+    title, _, body = arg.partition("|")
+    try:
+        import config
+        per_min = int(getattr(config, "BILLBOARD_POSTS_PER_MIN", 3))
+    except Exception:
+        per_min = 3
+    if not guard.window("post", client_id, per_min, 60):
+        return [tok_rate(i18n.t("post_rate", lang))]
+    ok, info = billboard._append_entry(title.strip(), body.strip(), client_id)
+    if ok:
+        return ["\u2713 #" + board_id(info)]
+    return [i18n.t("post_title_required" if info == "title_required" else "post_not_saved", lang)]
+
+
+def _board_on():
+    try:
+        import features
+        return features.enabled("billboard")
+    except Exception:
+        return False
+
+
 def help_lines(lang, mesh=False):
     """The /help listing, in the requesting client's language. Command
     WORDS and their column alignment stay fixed across all languages
@@ -981,6 +1075,10 @@ def help_lines(lang, mesh=False):
         line("/topic " + a("text"), "help_topic"),
         line("/msg " + a("who") + " " + a("text"), "help_msg"),
         line("/me " + a("action"), "help_me"),
+    ] + ([
+        line("/board " + a("words"), "help_board"),
+        line("/post " + a("title") + " | " + a("text"), "help_post"),
+    ] if _board_on() else []) + [
         line("/clear", "help_clear"),
         line("/help", "help_help"),
     ] + plugins.help_lines(lang, mesh) + [
@@ -1016,7 +1114,12 @@ def handle_input(client_id, room, text):
     """
     lang = i18n.get_lang(client_id)
     user = get_user(client_id)
-    text = _clean(text, MAX_MESSAGE_LEN)
+    if text[:6].lower() == "/post ":
+        # A notice: up to the billboard's own lengths (title 80, body 600),
+        # its line breaks kept -- more than a chat line.
+        text = "".join(ch for ch in text[:POST_CMD_MAX] if ord(ch) >= 32 and ord(ch) != 127 or ch == "\n").strip()
+    else:
+        text = _clean(text, MAX_MESSAGE_LEN)
     if not text:
         return [], None
     # Who's asking, for password checks inside commands (guard.py), and
@@ -1051,7 +1154,8 @@ def _handle_core(client_id, room, text, user, lang):
         if posted is None:
             return [i18n.t("room_gone", lang)], None
         # Posted: now !triggers and plugin listeners.
-        return plugins.after(client_id, room, user["nick"], text, lang), None
+        return (plugins.after(client_id, room, user["nick"], text, lang)
+                + (_lora_notice(client_id, "room") if room == MESH_ROOM else [])), None
 
     parts = text[1:].split(" ", 1)
     cmd = parts[0].lower()
@@ -1108,6 +1212,9 @@ def _handle_core(client_id, room, text, user, lang):
         touch_user(client_id, room=DEFAULT_ROOM)
         system(DEFAULT_ROOM, ev_join(user["nick"]))
         return [], DEFAULT_ROOM
+
+    if cmd in ("board", "post"):
+        return board_command(client_id, cmd, arg, lang), None
 
     if cmd == "rooms":
         return [rooms_line(r, len(names_in_room(r)), topic(r, lang))
@@ -1176,7 +1283,7 @@ def _handle_core(client_id, room, text, user, lang):
         # Confirmed to the sender only. Nothing is posted to the room --
         # that is the whole point, and it also keeps private traffic off
         # the radio, since rrc_mesh forwards room messages but not these.
-        return [dm_line(user["nick"], body)], None
+        return [dm_line(user["nick"], body)] + _lora_notice(client_id, "dm", target), None
 
     if cmd == "me":
         if not arg:

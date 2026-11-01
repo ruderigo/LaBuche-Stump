@@ -250,9 +250,23 @@ def _take_in_chain_stumps(router):
 def _known_name(router, h):
     try:
         entry = router.peers.get(bytes.fromhex(h))
-        return entry.get("name") if entry else None
+        if entry and entry.get("name"):
+            return entry.get("name")
     except Exception:
-        return None
+        pass
+    # Its LXMF announce (router.peers) hasn't arrived yet -- it's a
+    # separate, crypto-heavy broadcast on its own ~2-minute cycle. The
+    # Stump's beacon carries its name too and comes first, within seconds
+    # of a restart (beta.43's early re-introduction), so resolve the name
+    # from there rather than sitting on "mesh-xxxx" until the announce.
+    try:
+        import discovery
+        e = discovery._known.get(h)
+        if e and e.get("name"):
+            return e["name"]
+    except Exception:
+        pass
+    return None
 
 
 def _fix_nick(router, h, p):
@@ -273,6 +287,10 @@ def _fix_nick(router, h, p):
         for cid, r in list(_remote.items()):
             if r["h"] == h:
                 rrc.set_reachable(cid, r["nick"] + "@" + nick)
+        # Its names lists (/names) too: they came in under the old name.
+        e = rrc._remote_names.get(h)
+        if e is not None:
+            e["who"] = nick
 
 
 def _from_stump(dest_hash_hex, peer, text, router=None, title=""):
@@ -284,7 +302,8 @@ def _from_stump(dest_hash_hex, peer, text, router=None, title=""):
     #lora-mesh: the radio's room, shared by the Stumps."""
     who = peer["nick"]
     me = (rrc.NODE or {}).get("name") or "?"
-    room = rrc.MESH_ROOM if rrc.canon((title or "").lstrip("#")) == rrc.MESH_ROOM else (
+    t = rrc.canon((title or "").lstrip("#"))
+    room = t if t in (rrc.MESH_ROOM, rrc.CHAIN_ROOM) else (
         rrc.CHAIN_ROOM if peer.get("room") == rrc.CHAIN_ROOM else rrc.MESH_ROOM)
     for line in text.split("\n"):
         line = line.strip()
@@ -304,9 +323,16 @@ def _from_stump(dest_hash_hex, peer, text, router=None, title=""):
                 cid = _remote_seen(dest_hash_hex, nick, who, ident)
                 if cid:
                     listed.add(cid)
-            # Gone from that Stump's list: gone as a contact here too (not
-            # an hour later).
+                    _remote[cid].setdefault("rooms", set()).add(room)
+            # Gone from that Stump's list for this room: gone as a contact
+            # here too (not an hour later) -- unless that Stump still lists
+            # them in its other room (a Stump sends one list per room).
             for cid in [k for k, r in _remote.items() if r["h"] == dest_hash_hex and k not in listed]:
+                rooms = _remote[cid].get("rooms")
+                if rooms:
+                    rooms.discard(room)
+                    if rooms:
+                        continue
                 _remote.pop(cid)
                 rrc.drop_reachable(cid)
             continue
@@ -343,7 +369,11 @@ def _from_stump(dest_hash_hex, peer, text, router=None, title=""):
 # ── Peer state ────────────────────────────────────────────────────────
 
 def _prune_peers(now):
-    stale = [h for h, p in _peers.items() if now - p["last_seen"] > PEER_TIMEOUT]
+    # While the radio is down nobody on LoRa can be heard: they aren't
+    # gone, and what waits for them stays (up to LORA_KEEP_S).
+    keep = _lora_waits() and _lora["since"] is not None and now - _lora["since"] < _setting("LORA_KEEP_S", LORA_KEEP_S)
+    stale = [h for h, p in _peers.items() if now - p["last_seen"] > PEER_TIMEOUT
+             and not (keep and not p.get("stump"))]
     for h in stale:
         p = _peers.pop(h)
         rrc.system(p["room"], rrc.ev_leave("~" + p["nick"]))
@@ -482,6 +512,143 @@ def _is_person(router, dest, packet):
         return False
 
 
+_forged = set()           # LXMF addresses named by beacons that weren't theirs (logged once)
+
+
+# ── The radio, this Stump's own or one along the chain ───────────────
+# "up": a radio online (this Stump's Heltec, by USB, Bluetooth or the
+# CAM's bridge; or another Stump of the chain's, from its beacon).
+# "connecting": none online, for less than LORA_GRACE_S -- the Heltec's
+# own reconnect gets that long, nothing is said yet. "down": longer than
+# that: someone writing to LoRa is told, once a minute, and their line
+# waits (the room and DM marks don't move) to go out when it's back, up
+# to LORA_KEEP_S. "none": this Stump has no radio, nor does any Stump
+# of the chain: nothing to wait for.
+_lora = {"state": "none", "since": None, "own": None, "told": {}}
+
+
+def _setting(name, default):
+    try:
+        import config
+        return getattr(config, name, default)
+    except Exception:
+        return default
+
+
+def lora_status(now=None):
+    """{"state": "none"|"up"|"connecting"|"down", "down_s": seconds or None}"""
+    now = time.time() if now is None else now
+    since = _lora["since"]
+    return {"state": _lora["state"], "down_s": int(now - since) if since is not None else None}
+
+
+def _lora_paths():
+    """(this Stump or one of its chain has a radio, one is online now)."""
+    own = None
+    try:
+        import radio
+        own = radio.hw()["state"]
+    except Exception:
+        pass
+    if own and own != "none":
+        if own != _lora["own"] and _lora["own"] == "online":
+            # Our radio just went: the chain hears it from our beacon, now
+            # rather than at the half-hourly one.
+            try:
+                import chain
+                chain.link_event()
+            except Exception:
+                pass
+        _lora["own"] = own
+        if own == "online":
+            return True, True
+    else:
+        _lora["own"] = own
+    has, up = bool(own and own != "none"), False
+    try:
+        import discovery
+        for s in discovery.chain_stumps():
+            if s.get("heard_s", 10 ** 9) > 7200:
+                continue
+            if s.get("has_radio"):
+                has = True
+            if s.get("radio"):
+                up = True
+    except Exception:
+        pass
+    return has, up
+
+
+def lora_tick(now=None):
+    now = time.time() if now is None else now
+    has, up = _lora_paths()
+    before = _lora["state"]
+    if not has:
+        _lora["state"], _lora["since"] = "none", None
+    elif up:
+        if before in ("down", "connecting") and _lora["since"] is not None:
+            print("[rrc_mesh] the radio is back after %d s" % int(now - _lora["since"]))
+            if now - _lora["since"] > _setting("LORA_KEEP_S", LORA_KEEP_S):
+                _skip_backlog()
+        _lora["state"], _lora["since"] = "up", None
+    else:
+        if _lora["since"] is None:
+            _lora["since"] = now
+        grace = _setting("LORA_GRACE_S", LORA_GRACE_S)
+        _lora["state"] = "down" if now - _lora["since"] >= grace else "connecting"
+        if _lora["state"] == "down" and before != "down":
+            print("[rrc_mesh] the radio has been down %d s: telling who writes to LoRa, keeping their lines"
+                  % int(now - _lora["since"]))
+    return _lora["state"]
+
+
+LORA_GRACE_S = 120
+LORA_KEEP_S = 3600
+
+
+def _lora_waits():
+    """Lines for LoRa wait (the radio connecting or down)."""
+    return _lora["state"] in ("connecting", "down")
+
+
+def _skip_backlog():
+    """Down longer than LORA_KEEP_S: what waited is let go, not sent all
+    at once an hour late."""
+    for h, p in _peers.items():
+        if not p.get("stump"):
+            msgs = rrc.since(p["room"], p.get("last_sent_id", 0))
+            if msgs:
+                p["last_sent_id"] = msgs[-1]["id"]
+            dms = rrc.dms_since(h, p.get("last_dm_id", 0))
+            if dms:
+                p["last_dm_id"] = dms[-1]["id"]
+    print("[rrc_mesh] the radio was down over an hour: what waited is let go")
+
+
+def _lora_notice(client_id, kind, target=None):
+    """The line someone writing to LoRa gets while the radio is down."""
+    if _lora["state"] != "down":
+        return None
+    if kind == "dm":
+        # Only a DM to someone on LoRa (not a person here, nor on another Stump by Wi-Fi).
+        t = (target or "").lower()
+        on_lora = any(p["nick"].lower() == t and not p.get("stump") for p in _peers.values()) or \
+            any(r["nick"].lower() == t for r in _reach.values())
+        if not on_lora:
+            return None
+    now = time.time()
+    if now - _lora["told"].get(client_id, 0) < 60:
+        return None
+    _lora["told"][client_id] = now
+    if len(_lora["told"]) > 200:
+        _lora["told"].clear()
+    mins = max(1, int((now - _lora["since"]) // 60))
+    return rrc.tok_rate(i18n.t("lora_down_waits", i18n.get_lang(client_id), min=mins))
+
+
+rrc.LORA_NOTICE[0] = _lora_notice
+
+
 def _note_stump_beacon(router, app_data, packet):
     """A "stump.node" beacon from another node: remember its LXMF
     delivery hash (carried in the beacon's announce data) as a Stump,
@@ -496,19 +663,42 @@ def _note_stump_beacon(router, app_data, packet):
         from urns import umsgpack
         fields = umsgpack.unpackb(app_data)
         lxmf_hash = bytes(fields[3])
+        # The LXMF address must be the beacon's own identity's: the announce
+        # is signed by that identity, but the address inside is just data.
+        # Anyone could otherwise announce a beacon naming SOMEONE ELSE's
+        # address, and this Stump would take that person for a Stump (their
+        # messages read as a Stump's batches, their name off the lists).
+        from urns.destination import Destination
+        ident_hash = Identity.truncated_hash(bytes(packet.data[:off]))
+        if lxmf_hash != Destination.hash(ident_hash, "lxmf", "delivery"):
+            if lxmf_hash.hex() not in _forged:
+                if len(_forged) > 32:
+                    _forged.clear()
+                _forged.add(lxmf_hash.hex())
+                print("[rrc_mesh] a Stump beacon naming an address not its own (%s): ignored"
+                      % lxmf_hash.hex()[:8])
+            return True
+        answer = False
         if len(fields) > 4:
             try:
                 import discovery
-                discovery.heard(lxmf_hash.hex(), str(fields[2]), fields[4])
+                c = fields[5] if len(fields) > 5 else None
+                # Its first beacon since this Stump started, or the first of
+                # a new boot of its own ("b": it restarted, and forgot this
+                # Stump while this one still knew it): answer, as a new Stump
+                # is answered. Knowing it as a Stump from the chat alone
+                # (rrc.is_stump) isn't enough: it may not know this one.
+                answer = lxmf_hash.hex() not in discovery._known or discovery.restarted(lxmf_hash.hex(), c)
+                discovery.heard(lxmf_hash.hex(), str(fields[2]), fields[4], c)
             except Exception:
                 pass
         own = router.delivery_destination
         if own is None or lxmf_hash != bytes(own.hash):
             h = lxmf_hash.hex()
-            if not rrc.is_stump(h):
-                # A Stump new to this one: answer with this one's beacon,
-                # so it learns this Stump too (over the radio alone there's
-                # no chain link to do it).
+            if answer or not rrc.is_stump(h):
+                # A Stump new to this one (or new again, above): answer with
+                # this one's beacon, so it learns this Stump too (over the
+                # radio alone there's no chain link to do it).
                 try:
                     import chain
                     chain.stump_heard()
@@ -663,7 +853,8 @@ def install_announce_handler(router):
 
 
 def _prune_reach(now):
-    for h in [k for k, r in _reach.items() if now - r["last_seen"] > ANNOUNCE_TIMEOUT]:
+    keep = _lora_waits() and _lora["since"] is not None and now - _lora["since"] < _setting("LORA_KEEP_S", LORA_KEEP_S)
+    for h in [k for k, r in _reach.items() if now - r["last_seen"] > ANNOUNCE_TIMEOUT and not keep]:
         _reach.pop(h)
         rrc.drop_reachable(h)
 
@@ -1061,9 +1252,62 @@ def _flush_profiles(router, dest_hash_hex, peer):
         if not recs:
             break
         # No "via": too big for one packet; the path to it is the chain's.
-        _send_queue.append((router, dest, json.dumps(recs), PROFILES_TITLE))
+        _send_queue.append((router, dest, _profiles_out(json.dumps(recs)), PROFILES_TITLE))
         cur = nxt
     peer["prof_seq"] = cur
+
+
+# Profiles (password hashes) cross the chain only with the chain secret's
+# mark: {"r": <records, as JSON text>, "t": HMAC-SHA256(secret, that text),
+# first 16 bytes, hex}. Coming in over a chain link isn't enough on its
+# own -- a device on a Stump's Wi-Fi can send UDP that looks like it comes
+# from the Stump above. Without a chain secret (an open chain), the plain
+# list as before. Older Stumps (before 1.0.0-beta.37) send and expect the
+# plain list: with a secret, update every Stump of the chain together.
+def _profiles_tag(secret, text):
+    from urns.crypto.hmac import new as hmac_new
+    import ubinascii
+    return ubinascii.hexlify(hmac_new(secret.encode(), text.encode()).digest()[:16]).decode()
+
+
+def _chain_secret():
+    try:
+        import chain
+        s = chain.settings()
+        return s["secret"] if s else ""
+    except Exception:
+        return ""
+
+
+def _profiles_out(text):
+    secret = _chain_secret()
+    if not secret:
+        return text
+    try:
+        import ujson as json
+    except ImportError:
+        import json
+    return json.dumps({"r": text, "t": _profiles_tag(secret, text)})
+
+
+def _profiles_in(content):
+    """The records in a profiles batch, or None if it isn't marked with
+    this chain's secret (when it has one)."""
+    try:
+        import ujson as json
+    except ImportError:
+        import json
+    data = json.loads(content or "[]")
+    secret = _chain_secret()
+    if not secret:
+        return data if isinstance(data, list) else (json.loads(data["r"]) if isinstance(data, dict) and "r" in data else [])
+    if not isinstance(data, dict) or not isinstance(data.get("r"), str) or not isinstance(data.get("t"), str):
+        return None
+    import webtext
+    if not webtext.same(data["t"], _profiles_tag(secret, data["r"])):
+        return None
+    recs = json.loads(data["r"])
+    return recs if isinstance(recs, list) else None
 
 
 def _take_profiles(message):
@@ -1074,11 +1318,12 @@ def _take_profiles(message):
         return
     try:
         import profiles
-        try:
-            import ujson as json
-        except ImportError:
-            import json
-        n = profiles.merge(json.loads(message.content_as_string() or "[]"))
+        recs = _profiles_in(message.content_as_string())
+        if recs is None:
+            print("[rrc_mesh] profiles from %s ignored: not marked with this chain's secret"
+                  % message.source_hash.hex()[:8])
+            return
+        n = profiles.merge(recs)
         if n:
             rrc.release_registered_nicks()
             print("[rrc_mesh] %d profile(s) from %s" % (n, message.source_hash.hex()[:8]))
@@ -1098,6 +1343,17 @@ def _flush_to_peer(router, dest_hash_hex, peer):
     dms     = rrc.dms_since(dest_hash_hex, peer.get("last_dm_id", 0))
 
     remote = _remote_dm_lines(dest_hash_hex) if peer.get("stump") else []
+    # Who's in #wifi-mesh here, for the other Stumps' /names and DMs (chain
+    # protocol 2): when it changes, and every NAMES_EVERY s. It used to
+    # list only who had spoken, so someone quiet on a Stump in the middle
+    # was nobody's contact elsewhere.
+    names_line = None
+    if peer.get("stump") and room == rrc.CHAIN_ROOM:
+        roster = " ".join(_room_roster(rrc.CHAIN_ROOM))
+        now = time.time()
+        if roster != peer.get("wifi_roster") or now - peer.get("wifi_roster_at", 0) > NAMES_EVERY:
+            peer["wifi_roster"], peer["wifi_roster_at"] = roster, now
+            names_line = "[NAMES] " + (roster or "-")
     if peer.get("stump"):
         _flush_profiles(router, dest_hash_hex, peer)
         # #lora-mesh to another Stump always goes the radio-first way
@@ -1108,7 +1364,7 @@ def _flush_to_peer(router, dest_hash_hex, peer):
             if msgs:
                 peer["last_sent_id"] = msgs[-1]["id"]
             msgs = []
-    if not msgs and not dms and not remote:
+    if not msgs and not dms and not remote and not names_line:
         return
     try:
         dest_hash_bytes = bytes.fromhex(dest_hash_hex)
@@ -1130,7 +1386,7 @@ def _flush_to_peer(router, dest_hash_hex, peer):
         peer["last_sent_id"] = m["id"]
         if m["nick"] == nick:
             continue
-        if stump and (m["kind"] == "system" or m.get("via")):
+        if stump and (m["kind"] == "system" or m.get("via") or m.get("bot")):
             # To another Stump: its own people's lines only, no notices.
             continue
         if m["kind"] == "system":
@@ -1152,11 +1408,13 @@ def _flush_to_peer(router, dest_hash_hex, peer):
             peer["last_dm_id"] = m["id"]
     _send_queue.extend(_voice_items(router, dest_hash_bytes, dms))
     lines.extend(remote)
+    if names_line:
+        lines.append(names_line)
 
     if lines:
         # Room lines in this batch belong to `room`; say so in the title.
         # A DM-only batch has no room (its lines name their author).
-        text, title = "\n".join(lines), ("#" + room if msgs else "")
+        text, title = "\n".join(lines), ("#" + room if msgs or names_line else "")
         chain_if = _chain_iface(dest_hash_bytes) if stump and room == rrc.CHAIN_ROOM else None
         if chain_if is not None and len((text + title).encode()) <= RADIO_CHUNK:
             # #wifi-mesh stays on Wi-Fi: a short batch to a Stump one hop
@@ -1171,7 +1429,7 @@ def _stump_lines(msgs, skip_nick=None):
     came from other Stumps, no notices)."""
     out = []
     for m in msgs:
-        if m["nick"] == skip_nick or m["kind"] == "system" or m.get("via"):
+        if m["nick"] == skip_nick or m["kind"] == "system" or m.get("via") or m.get("bot"):
             continue
         out.append(("* " + m["nick"] + " " if m["kind"] == "action" else "<" + m["nick"] + "> ") + m["body"])
     return out
@@ -1275,13 +1533,17 @@ NAMES_EVERY = 600
 
 
 def _lora_roster():
-    """The people in #lora-mesh on THIS Stump (not the other Stumps, not
+    return _room_roster(rrc.MESH_ROOM)
+
+
+def _room_roster(room):
+    """The people in this room on THIS Stump (not the other Stumps, not
     people this one only knows from them)."""
     stumps = set(p["nick"] for p in _peers.values() if p.get("stump"))
     out = []
     for cid, u in list(rrc._users.items()):
         n = u["nick"]
-        if (u["room"] != rrc.MESH_ROOM or n in stumps or "@" in n or cid in rrc._hidden
+        if (u["room"] != room or n in stumps or "@" in n or cid in rrc._hidden
                 or rrc.same_web(cid) is not None):
             continue
         ident = rrc.identity_of(cid)
@@ -1393,8 +1655,9 @@ async def poll_loop(router):
                     r["nick"] = peer["nick"]
                     rrc.set_reachable(dest_hash_hex, peer["nick"])
 
+            lora_tick(now)
             for h, r in list(_reach.items()):
-                if h not in _peers:
+                if h not in _peers and not _lora_waits():
                     _deliver_reach_dms(router, h, r)
                     # Sent now, same as the room-peer loop below -- left
                     # queued, it waited a whole extra 5-second cycle.
@@ -1403,6 +1666,8 @@ async def poll_loop(router):
                         await asyncio.sleep(0)
 
             for dest_hash_hex, peer in list(_peers.items()):
+                if _lora_waits() and not peer.get("stump"):
+                    continue        # a LoRa person: their lines wait for the radio (lora_tick)
                 _flush_to_peer(router, dest_hash_hex, peer)
                 while _send_queue:
                     _send_item(_send_queue.pop(0))

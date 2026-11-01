@@ -33,7 +33,7 @@ note describes something that has changed since, the README and
   code. Named `LICENSE` with no extension deliberately, matching the
   standard convention GitHub, package managers, and license scanners
   all look for by that exact name.
-- **`Stump_Beta_A.zip`** — the full firmware source, built *fresh* from
+- **`Stump-<release>.zip`** (`Stump_Beta_A.zip` before 1.0.0-beta.35) — the full firmware source, built *fresh* from
   the technician's own `final_firmware/` directory at push time rather
   than copied from wherever their original download happened to land.
   Built this way specifically so it can't go stale relative to what's
@@ -336,7 +336,7 @@ back on) goes at the end.
 **Tools page, behind `/admin` too.** *Tools page* lists every section
 and file of the card's `tools/` folder with a box to tick: a whole
 section, or single files, deleted from the SD card. The Provisioner
-puts its own tools (Provisioner, flasher, FireFly apps) back at its
+puts its own tools (Provisioner, FireFly apps) back at its
 next `--upload-app`, unless run with `--skip-tools`.
 
 **Per-browser overrides and logo, behind `/admin`.** The same login
@@ -1629,3 +1629,31 @@ sender is refused when the node isn't open.
   guidance about closing whatever else has the port open instead of
   offering to wipe, while a real, board-reported mount failure still
   offers the wipe prompt exactly as before.
+
+## The code's layout after the cleanup (1.0.0-beta.35)
+
+- **barkeep.py** is the web server: `_serve` reads the request and calls
+  one handler per route (`_r_*`), matched in order, the first match wins
+  (the order is the old if/elif chain's: a longer address before the
+  shorter one it starts with). A new route is a handler and one line in
+  that chain.
+- **admin_web.py** holds everything under `/admin`: the page's sections
+  and their forms. barkeep imports it inside the route, the first time
+  someone opens `/admin`, so a boot that never does doesn't hold its
+  ~1,500 lines. It reaches barkeep's helpers as `B.<name>`. Passwords and
+  sessions (`_check_admin_pw`, `_session_ok`...) stay in barkeep: every
+  part of the server uses them.
+- **webtext.py**: `esc`, `url_encode`, `url_decode`, `sd_available`. The
+  only copy: the modules' own names for them (`billboard._esc`,
+  `rrc_ui._esc`, `i18n._url_encode`...) point here.
+- **store.py**: `save_json` / `load_json`, for every settings file.
+  Whole or not at all (`<file>.tmp`, then a rename over the old one);
+  never raises.
+- **On the board, compiled.** The Provisioner sends `.mpy` files when
+  the board's MicroPython and the computer's mpy-cross agree on the
+  version (`compile_for_board`, `remove_shadowed`); `main.py` and
+  `config.py` stay source. MicroPython loads a `.py` before a `.mpy` of
+  the same name, which is why the `.py` a compiled module replaces is
+  removed. `MPY_CROSS=... python3 tests/run.py` runs the tests on a
+  compiled copy; a test that reads a module's source opens it from the
+  repository, not from its copy.
