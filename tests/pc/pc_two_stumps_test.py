@@ -119,9 +119,12 @@ if up:
     dms1 = lambda: json.loads(get(FIRST, "/rrc/poll?room=wifi-mesh&since=0")).get("dms", [])
     check("... and the answer comes back", wait(lambda: any(d["body"] == "got it" for d in dms1()), 60), dms1())
     # a DM to the other Stump itself
+    # (private since 1.0.0-beta.47: that Stump answers, as a DM from itself)
     get(SECOND, "/rrc/send", b"/msg Firstpc hi node")
-    check("a DM to a Stump shows in its #wifi-mesh, never #lora-mesh",
-          wait(lambda: any(m["body"] == "@Firstpc hi node" for m in room(FIRST, "wifi-mesh")), 60), room(FIRST, "wifi-mesh"))
+    check("a DM to a Stump: it answers privately, a DM from the Stump itself",
+          wait(lambda: any(d["nick"] == "Firstpc" and "@Firstpc" in d["body"] for d in dms2()), 60), dms2())
+    check("... and it's in no room on either Stump", not any("hi node" in m["body"] for m in
+          room(FIRST, "wifi-mesh") + room(SECOND, "wifi-mesh")), room(FIRST, "wifi-mesh"))
     time.sleep(12)
     second = room(SECOND, "wifi-mesh")
     check("said once, never echoed back", sum(m["body"] == "hello from the second" for m in second) == 1

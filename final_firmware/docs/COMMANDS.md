@@ -432,8 +432,10 @@ over the chain. Between Stumps only chat lines cross, shown as
 People on other Stumps are DM contacts: `/msg rod@LaBuche text` is
 private, and rod's answer arrives as a DM from `you@yourstump`; a
 `/msg` to someone not there comes back as `⊖ name`. A DM to a Stump
-itself (`/msg LaBuche text`) shows in that Stump's `#wifi-mesh` as
-`<you@yourstump> @LaBuche text`. (`#chained` and `#mesh`, its names on
+itself (`/msg LaBuche text`) stays private: its BarKeep answers, in your
+DM thread with that Stump (its triggers, `!help`, or how to reach the
+people there as `name@LaBuche`). Until 1.0.0-beta.47 it showed in that
+Stump's `#wifi-mesh`. (`#chained` and `#mesh`, its names on
 `main` for an afternoon, still reach it.)
 
 **On a computer with its own Heltec, with `LORA_MESH_LOCKED = True`** in

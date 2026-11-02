@@ -36,6 +36,7 @@ def setup(stump):
         stump.command(name, _command(name), trigger=False, limit=False, mesh_lines=0,
                       help=core.help_line if name == "fshelp" else None)
     stump.on_message(_on_line)
+    stump.provide("bot", _Bot())          # (a DM to this Stump itself: rrc_mesh)
     stump.every(30, _notice)
     mins = core.broadcast_mins()
     print("[fservbot] active: prefix '%s', %d trigger(s), notice %s" % (
@@ -66,6 +67,19 @@ def _on_line(ctx):
     if reply:
         rrc.post(ctx.room, core.bot_name(), reply, bot=True)
         _activity["at"] = 0      # the bot just spoke here: no notice on top
+
+
+class _Bot:
+    """BarKeep for a DM written to this Stump itself (from another Stump):
+    the same triggers as in a room, answered to that one person only."""
+    def answer(self, nick, text):
+        return core.maybe_respond(None, nick, text.strip())
+
+    def name(self):
+        return core.bot_name()
+
+    def prefix(self):
+        return core.prefix()
 
 
 def _notice():

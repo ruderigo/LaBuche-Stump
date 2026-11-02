@@ -258,8 +258,12 @@ the chain lands there, not in `#lora-mesh`. People seen on another Stump are
 DM contacts as `nick@thatstump` (in `users`); `/msg rod@LaBuche text`
 reaches rod privately, and rod's answer arrives as a DM from
 `you@yourstump`. That works over LXMF too: a mesh client sends `/msg
-rod@LaBuche text` like any `/msg`. A DM to a Stump itself shows in its
-`#wifi-mesh` as `@ThatStump text`. The other Stumps' names are in the
+rod@LaBuche text` like any `/msg`. A DM to a Stump itself (`/msg Laptop
+text`) is private (since 1.0.0-beta.47; it showed in that Stump's
+`#wifi-mesh` before): that Stump's BarKeep answers it -- its triggers
+(`!help`, `!list`...), or how to reach the people there -- and the
+answer arrives as a DM from the Stump itself (`"nick": "Laptop"`, no
+`@`), so it belongs in the DM thread with that Stump. The other Stumps' names are in the
 poll's `stumps` list: the web chat groups them at the bottom of its
 column with a 🪵 (see *Telling Stumps from people*).
 

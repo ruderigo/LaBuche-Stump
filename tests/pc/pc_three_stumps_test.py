@@ -171,9 +171,11 @@ try:
     say("Charlie", "/msg %s@Alpha and back" % nick["Alpha"])
     check("... and the answer comes back", wait(lambda: any(d["body"] == "and back" for d in dms("Alpha")), 90), dms("Alpha"))
     say("Charlie", "/msg Alpha to the stump")
-    check("a DM to a Stump two hops away shows in its #wifi-mesh",
-          wait(lambda: any(m["body"] == "@Alpha to the stump" for m in room("Alpha", "wifi-mesh")), 90),
-          room("Alpha", "wifi-mesh"))
+    check("a DM to a Stump two hops away: it answers privately, a DM from the Stump itself",
+          wait(lambda: any(d["nick"] == "Alpha" and "@Alpha" in d["body"] for d in dms("Charlie")), 90),
+          dms("Charlie"))
+    check("... and it's in no room", not any("to the stump" in m["body"] for n in STUMPS
+                                              for m in room(n, "wifi-mesh")), room("Alpha", "wifi-mesh"))
 
     # ── 4. Paths that must not exist ─────────────────────────────────
     time.sleep(12)

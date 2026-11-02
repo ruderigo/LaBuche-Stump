@@ -747,7 +747,8 @@ Every command and reply is in
   can `/join wifi-mesh`. Only chat lines cross between Stumps, shown as
   `<rod@LaBuche>`; joins and parts stay on their own Stump. People on
   other Stumps are DM contacts as `rod@LaBuche` (`/msg rod@LaBuche ...`
-  is private); a DM to a Stump itself shows in its `#wifi-mesh`.
+  is private); a DM to a Stump itself stays private too: its BarKeep answers it
+  in your DM thread with that Stump.
 - **`#lora-mesh` between Stumps:** each Stump sends its own people's
   lines there to the other Stumps it knows — over its radio when it has
   one online, one packet each, even when Wi-Fi reaches them too — and
