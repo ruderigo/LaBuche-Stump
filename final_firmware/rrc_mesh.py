@@ -297,7 +297,7 @@ def _from_stump(dest_hash_hex, peer, text, router=None, title=""):
     """Lines from another Stump of the chain: "<nick> text" into #wifi-mesh
     as nick@thatstump, "* nick text" as an action, "[DM>rod] <nick> text"
     as a DM to rod here from nick@thatstump, "[DM] <nick>: text" (a DM to
-    this Stump itself) into #wifi-mesh, addressed to it. Marked as relayed,
+    this Stump itself) answered privately by BarKeep. Marked as relayed,
     so they go no further. A batch titled "#lora-mesh" lands in
     #lora-mesh: the radio's room, shared by the Stumps."""
     who = peer["nick"]
@@ -339,17 +339,30 @@ def _from_stump(dest_hash_hex, peer, text, router=None, title=""):
         if line.startswith("[DM>") and "] <" in line and "> " in line:
             to, rest = line[4:].split("] <", 1)
             nick, body = rest.split("> ", 1)
-            _remote_seen(dest_hash_hex, nick, who)
-            ok, _ = rrc.send_dm(nick + "@" + who, to, body)
+            if nick == who:
+                # That Stump itself answering (its BarKeep, a "no one by that
+                # name"): in the thread with the Stump, not "who@who".
+                frm = who
+            else:
+                _remote_seen(dest_hash_hex, nick, who)
+                frm = nick + "@" + who
+            ok, _ = rrc.send_dm(frm, to, body)
             if not ok and router is not None:
                 # No one here by that name: say so, as a DM back.
                 _send_queue.append((router, bytes.fromhex(dest_hash_hex),
                                     "[DM>%s] <%s> %s" % (nick, me, rrc.no_such(to))))
             continue
         if line.startswith("[DM] <") and ">: " in line:
+            # A DM to this Stump itself (its entry under "Stumps"): private,
+            # never into a room (it was posted to #wifi-mesh for all to read
+            # until 1.0.0-beta.47). BarKeep answers it, back into the
+            # sender's DM thread with this Stump.
             nick, body = line[6:].split(">: ", 1)
             _remote_seen(dest_hash_hex, nick, who)
-            rrc.post(room, nick + "@" + who, "@" + me + " " + body, via=dest_hash_hex)
+            reply = _dm_to_me(dest_hash_hex, nick, body)
+            if reply and router is not None:
+                _send_queue.append((router, bytes.fromhex(dest_hash_hex), "\n".join(
+                    "[DM>%s] <%s> %s" % (nick, me, l) for l in reply.split("\n") if l.strip())))
             continue
         if line.startswith("<") and "> " in line:
             nick, body = line[1:].split("> ", 1)
@@ -364,6 +377,36 @@ def _from_stump(dest_hash_hex, peer, text, router=None, title=""):
         if line[:1] in ("✓", "✗", "✎", "→", "⊖", "⊘", "⧗"):
             continue           # an older Stump's room notices: not chat
         rrc.post(room, who, line, via=dest_hash_hex)
+
+
+# A DM to this Stump itself: BarKeep's answer to a trigger (!help, !list,
+# ...), else, at most every DM_HELP_EVERY s per sender, how to reach the
+# people here (name@thisstump).
+DM_HELP_EVERY = 600
+_dm_helped = {}
+
+
+def _dm_to_me(dest_hash_hex, nick, body):
+    bot = plugins.service_lookup("bot")
+    if bot is not None:
+        try:
+            r = bot.answer(nick, body)
+            if r:
+                return r
+        except Exception as e:
+            print("[rrc_mesh] BarKeep couldn't answer a DM:", e)
+    key = dest_hash_hex + " " + nick
+    now = time.time()
+    if now - _dm_helped.get(key, -DM_HELP_EVERY) < DM_HELP_EVERY:
+        return None
+    if len(_dm_helped) > 100:
+        _dm_helped.clear()
+    _dm_helped[key] = now
+    me = (rrc.NODE or {}).get("name") or "?"
+    lang = i18n.DEFAULT_LANG
+    if bot is not None:
+        return i18n.t("stump_dm_bot", lang, stump=me, bot=bot.name(), p=bot.prefix())
+    return i18n.t("stump_dm_nobot", lang, stump=me)
 
 
 # ── Peer state ────────────────────────────────────────────────────────

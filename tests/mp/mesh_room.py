@@ -191,10 +191,48 @@ rrc_mesh.on_message(R, Msg("[DM>nobody] <rod> hello?"))
 q = rrc_mesh._send_queue[-1][2] if rrc_mesh._send_queue else ""
 check("a DM to no one here: the sender is told", q == "[DM>rod] <LaBuche> ⊖ nobody", rrc_mesh._send_queue)
 del rrc_mesh._send_queue[:]
+# A DM to this Stump itself: private (it went into #wifi-mesh for all to
+# read until 1.0.0-beta.47), answered by BarKeep into rod's DM thread with
+# this Stump.
+import plugins
+class FakeBot:
+    def answer(self, nick, text):
+        return "Files: !list\nAsk me: !help" if text.strip() == "!fserv" else None
+    def name(self):
+        return "BarKeep"
+    def prefix(self):
+        return "!"
+real_lookup = plugins.service_lookup
+plugins.service_lookup = lambda s: FakeBot() if s == "bot" else real_lookup(s)
+rrc_mesh.on_message(R, Msg("[DM] <rod>: !fserv"))
+q = rrc_mesh._send_queue[-1][2] if rrc_mesh._send_queue else ""
+check("a DM to this Stump itself: BarKeep answers rod privately, every line", q == "[DM>rod] <LaBuche> Files: !list\n[DM>rod] <LaBuche> Ask me: !help",
+      rrc_mesh._send_queue)
+del rrc_mesh._send_queue[:]
 rrc_mesh.on_message(R, Msg("[DM] <rod>: hey LaBuche"))
-check("a DM to this Stump itself shows in #wifi-mesh, addressed to it", any(x["nick"] == "rod@Laptop" and x["body"] == "@LaBuche hey LaBuche"
-                                                                         for x in rrc.since("wifi-mesh", 0)))
-check("... never in #lora-mesh", not any("hey LaBuche" in x["body"] for x in rrc.since("lora-mesh", 0)))
+q = rrc_mesh._send_queue[-1][2] if rrc_mesh._send_queue else ""
+check("... no trigger: how to reach people here, from the Stump, with its bot", q.startswith("[DM>rod] <LaBuche> ")
+      and "BarKeep" in q and "@LaBuche" in q, rrc_mesh._send_queue)
+del rrc_mesh._send_queue[:]
+rrc_mesh.on_message(R, Msg("[DM] <rod>: hey again"))
+check("... and that only once in a while (no ping-pong)", rrc_mesh._send_queue == [], rrc_mesh._send_queue)
+check("... never in #wifi-mesh or #lora-mesh", not any("hey LaBuche" in x["body"] or "!fserv" in x["body"]
+                                                        for r in ("wifi-mesh", "lora-mesh") for x in rrc.since(r, 0)))
+plugins.service_lookup = lambda s: None if s == "bot" else real_lookup(s)
+rrc_mesh._dm_helped.clear()
+rrc_mesh.on_message(R, Msg("[DM] <rod>: anyone?"))
+q = rrc_mesh._send_queue[-1][2] if rrc_mesh._send_queue else ""
+check("... no BarKeep here: says nobody reads them, and how to reach people", q.startswith("[DM>rod] <LaBuche> ") and "@LaBuche" in q,
+      rrc_mesh._send_queue)
+plugins.service_lookup = real_lookup
+del rrc_mesh._send_queue[:]
+# The other way: the laptop Stump's own answer to bob, here.
+rrc_mesh.on_message(R, Msg("[DM>bob] <Laptop> Files: !list"))
+got = rrc.dms_since(W, 0)
+check("the other Stump's answer reaches bob in his thread with that Stump (Laptop, not Laptop@Laptop)",
+      any(d["nick"] == "Laptop" and d["body"] == "Files: !list" for d in got)
+      and "Laptop@Laptop" not in rrc.reachable_nicks(), (got, rrc.reachable_nicks()))
+check("... privately", not any("Files: !list" in x["body"] for r in ("wifi-mesh", "lora-mesh") for x in rrc.since(r, 0)))
 
 # No announce heard yet (no path): the link the message came in on decides
 EARLY = '9a' * 16

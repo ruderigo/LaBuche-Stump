@@ -590,6 +590,8 @@ STRINGS = {
     "admin_rescue_try": {"fr": "Démarrer normalement", "en": "Start normally", "es": "Arrancar normalmente"},
     "admin_watchdog_note": {"fr": "Le Stump ne répondait plus : le chien de garde l'a redémarré.", "en": "The Stump had stopped responding: the watchdog restarted it.", "es": "El Stump dejó de responder: el perro guardián lo reinició."},
     "admin_setup_storage": {"fr": "Stockage", "en": "Storage", "es": "Almacenamiento"},
+    "stump_dm_bot": {"fr": "Ici le Stump {stump} : son bot {bot} vous répond ici ({p}help). Pour écrire à quelqu'un sur ce Stump, écrivez à nom@{stump}.", "en": "This is the Stump {stump}: its bot {bot} answers you here ({p}help). To write to someone on this Stump, write to name@{stump}.", "es": "Aquí el Stump {stump}: su bot {bot} le responde aquí ({p}help). Para escribir a alguien en este Stump, escriba a nombre@{stump}."},
+    "stump_dm_nobot": {"fr": "Ici le Stump {stump} : personne ne lit ses messages privés. Pour écrire à quelqu'un sur ce Stump, écrivez à nom@{stump}.", "en": "This is the Stump {stump}: nobody reads its own DMs. To write to someone on this Stump, write to name@{stump}.", "es": "Aquí el Stump {stump}: nadie lee sus mensajes privados. Para escribir a alguien en este Stump, escriba a nombre@{stump}."},
     "admin_setup_computer": {"fr": "Cet ordinateur", "en": "This computer", "es": "Este ordenador"},
     "admin_setup_awake_on": {"fr": "gardé éveillé", "en": "kept awake", "es": "se mantiene despierto"},
     "admin_setup_awake_off": {"fr": "peut se mettre en veille", "en": "may sleep", "es": "puede suspenderse"},
