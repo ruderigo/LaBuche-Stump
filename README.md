@@ -1,5 +1,4 @@
-# Project Stump — Beta A (beta testing)
-
+# Project Stump 
 [![Tests](https://github.com/ruderigo/LaBuche-Stump/actions/workflows/tests.yml/badge.svg)](https://github.com/ruderigo/LaBuche-Stump/actions/workflows/tests.yml)
 [![Release](https://img.shields.io/github/v/release/ruderigo/LaBuche-Stump?include_prereleases)](https://github.com/ruderigo/LaBuche-Stump/releases)
 
