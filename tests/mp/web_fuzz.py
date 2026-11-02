@@ -27,6 +27,7 @@ def _capture(*a, **k):
 
 
 barkeep.print = _capture
+KEEP[0] = 128 * 1024         # (harness.py: statuses and words only, never a whole big file)
 SECRETS = [str(getattr(config, k)) for k in ("AUTH_ADMIN_PASSWORD", "FSERVBOT_OP_PASSWORD", "WIFI_PASS")
            if getattr(config, k, None) and len(str(getattr(config, k))) >= 3]
 OK_STATUS = ("200", "201", "204", "302", "303", "304", "400", "401", "403", "404", "405", "409",

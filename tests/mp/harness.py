@@ -44,14 +44,31 @@ class Rd:
         return await s.read(n)
 
 
+# How much of an answer a Wr keeps (None: all of it). A test that only
+# looks at statuses and words (web_fuzz) sets it, so a big file (codec2.wasm,
+# ~300 KB) isn't joined, split and decoded whole: three copies at once in
+# the test's 4 MB heap, which failed now and then on how it had fragmented
+# (MemoryError, 1.0.0-beta.46's release build). The Stump itself sends it
+# in 16 KB pieces.
+KEEP = [None]
+
+
 class Wr:
     def __init__(s, ip='192.168.4.50'):
-        s.w = []; s.ip = ip
+        s.w = []; s.ip = ip; s.n = 0
     def get_extra_info(s, n): return (s.ip, 1)
+    def _keep(s, b):
+        if KEEP[0] is not None and s.n >= KEEP[0]:
+            return
+        b = b.encode() if isinstance(b, str) else bytes(b)
+        if KEEP[0] is not None:
+            b = b[:KEEP[0] - s.n]
+        s.n += len(b)
+        s.w.append(b)
     async def awrite(s, b, *a):
-        s.w.append(b.encode() if isinstance(b, str) else bytes(b))
+        s._keep(b)
     def write(s, b):
-        s.w.append(b.encode() if isinstance(b, str) else bytes(b))
+        s._keep(b)
     async def drain(s): pass
     async def aclose(s): pass
     def close(s): pass
