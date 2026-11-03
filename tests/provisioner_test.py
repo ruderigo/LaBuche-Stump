@@ -488,4 +488,69 @@ check('no pyserial: the Heltec and the CAM told apart by port name', "Heltec" in
       and "CAM" in guess.get("/dev/cu.usbmodem5C372383661", ""), guess)
 # remove_plugin refuses core
 check('remove refuses urns', P.remove_plugin('/dev/fake', 'urns') is False)
+# --answers FILE.json (the RK3326 Provisioner): the wizards with no one at the keyboard.
+import io, contextlib, os, importlib
+P = importlib.reload(P)                  # (the stand-ins above for ask_yes_no and others, gone)
+builtins.input = lambda *a: (_ for _ in ()).throw(AssertionError("asked the keyboard"))
+check('answers: a question is keyed by its text, to its "?", no parentheses, any case',
+      P._qkey("Use it for this Stump (the other settings stay as they are)?") == "use it for this stump"
+      and P._qkey("Change something? s: the storage (now 2048 MB)") == "change something"
+      and P._qkey("  Storage for this Stump, in MB ") == "storage for this stump, in mb")
+tmp = Path(tempfile.mkdtemp())
+SECRET = "Hunter2-not-printed"
+(tmp / "a.json").write_text(json.dumps({
+    "_comment": "ignored", "Node name": "Handheld", "Is this Stump part of a chain?": "no",
+    "The Heltec": 3, "Theme": "amb", "FSERV bot operator password": SECRET,
+    "How should file sharing work?": "Free", "Identity requirement": "open", "nobody asks this": 1}))
+P.load_answers(tmp / "a.json")
+heltec_opts = None
+real_choice = P.ask_choice
+out = io.StringIO()
+try:
+    with contextlib.redirect_stdout(out):
+        prof, _ = P.config_wizard("pc")
+    ok = True
+except SystemExit as e:
+    prof, ok = {}, ("exit", e.code)
+text = out.getvalue()
+check('answers: the --pc wizard runs from the file, nothing asked on the keyboard', ok is True and prof.get("node_name") == "Handheld",
+      (ok, text[-300:]))
+check('... a choice by its number or the start of its text', ok is True and "theme" in json.dumps(prof).lower(), prof)
+check('... an answer is never printed (passwords among them)', SECRET not in text and "(answered from a.json)" in text)
+check('... a question left out takes its default, said so', "(the default)" in text)
+check('... keys no question asked are reported', P.answers_unused() == ["nobody asks this"], P.answers_unused())
+P.ANSWERS.update(map=None, file=None, asked={}, used=set())
+(tmp / "b.json").write_text(json.dumps({"Node name": "X"}))
+P.load_answers(tmp / "b.json")
+with contextlib.redirect_stdout(io.StringIO()):
+    try:
+        P.ask("A question with no default")
+        code = None
+    except SystemExit as e:
+        code = e.code
+check('answers: a question not in the file with no default stops the run (exit 3)', code == 3, code)
+P.ANSWERS["map"]["pick"] = "o"
+with contextlib.redirect_stdout(io.StringIO()):
+    try:
+        P.ask_choice("Pick?", ["one", "other"])
+        code = None
+    except SystemExit as e:
+        code = e.code
+check('answers: a choice that matches several options stops the run', code == 3, code)
+P.ANSWERS["map"]["again"] = True
+with contextlib.redirect_stdout(io.StringIO()):
+    try:
+        for _ in range(10):
+            P.ask_yes_no("Again?", False)
+        code = None
+    except SystemExit as e:
+        code = e.code
+check('answers: the same question over and over (a retry loop) stops the run', code == 3, code)
+P.ANSWERS.update(map=None, file=None, asked={}, used=set())
+with contextlib.redirect_stdout(io.StringIO()):
+    tpl = P.pc_answers_template()
+check('--answers-template: the questions with their defaults', tpl.get("node name") == "unnamed-stump"
+      and tpl.get("start this stump automatically when you log in") is True and "_about" in tpl
+      and P.ANSWERS["record"] is None, sorted(tpl)[:8])
+shutil.rmtree(tmp, ignore_errors=True)
 print('FAILURES', FAIL)

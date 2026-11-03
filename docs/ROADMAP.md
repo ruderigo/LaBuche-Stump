@@ -118,6 +118,24 @@ Done in 1.0.0-beta.37.
         for a visitor's laptop to download and open
 - [ ] More boards (M each): one Provisioner profile per board (flash,
       PSRAM, radio, SD pins)
+- [ ] For the RK3326 Provisioner (the handheld that makes Stumps from a
+      gamepad; its request, 2026-11-02):
+  - [x] The bundle as a release file: `Stump-<release>.bundle`, in
+        `SHA256SUMS`, `default_ssid` in its header (beta.48)
+  - [x] The computer wizard answered from a file:
+        `provisioner.py --pc --answers FILE.json` (beta.48)
+  - [ ] **A Heltec for a CAM, headless** (L, on hold): what the route
+        does today with rnodeconf's questions and a download, done with
+        no one typing and offline, as `provisioner.py --heltec-for-cam
+        PORT --answers FILE.json` (a placeholder now: it says so and
+        exits 2). The RNode firmware stays out of our releases (GPL-3,
+        as for Arborist): we publish the upstream version, its SHA-256
+        and its flash layout; the handheld downloads it once while
+        online. Then the EEPROM provisioning `--autoinstall` does, the
+        radio, the access code and the Wi-Fi as a station on the CAM's
+        network, each without a question. Needs rnodeconf's
+        non-interactive options worked out and a real Heltec on the
+        bench
 
 ## 5. Pentest preparation
 

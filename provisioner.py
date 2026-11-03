@@ -331,7 +331,7 @@ EXPECTED_FILE_HASHES = {
     "config.py": "0e84493cd2e4069f",
     "conn.py": "b17cf4fb4f80fbbf",
     "discovery.py": "c1808c59c1452dda",
-    "docs/ARBORIST.md": "240da3e47f9e1e2a",
+    "docs/ARBORIST.md": "8321aadbfd7cf00a",
     "docs/CHAIN.md": "775bf418753c82ba",
     "docs/CLIENT_QUICKSTART.md": "ed1e68b24122136b",
     "docs/COMMANDS.md": "d9147e44b6c0e386",
@@ -341,9 +341,9 @@ EXPECTED_FILE_HASHES = {
     "docs/HOME_BRANDING.md": "e1a1a9cf854dcdce",
     "docs/HTTPS_SETUP.md": "12cbbf2de7c38810",
     "docs/PACKS.md": "2e89e3c28d80d72d",
-    "docs/PC.md": "226bba891edcb5a6",
+    "docs/PC.md": "b924bffc27091f02",
     "docs/PLUGINS.md": "3f5b4a5ee6844305",
-    "example_node.py": "fe0f739fad94b6b7",
+    "example_node.py": "d9b7cb5af743c652",
     "features.py": "81e8af361c64a911",
     "fserv.py": "14d07285fb7518d6",
     "fservbot/plugin.json": "45f850380dede0af",
@@ -1675,7 +1675,105 @@ def cyan(text):
     return _ansi(text, "1;36")
 
 
+# ── Answers from a file (--answers FILE.json) ────────────────────────
+# Asked by the RK3326 Provisioner team: run a wizard with no one at the
+# keyboard. Every question goes through ask / ask_yes_no / ask_choice, so
+# they look here first. A question is keyed by its own text, up to its
+# first "?", without anything in parentheses, case and spacing ignored:
+# "Start this Stump automatically when you log in?" -> "start this stump
+# automatically when you log in". Not in the file: its default, said so;
+# no default: the run stops (exit 3), naming the question. Answers are
+# never printed (passwords and the chain secret are among them).
+
+ANSWERS = {"file": None, "map": None, "asked": {}, "used": set(), "record": None}
+_NOT_GIVEN = object()
+_NO_FILE = object()
+ASK_LIMIT = 5             # the same question this often: the answers can't settle it
+
+
+def _qkey(text):
+    t = str(text)
+    if "?" in t:
+        t = t.split("?", 1)[0]
+    out, depth = [], 0
+    for ch in t:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif not depth:
+            out.append(ch)
+    return " ".join("".join(out).split()).strip(" :").lower()
+
+
+def load_answers(path):
+    """Reads an answers file ({"question": answer, ...}) for the wizards."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        sys.exit("Can't read the answers file %s: %s" % (path, e))
+    if not isinstance(data, dict):
+        sys.exit("The answers file must be a JSON object: {\"question\": answer, ...}")
+    ANSWERS["file"] = str(path)
+    ANSWERS["map"] = {_qkey(k): v for k, v in data.items() if not str(k).startswith("_")}
+
+
+def answers_unused():
+    """Keys in the answers file no question asked (a typo, or a branch not taken)."""
+    if ANSWERS["map"] is None:
+        return []
+    return sorted(k for k in ANSWERS["map"] if k not in ANSWERS["used"])
+
+
+def _from_answers(prompt):
+    """The answer to this question from the file, or _NOT_GIVEN; _NO_FILE
+    when there's no file (ask the terminal)."""
+    if ANSWERS["record"] is not None:
+        return _NOT_GIVEN
+    if ANSWERS["map"] is None:
+        return _NO_FILE
+    k = _qkey(prompt)
+    n = ANSWERS["asked"][k] = ANSWERS["asked"].get(k, 0) + 1
+    if n > ASK_LIMIT:
+        print(red("Asked %d times: \"%s\" -- the answers file can't settle it." % (n - 1, k)))
+        sys.exit(3)
+    if k in ANSWERS["map"]:
+        ANSWERS["used"].add(k)
+        print("%s: (answered from %s)" % (prompt, Path(ANSWERS["file"]).name))
+        return ANSWERS["map"][k]
+    return _NOT_GIVEN
+
+
+def _no_answer(prompt):
+    print(red("Not in the answers file, and no default: \"%s\"" % _qkey(prompt)))
+    sys.exit(3)
+
+
+def _record(prompt, value):
+    """--answers-template: what a question would take, by default."""
+    ANSWERS["record"].setdefault(_qkey(prompt), value)
+    k = _qkey(prompt)
+    n = ANSWERS["asked"][k] = ANSWERS["asked"].get(k, 0) + 1
+    if n > ASK_LIMIT:
+        raise _TemplateDone()
+
+
+class _TemplateDone(Exception):
+    pass
+
+
 def ask(prompt, default=None):
+    a = _from_answers(prompt)
+    if a is _NOT_GIVEN:
+        if ANSWERS["record"] is not None:
+            _record(prompt, default if default is not None else None)
+            return default if default is not None else ""
+        if default is None:
+            _no_answer(prompt)
+        print("%s: %s (the default)" % (prompt, default))
+        return default
+    if a is not _NO_FILE:
+        return "" if a is None else str(a)
     suffix = f" [{default}]" if default is not None else ""
     val = _in(f"{prompt}{suffix}: ").strip()
     return val if val else default
@@ -1696,6 +1794,22 @@ def ask_yes_no(prompt, default=True):
 
     Returns a real bool, so no caller has to parse strings again.
     """
+    a = _from_answers(prompt)
+    if a is _NOT_GIVEN:
+        if ANSWERS["record"] is not None:
+            _record(prompt, bool(default))
+        else:
+            print("%s: %s (the default)" % (prompt, "yes" if default else "no"))
+        return default
+    if a is not _NO_FILE:
+        if isinstance(a, bool):
+            return a
+        if str(a).strip().lower() in _YES:
+            return True
+        if str(a).strip().lower() in _NO:
+            return False
+        print(red("\"%s\": %r isn't a yes or a no in the answers file." % (_qkey(prompt), a)))
+        sys.exit(3)
     hint = "Y/n" if default else "y/N"
     while True:
         raw = _in(f"{prompt} [{hint}]: ").strip().lower()
@@ -1709,6 +1823,26 @@ def ask_yes_no(prompt, default=True):
 
 
 def ask_choice(prompt, options):
+    a = _from_answers(prompt)
+    if a is _NOT_GIVEN:
+        if ANSWERS["record"] is not None:
+            _record(prompt, options[0] if options else None)
+            return options[0]
+        _no_answer(prompt)
+    if a is not _NO_FILE:
+        # The option's number (1-based), its text, or the start of its text.
+        if isinstance(a, int) and not isinstance(a, bool) and 1 <= a <= len(options):
+            return options[a - 1]
+        t = str(a).strip().lower()
+        if t.isdigit() and 1 <= int(t) <= len(options):
+            return options[int(t) - 1]
+        hits = [o for o in options if str(o).lower() == t] or [o for o in options if str(o).lower().startswith(t)]
+        if len(hits) == 1:
+            return hits[0]
+        print(red("\"%s\": %r matches %s of the options." % (_qkey(prompt), a, "none" if not hits else "several")))
+        for i, o in enumerate(options, 1):
+            print("  %d) %s" % (i, o))
+        sys.exit(3)
     print(prompt)
     for i, opt in enumerate(options, 1):
         print(f"  {i}) {opt}")
@@ -1891,7 +2025,10 @@ def _bars(signal):
 
 def ask_wifi(prompt, default="", scan=None):
     """Asks for a Wi-Fi name, offering the networks in range. Typing a
-    name (or a blank for the default) still works at the same prompt."""
+    name (or a blank for the default) still works at the same prompt.
+    From an answers file: the name, no scan."""
+    if ANSWERS["map"] is not None or ANSWERS["record"] is not None:
+        return ask(prompt, default or None)
     scan = scan or scan_wifi
     while True:
         print("%s -- looking for Wi-Fi networks around this computer..." % prompt)
@@ -6268,6 +6405,35 @@ def check_chain(target=None):
     return ok
 
 
+def pc_answers_template():
+    """--pc --answers-template: the --pc wizard's questions with their
+    defaults, as an answers file to fill in. The questions a new Stump gets
+    along the default answers; a yes that opens more questions (a chain,
+    a Heltec) shows them once that answer is changed and it's run again."""
+    ANSWERS["record"], ANSWERS["asked"] = {}, {}
+    rec = ANSWERS["record"]
+    _record("Folder for this Stump", str(pc_default_folder()))
+    _record("Change something? s: the storage · a: all the questions again · Enter: nothing", "")
+    real = sys.stdout
+    try:
+        sys.stdout = open(os.devnull, "w")
+        config_wizard("pc")
+    except (_TemplateDone, SystemExit, EOFError):
+        pass
+    finally:
+        try:
+            sys.stdout.close()
+        except Exception:
+            pass
+        sys.stdout = real
+    _record("Start this Stump automatically when you log in?", True)
+    ANSWERS["record"] = None
+    return dict({"_about": "Answers for: python3 provisioner.py --pc [FOLDER] --answers FILE.json. "
+                           "Keys are the questions (up to their '?', case ignored); a question left out "
+                           "takes its default; a choice takes its number or the start of its text. "
+                           "Keys starting with _ are ignored."}, **rec)
+
+
 def setup_pc(folder=None, reconfigure=False):
     """Sets up (or updates) a Stump on this computer. True if it's ready."""
     fw = STUMP_APP_DIR
@@ -6353,7 +6519,8 @@ def setup_pc(folder=None, reconfigure=False):
     elif not joins:
         r.note("Chain", "first Stump: the others join it")
         if secret:
-            r.note("Chain secret", secret)
+            # (from an answers file: never printed; it's in config.py)
+            r.note("Chain secret", secret if ANSWERS["map"] is None else "in config.py")
         r.end("skip", "it's the first Stump: nothing to join")
     else:
         print("Can this computer join %s?" % parent)
@@ -6456,6 +6623,13 @@ def main():
             sys.exit(1)
         host = args[args.index("--host") + 1] if "--host" in args and args.index("--host") + 1 < len(args) else None
         sys.exit(0 if install_cert(args[idx + 1], args[idx + 2], args[idx + 3], host) else 1)
+    elif "--heltec-for-cam" in args:
+        # Asked by the RK3326 Provisioner team (docs/ROADMAP.md, 4): a Heltec
+        # set up for a CAM with no one at the keyboard and no internet. Not
+        # built yet; the interactive route is "A Heltec for a CAM".
+        print("--heltec-for-cam isn't built yet (planned: docs/ROADMAP.md, 'A Heltec for a CAM, headless').")
+        print("For now: python3 provisioner.py, then \"A Heltec for a CAM\".")
+        sys.exit(2)
     elif "--check-chain" in args:
         idx = args.index("--check-chain")
         target = args[idx + 1] if idx + 1 < len(args) and not args[idx + 1].startswith("--") else None
@@ -6464,7 +6638,19 @@ def main():
         # Stump on this computer (docs/PC.md): set up or update its folder.
         idx = args.index("--pc")
         folder = args[idx + 1] if idx + 1 < len(args) and not args[idx + 1].startswith("--") else None
+        if "--answers-template" in args:
+            print(json.dumps(pc_answers_template(), indent=2, ensure_ascii=False))
+            sys.exit(0)
+        if "--answers" in args:
+            i = args.index("--answers")
+            if i + 1 >= len(args):
+                print("Usage: provisioner.py --pc [FOLDER] --answers FILE.json   (--answers-template: the questions)")
+                sys.exit(1)
+            load_answers(args[i + 1])
         ok = setup_pc(folder, reconfigure="--reconfigure" in args)
+        left = answers_unused()
+        if left:
+            print("Not asked this run (fine for a branch it didn't take; else a typo): " + ", ".join(left))
         sys.exit(0 if ok else 1)
     elif "--erase-flash" in args:
         idx = args.index("--erase-flash")
