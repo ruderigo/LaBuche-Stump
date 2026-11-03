@@ -1,14 +1,17 @@
-# Project Stump 
+# Project Stump
+
 [![Tests](https://github.com/ruderigo/LaBuche-Stump/actions/workflows/tests.yml/badge.svg)](https://github.com/ruderigo/LaBuche-Stump/actions/workflows/tests.yml)
 [![Release](https://img.shields.io/github/v/release/ruderigo/LaBuche-Stump?include_prereleases)](https://github.com/ruderigo/LaBuche-Stump/releases)
 
-**This repository is where Stump is beta-tested.** Download a release
+**This is Stump's stable repository.** Download a release
 (`Stump-<version>.zip`: the Provisioner, the firmware and the packs in
 one folder) from [Releases](https://github.com/ruderigo/LaBuche-Stump/releases),
 check it (`sha256sum -c SHA256SUMS`, `gh attestation verify`, see
 [docs/RELEASE.md](docs/RELEASE.md)), and report what you find in Issues.
-What changed: [CHANGELOG.md](CHANGELOG.md). The stable line is
-[LaBuche-Stump](https://github.com/ruderigo/LaBuche-Stump).
+What changed: [CHANGELOG.md](CHANGELOG.md). New work is tried first in
+the beta-testing repository,
+[SandBox_Stump_On](https://github.com/ruderigo/SandBox_Stump_On), and
+comes here once it has passed there.
 
 <p align="center">
   <img src="1a.gif" alt="Demo 1a" width="500" /><br>
