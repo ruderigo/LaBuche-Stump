@@ -5,6 +5,9 @@ name: Release
 #
 #   Stump-<version>.zip     provisioner.py + final_firmware/ + packs/, one folder
 #   provisioner.py          on its own
+#   Stump-<v>.bundle        what Arborist carries, as a file of its own: MicroPython,
+#                           the Stump compiled, the config.py template (for tools
+#                           that make Stumps like Arborist; build_arborist.py)
 #   Arborist-<v>.html       makes and looks after a Stump (a CAM on USB) from
 #                           Chrome or Edge, saved and opened on the computer
 #                           (scripts/build_arborist.py)

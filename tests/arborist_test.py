@@ -92,6 +92,25 @@ def main():
         left = re.findall(r"@@(?:RELEASE|MICROPYTHON|SSID|PAYLOAD|ESPTOOL|ESPTOOL_LICENSE|REPL)@@", html)
         check("built: nothing left to fill in", not left, left)
         check("built: esptool-js in it, its licence too", "window.esptool={" in html and "Apache License" in html)
+        # The bundle as a release file of its own (the RK3326 Provisioner).
+        import base64, gzip, json as J
+        bundle = work / "dist" / ("Stump-%s.bundle" % B.release())
+        raw = bundle.read_bytes() if bundle.exists() else b""
+        inner = re.search(r'id="payload"[^>]*>([^<]+)<', html)
+        check("built: Stump-<release>.bundle beside the page, the page's payload byte for byte",
+              raw and inner and base64.b64decode(inner.group(1).strip()) == raw, (bundle.exists(), bool(inner)))
+        try:
+            g = gzip.decompress(raw)
+            n = int.from_bytes(g[:4], "little")
+            hdr = J.loads(g[4:4 + n])
+            body = g[4 + n:]
+        except Exception as e:
+            hdr, body = {"error": repr(e)}, b""
+        import hashlib
+        check("... its header: the release, the default Wi-Fi name, every file with its SHA-256",
+              hdr.get("release") == B.release() and hdr.get("default_ssid") and "config_template" in hdr
+              and hdr.get("files") and all(hashlib.sha256(body[o:o + l]).hexdigest() == h for _, o, l, h in hdr["files"]),
+              {k: v for k, v in hdr.items() if k not in ("config_template", "files")})
         (work / "template.py").write_text(tpl, encoding="utf-8")
         node_test("repl_test.js", MP, work / "repl", work / "template.py", B.FW)
         try:

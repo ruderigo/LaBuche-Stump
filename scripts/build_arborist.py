@@ -20,6 +20,13 @@ Writes dist/Arborist-<release>.html, holding:
 
 Packed as one gzip, in base64, inside the page; each file's SHA-256 is
 checked on the board after it's copied.
+
+Also writes dist/Stump-<release>.bundle: that same gzip, byte for byte, as
+a file of its own, for tools that make Stumps the way Arborist does (the
+RK3326 Provisioner). Inside, after gunzip: 4 bytes (little-endian) the
+header's length, the JSON header (release, micropython, micropython_sha256,
+mpy, config_template, default_ssid, and files: [name, offset, length,
+sha256] each), then the files' bytes in order.
 """
 import base64, gzip, hashlib, io, json, os, re, subprocess, sys, tempfile, urllib.request
 from pathlib import Path
@@ -176,9 +183,10 @@ def build(out_dir, mp_path=None):
         app, mpy = compiled(board_files(), tmp)
     mp, mp_sha = micropython(mp_path)
     tpl = config_template()
+    ssid = re.search(r'^DEFAULT_SSID = "([^"]*)"', (FW / "captive_portal.py").read_text(encoding="utf-8"), re.M).group(1)
     entries = [("micropython.bin", mp)] + [("app/" + p, d) for p, d in app]
     blob = pack(entries, {"release": rel, "micropython": MICROPYTHON_VERSION, "micropython_sha256": mp_sha,
-                          "mpy": mpy, "config_template": tpl})
+                          "mpy": mpy, "config_template": tpl, "default_ssid": ssid})
     esptool = (FW / "tools_payload" / "flasher" / "esptool-bundle.js").read_text(encoding="utf-8")
     m = re.search(r"export\{([^}]*)\}\s*;?\s*$", esptool)
     if not m:
@@ -187,7 +195,6 @@ def build(out_dir, mp_path=None):
     esptool = esptool[:m.start()] + "window.esptool={%s};" % names
     lic = (FW / "tools_payload" / "flasher" / "esptool-js-LICENSE.txt").read_text(encoding="utf-8")
     page = (HERE / "page.html").read_text(encoding="utf-8")
-    ssid = re.search(r'^DEFAULT_SSID = "([^"]*)"', (FW / "captive_portal.py").read_text(encoding="utf-8"), re.M).group(1)
     for k, v in (("@@RELEASE@@", rel), ("@@SSID@@", ssid), ("@@MICROPYTHON@@", MICROPYTHON_VERSION),
                  ("/*@@REPL@@*/", (HERE / "repl.js").read_text(encoding="utf-8")),
                  ("/*@@ESPTOOL@@*/", esptool.replace("</script", "<\\/script")),
@@ -196,9 +203,15 @@ def build(out_dir, mp_path=None):
         if k not in page:
             raise SystemExit("page.html has no %s" % k)
         page = page.replace(k, v)
-    out = Path(out_dir) / ("Arborist-%s.html" % re.sub(r"[^A-Za-z0-9._-]", "_", rel))
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", rel)
+    out = Path(out_dir) / ("Arborist-%s.html" % safe)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(page, encoding="utf-8")
+    # The same blob as a release file of its own (asked by the RK3326
+    # Provisioner team, 1.0.0-beta.48): a stable interface for anything that
+    # makes Stumps the way Arborist does, without reading the page's markup.
+    # Listed in SHA256SUMS by build_release.py like every file in dist/.
+    (Path(out_dir) / ("Stump-%s.bundle" % safe)).write_bytes(blob)
     size = sum(len(d) for _, d in app)
     print("  %d files (%d KB), MicroPython %d KB -> %s (%d KB)" % (len(app), size // 1024, len(mp) // 1024, out, out.stat().st_size // 1024))
     return out

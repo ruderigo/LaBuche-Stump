@@ -11,6 +11,16 @@ octal PSRAM (MIT licence), the Stump compiled for it, and esptool-js
 (Apache-2.0), which writes the board. Nothing is downloaded or sent
 anywhere while it works.
 
+What it carries is also on each release as a file of its own,
+`Stump-<release>.bundle` (since 1.0.0-beta.48, in `SHA256SUMS`), for
+tools that make Stumps the way Arborist does, such as the RK3326
+Provisioner on a handheld. It's one gzip: 4 bytes (little-endian) the
+header's length, a JSON header (`release`, `micropython`,
+`micropython_sha256`, `mpy`, `config_template`, `default_ssid`, and
+`files`: `[name, offset, length, sha256]` each), then the files' bytes in
+order (`micropython.bin`, then `app/...`). `scripts/build_arborist.py`
+makes both.
+
 ## Using it
 
 1. Save the page on the computer and open the saved file in Chrome or

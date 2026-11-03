@@ -59,6 +59,29 @@ it starts at login. It shows the Stump's settings and asks whether to
 change them; a Heltec plugged in by USB since is noticed and offered
 (the other settings stay). `--pc --reconfigure` runs the wizard again.
 
+**With no one at the keyboard** (since 1.0.0-beta.48; asked by the
+RK3326 Provisioner, which sets a Stump up from a handheld's gamepad):
+
+```
+python3 provisioner.py --pc --answers-template > answers.json   # the questions, with their defaults
+python3 provisioner.py --pc [FOLDER] --answers answers.json
+```
+
+The file maps each question to its answer: the question's own text up
+to its `?`, without anything in parentheses, any case (`"node name":
+"Handheld"`, `"is this stump part of a chain": false`). A yes or no takes
+`true`/`false` or `"y"`/`"n"`; a choice takes its number or the start of
+its text (`"theme": "amber"`). A question the file leaves out takes its
+default, and says so; one with no default stops the run (exit code 3),
+naming it, and so does a question that comes back over and over (a check
+the answers can't settle). Keys starting with `_` are ignored. Nothing
+is read from the keyboard, and answers are never printed (passwords and
+the chain secret are in it: keep the file private, or delete it after).
+The template follows the default answers; a "yes" that opens more
+questions (a chain, a Heltec) shows them once it's changed and the
+template is made again. An update answers `"change something": ""` to
+keep everything.
+
 **Restarting** without updating: **Stop Stump**, then **Start Stump**
 (double-click, in the Stump folder; see *Turning it off and on*);
 started by hand, Ctrl+C and run the same command again.
