@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-beta.73
+- **stumpid could be left switched off, and /admin with it** (the kit's WROVERs). If the board was reset while stumpid was starting, safe mode switched it off until someone turned it back on in /admin; but stumpid checks /admin's password, so every password was refused there, and `/auth`, `/whoami` answered "unknown command". Arborist and the Provisioner reset the board, or stop it for a prompt, each time they connect, so it happened in normal use. Now:
+  - safe mode never switches stumpid off (it's the access control); one an older firmware switched off is back on at the next start;
+  - stopping the board on purpose (Ctrl+C) while a plugin starts no longer puts the next start in safe mode;
+  - a built-in plugin (stumpid, fservbot) that fails to start is tried again a minute after the boot;
+  - while stumpid isn't running, /admin's login checks the password in config.py itself (fail-closed, as a rescue start already did), so it can be turned back on there;
+  - `/auth`, `/whoami`, `/admin`, `/invite` with stumpid down say identity checks are unavailable and why, not "unknown command".
+- Tests: `stumpid_safe` (the kit's board as it was: stumpid back on; /admin's password without stumpid; the answers; the retry; Ctrl+C while starting). It fails on beta.72 as on the kit: only fservbot running, `/auth` unknown, /admin refusing.
+
 ## 1.0.0-beta.72
 - **A LoRa Stump's first line after it starts was lost on the other radio Stumps** (kit finding 19). Its #lora-mesh broadcast reaches them before its beacon does, and they dropped it ("not a Stump yet"); it was never sent again. The Stumps without a radio got it (a message of its own). Now a broadcast from a Stump not known yet is kept a while (2 minutes, a few per Stump, from a few Stumps) and taken once its beacon is in, checked as any (its signature, played once). The kit bench on a PC failed on this every run (CI too: #88 timed out on it).
 - Tests: `lb_hold` (kept, then shown in order once the beacon is in; a forged one never; played again later shown once; bounded).

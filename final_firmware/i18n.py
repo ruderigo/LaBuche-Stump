@@ -427,6 +427,11 @@ STRINGS = {
         "en": "unknown command: /{cmd}  (try /help)",
         "es": "comando desconocido: /{cmd}  (prueba /help)",
     },
+    "identity_unavailable": {
+        "fr": "v\u00e9rification d'identit\u00e9 indisponible pour l'instant (stumpid ne tourne pas\u00a0: {why}). R\u00e9essaie plus tard\u00a0; l'admin peut le relancer dans /admin.",
+        "en": "identity checks aren't available right now (stumpid isn't running: {why}). Try again later; the admin can start it again in /admin.",
+        "es": "la verificaci\u00f3n de identidad no est\u00e1 disponible ahora (stumpid no est\u00e1 en marcha: {why}). Vuelve a intentarlo m\u00e1s tarde; el admin puede iniciarlo de nuevo en /admin.",
+    },
 
     # ---- BarKeep's own command console (the single-box /chat dispatcher
     # on the home page -- separate from RRC's multi-user chat. Command

@@ -1280,6 +1280,9 @@ def _speaks(text):
     return text[1:].split(" ", 1)[0].lower() in _SPEAKING_COMMANDS
 
 
+IDENTITY_COMMANDS = ("auth", "whoami", "admin", "invite")
+
+
 def handle_input(client_id, room, text):
     """
     Processes one line from a client -- either a /command or a message.
@@ -1519,5 +1522,12 @@ def _handle_core(client_id, room, text, user, lang):
 
     if cmd == "clear":
         return ["__CLEAR__"], None
+
+    if cmd in IDENTITY_COMMANDS:
+        # stumpid's, and it isn't running: said so, not "unknown command"
+        # (a client takes that as "this Stump has no /auth"), 1.0.0-beta.73.
+        why = plugins.why_not("stumpid")
+        if why:
+            return ["✗ " + i18n.t("identity_unavailable", lang, why=why)], None
 
     return [tok_unknown(cmd, i18n.t("unknown_command", lang, cmd=cmd))], None
