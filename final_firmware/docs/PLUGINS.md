@@ -196,7 +196,21 @@ If the node stops within a minute of starting, but after every plugin
 has started, the next boot loads only the built-in plugins (stumpid,
 fservbot) and `/admin` says so. The boot after that is normal again.
 
-Stopping the node with Ctrl+C (as the provisioner does) doesn't count.
+Stopping the node with Ctrl+C (as the provisioner does) doesn't count,
+even while a plugin is starting (since 1.0.0-beta.73).
+
+**stumpid is never switched off by safe mode** (since 1.0.0-beta.73): it's
+the access control, and it checks `/admin`'s password. A board gets reset
+while it starts often enough on purpose -- Arborist and the Provisioner
+reset it, or stop it for a prompt, when they connect -- and a stumpid
+switched off that way left `/auth` "unknown" and `/admin` refusing every
+password. One switched off by an older firmware is switched back on.
+
+A built-in plugin (stumpid, fservbot) that **fails to start** is tried
+again once, a minute after the boot. While stumpid isn't running,
+`/admin`'s login checks the password in `config.py` itself (fail-closed,
+as a rescue start does), and `/auth`, `/whoami`, `/admin`, `/invite` say
+identity checks are unavailable, and why, instead of "unknown command".
 
 ## Getting a plugin onto a node
 

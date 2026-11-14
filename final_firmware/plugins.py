@@ -793,11 +793,43 @@ async def scheduler_loop():
 
 
 async def stable_loop():
-    """Clears the safe-mode marker once the node has run for a minute."""
+    """Clears the safe-mode marker once the node has run for a minute,
+    then tries again a built-in plugin that failed to start."""
     import uasyncio as asyncio
     await asyncio.sleep(STABLE_AFTER_S)
     _safe["stable"] = True
     clear_marker()
+    retry_core()
+
+
+def retry_core():
+    """A built-in plugin (stumpid, fservbot) that failed to start at boot
+    gets one more try once the node is up (1.0.0-beta.73): stumpid is
+    the access control, and a start that failed for a passing reason
+    (memory, the card) left /auth unknown until the next restart."""
+    out = []
+    for name in CORE_PLUGINS:
+        rec = _plugins.get(name)
+        if rec is None or rec["state"] != "failed":
+            continue
+        _log(name, "failed to start (%s): trying again" % rec["error"])
+        rec["error"] = ""
+        if load_one(name):
+            _log(name, "started on the second try")
+            out.append(name)
+    return out
+
+
+def why_not(name):
+    """Why plugin `name` isn't running (for its commands' answer), or
+    None if it is."""
+    rec = _plugins.get(name)
+    if rec is None:
+        return "not installed"
+    if rec["state"] == "on":
+        return None
+    st = _load_state()
+    return st["auto_off"].get(name) or rec["error"] or rec["state"]
 
 
 # ── loading ───────────────────────────────────────────────────────────
@@ -1190,7 +1222,17 @@ def load_all():
     if marker is not None:
         _safe["on"] = True
         culprit = marker.get("plugin")
-        if culprit:
+        if culprit in PROTECTED:
+            # stumpid is the access control (and checks /admin's password):
+            # never switched off for this. A board is reset while it starts
+            # often enough on purpose -- Arborist and the Provisioner reset
+            # it, or stop it for a prompt, each time they connect -- and once
+            # off, /admin, where it's turned back on, refused every password
+            # (1.0.0-beta.73).
+            print("[plugin] SAFE MODE: %s was starting when the node last stopped -- "
+                  "it's the access control, so it starts anyway" % culprit)
+            _safe["on"] = False
+        elif culprit:
             # It reset or hung the board while starting: off until someone
             # turns it back on in /admin.
             _safe["culprit"] = culprit
@@ -1206,21 +1248,35 @@ def load_all():
             _safe["reason"] = "running"
             print("[plugin] SAFE MODE: the node stopped within %d s of starting last time -- "
                   "loading only %s this boot" % (STABLE_AFTER_S, ", ".join(CORE_PLUGINS)))
+    stuck = [n for n in PROTECTED if n in st["off"]]
+    if stuck:
+        # Switched off by an earlier firmware's safe mode: back on.
+        for n in stuck:
+            st["off"].remove(n)
+            st["auto_off"].pop(n, None)
+        _save_state(st)
+        print("[plugin] %s was switched off (safe mode, before 1.0.0-beta.73): back on" % ", ".join(stuck))
     running = []
-    for name in discover():
-        rec = _plugins.setdefault(name, _record(name, "?"))
-        if name not in _order:
-            _order.append(name)
-        if name in st["off"]:
-            rec["state"] = "off"
-            continue
-        if _safe["on"] and name not in CORE_PLUGINS:
-            rec["state"] = "off"
-            rec["error"] = "safe mode"
-            continue
-        _write_marker({"plugin": name})
-        if load_one(name):
-            running.append(name)
+    try:
+        for name in discover():
+            rec = _plugins.setdefault(name, _record(name, "?"))
+            if name not in _order:
+                _order.append(name)
+            if name in st["off"]:
+                rec["state"] = "off"
+                continue
+            if _safe["on"] and name not in CORE_PLUGINS:
+                rec["state"] = "off"
+                rec["error"] = "safe mode"
+                continue
+            _write_marker({"plugin": name})
+            if load_one(name):
+                running.append(name)
+    except KeyboardInterrupt:
+        # Stopped on purpose (Ctrl+C: Arborist, the Provisioner, a REPL),
+        # not a plugin's fault: no safe mode at the next start.
+        clear_marker()
+        raise
     _write_marker({"plugin": None})
     if running:
         print("[plugin] active:", ", ".join(running))

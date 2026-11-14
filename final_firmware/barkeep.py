@@ -1123,16 +1123,18 @@ def _check_admin_pw_now(pw):
     admin route still exists and refuses.""" 
     ident = plugins.service_lookup("identity")
     if ident is None:
-        if keepalive.mode() == "rescue":
-            # A rescue start loads no plugins: the same passwords, read
-            # where stumpid and fservbot read them (config.py), fail-closed.
-            try:
-                import config
-                want = getattr(config, "AUTH_ADMIN_PASSWORD", "") or getattr(config, "FSERVBOT_OP_PASSWORD", "")
-            except ImportError:
-                want = ""
-            return bool(want) and webtext.same(pw, want)
-        return False
+        # No stumpid running (a rescue start loads no plugins; or it
+        # failed to start, or was switched off): the same passwords, read
+        # where stumpid and fservbot read them (config.py), fail-closed.
+        # Before 1.0.0-beta.73 only a rescue start did this: with stumpid
+        # down, /admin -- where it's turned back on -- refused every
+        # password.
+        try:
+            import config
+            want = getattr(config, "AUTH_ADMIN_PASSWORD", "") or getattr(config, "FSERVBOT_OP_PASSWORD", "")
+        except ImportError:
+            want = ""
+        return bool(want) and webtext.same(pw, want)
     try:
         return bool(ident.check_admin_password(pw))
     except Exception as e:
