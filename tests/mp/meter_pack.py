@@ -8,6 +8,10 @@ import config
 config.AUTH_ADMIN_PASSWORD = 'pw'
 import plugins, rrc, rrc_mesh, i18n
 from urns import lxmf
+try:
+    from urns import ztext
+except ImportError:
+    ztext = None            # a firmware before packed text
 FAIL = []
 
 
@@ -58,6 +62,12 @@ r = cmd(A, '/meter')
 check("/meter: three lines", len(r) == 3, r)
 check("... the release, and that this firmware doesn't pack", "1.0.0-test" in r[0] and "not in this firmware" in r[0], r[0])
 check("... nothing counted yet", " 0 messages" in r[1] and "one packet: 0 of 0" in r[2], r)
+# A board starts in the year 2000 and jumps to today when it learns the
+# time: the minutes are counted, not read off the clock (a kit answered
+# "14134732 min").
+M._minute(); M._minute(); M._minute()
+r = cmd(A, '/meter')
+check("three minutes counted: 3 min, whatever the clock says", "in 3 min:" in r[1] and "since" not in M._n, r[1])
 check("... each fits a mesh line", all(len(l) <= plugins.MESH_LINE_CHARS for l in r), [len(l) for l in r])
 deliver(A, r)
 t3 = cmd(A, '/meter 3')
@@ -120,7 +130,7 @@ M._asked.clear()
 
 # 3. A firmware with packed text: the same test, and what it saved.
 if HAS:
-    from urns import umsgpack, ztext
+    from urns import umsgpack
     from urns.identity import Identity
     rt = lxmf.LXMRouter(identity=Identity())
     rt.register_delivery_identity(rt.identity, display_name="Stump")
@@ -150,8 +160,45 @@ if HAS:
     lxmf.PACKED_TEXT[0] = True
 
 # 4. Everywhere else.
+# On the Wi-Fi page nothing goes over LXMF: said so, and estimates instead.
+cmd(A, '/meter reset')
+M._asked.clear()
 r = cmd(W, '/meter', room='main')
-check("on the Wi-Fi: the same three lines", len(r) == 3 and r[0].startswith("meter ·"), r)
+check("on the Wi-Fi: the same three lines, and why they may read zero",
+      len(r) == 4 and r[0].startswith("meter ·") and "only messages sent to apps over LoRa/LXMF are counted" in r[3], r)
+tw = cmd(W, '/meter 3', room='main')
+check("... /meter 3 there: the same test lines", tw == t3, tw)
+r = cmd(W, '/meter last', room='main')
+want = len(ztext.pack(text3.encode())) if HAS else n3
+check("... /meter last: worked out, and said to be an estimate",
+      ("3 line(s), %d B of text → %d B sent" % (n3, want)) in r[0] and r[0].endswith("(an estimate: asked from the Wi-Fi)"), r)
+check("... %s" % ("one packet, packed" if HAS else "over a link on a firmware that doesn't pack"),
+      ("one packet" in r[0]) == HAS, r)
+check("... not counted as a message sent", M._n["msgs"] == 0, M._n)
+r = cmd(W, '/meter room', room='lobby')
+check("/meter room where nothing was said", "No lines in this room yet" in r[0], r)
+said = ["Paix, discoureuse! allons, sortons d'ici! Messieurs, je vous supplie de consulter la bonne manière.",
+        "J'ai un cheval merveilleux, et c'est un animal infatigable.",
+        "Mon cheval a fait tout cela aujourd'hui; et de plus j'ai été à Ruel voir un malade."]
+for i, l in enumerate(said):
+    rrc.post('main', 'Bavard-%d' % i, l)
+rrc.post('main', '*', 'someone joined', kind='system')
+r = cmd(W, '/meter room', room='main')
+size = sum(len(("<Bavard-%d> %s" % (i, l)).encode()) for i, l in enumerate(said))
+if HAS:
+    packed = sum(len(ztext.pack(("<Bavard-%d> %s" % (i, l)).encode())) for i, l in enumerate(said))
+    check("/meter room: the room's own lines, as text and packed (%d → %d B)" % (size, packed),
+          ("last 3 lines: %d B of text → %d B packed" % (size, packed)) in r[0] and packed < 0.75 * size, r)
+else:
+    check("/meter room on a firmware that doesn't pack: the text's size, and to ask again after the update",
+          ("last 3 lines: %d B of text; this firmware doesn't pack" % size) in r[0], r)
+for i in range(60):
+    rrc.post('main', 'Bavard-1', 'line %d of a busy room, about as long as people write them when they chat' % i)
+r = cmd(A, '/meter room', room='main')
+import re as _re
+n = int(_re.search(r"last (\d+) lines", r[0]).group(1))
+check("... a busy room: only its latest lines (%d), one mesh line" % n, 1 <= n <= M.ROOM_LINES and len(r) == 1
+      and len(r[0]) <= plugins.MESH_LINE_CHARS, r)
 i18n.set_lang(A, 'fr')
 r = cmd(A, '/meter')
 check("in the person's language", "texte compacté" in r[0] and "un seul paquet" in r[2], r)

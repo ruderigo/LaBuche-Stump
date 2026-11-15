@@ -12,11 +12,22 @@ the apps that read it (CLIENT_QUICKSTART, *Packed text*).
 | `/meter` | The numbers since the Stump started, or since the last reset |
 | `/meter 3` (or `1`, `2`) | A fixed test text of that many lines, sent to you |
 | `/meter last` | What your last test took |
+| `/meter room` | An estimate from the latest lines of the room you're in |
 | `/meter reset` | Counters back to zero (for everyone) |
 
-Slash only: nothing of it shows in the room. It works over LoRa and on
-the Wi-Fi page; only messages to an app (LoRa, or any LXMF route) are
-counted.
+Slash only: nothing of it shows in the room.
+
+**Where you ask from matters.** The counters are of messages the Stump
+sends an app over LXMF (LoRa, or any other Reticulum route). The Wi-Fi
+page isn't LXMF, so a Stump whose people are all on the Wi-Fi counts
+**0 messages**, and says why. From the Wi-Fi page you still get:
+
+- `/meter room`: the room's latest lines (up to 20), each measured as
+  it would go to an app. On a firmware with packed text: their size as
+  text and packed. On an older one: their size as text, to compare
+  after the update.
+- `/meter 3` then `/meter last`: the same test, worked out instead of
+  sent, and marked as an estimate.
 
 ## A test, start to finish
 
@@ -78,6 +89,11 @@ chain), nor voice notes. With stamps on (`LXMF_STAMPS`), a message
 carries 18 to 34 bytes more than the one-packet rule here assumes.
 
 ## Good to know
+
+- 1.1: the minutes are counted by the pack (1.0 read the clock, and a
+  board's jumps from the year 2000 to today: "in 14134732 min"); the
+  Wi-Fi page is told why it reads zero, and gets `/meter room` and an
+  estimated test.
 
 - It **changes nothing that is sent**: it looks at each message and
   lets it through as it is. With the Simple pack on, it counts the
