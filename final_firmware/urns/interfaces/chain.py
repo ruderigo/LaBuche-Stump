@@ -23,9 +23,8 @@
 # signature, an HKDF and a byte-by-byte unmask per packet per hop: tens
 # of milliseconds on a CAM, a hundredfold slowdown.)
 
-import socket
 import time
-from .udp import UDPInterface, _create_socket, _resolve_addr
+from .udp import UDPInterface, _resolve_addr
 from ..log import log, LOG_NOTICE, LOG_WARNING, LOG_DEBUG
 
 HELLO_MAGIC = b"STUMPCHAIN1"

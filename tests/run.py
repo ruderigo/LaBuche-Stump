@@ -76,6 +76,7 @@ TESTS = [
     ("address_announce", "assert", []),
     ("cap_flood", "assert", []),
     ("lxmf_stamps", "assert", []),
+    ("lxmf_router", "assert", []),
     ("nomadnet_pack", "assert", NOMADNET),
     ("wrover_board", "assert", []),
     ("heltec_connect", "assert", []),

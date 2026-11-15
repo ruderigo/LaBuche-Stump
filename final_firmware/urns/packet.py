@@ -287,7 +287,7 @@ class Packet:
         if self.destination and self.destination.identity and self.destination.identity.prv:
             signature = self.destination.identity.sign(self.packet_hash)
             try:
-                import gc; _gc_collect()
+                _gc_collect()
             except:
                 pass
             # Implicit proof: just the signature
@@ -299,7 +299,7 @@ class Packet:
             proof = Packet(destination, proof_data, const.PKT_PROOF,
                            attached_interface=self.receiving_interface)
             try:
-                import gc; _gc_collect()
+                _gc_collect()
             except:
                 pass
             proof.send()

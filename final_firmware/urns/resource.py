@@ -7,7 +7,6 @@ import time
 from . import const, umsgpack
 from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_NOTICE, sl
 from .identity import Identity
-from .crypto.hashes import sha256
 
 # Millisecond monotonic clock for round timing. Device time.time() is whole
 # seconds — dividing rate math by it is a ZeroDivisionError on any fast round.
@@ -87,7 +86,6 @@ class Resource:
 
     def __init__(self, link, data, is_response=False, request_id=None):
         """Create a sender-side Resource. Encrypts, splits, and advertises."""
-        import gc
 
         if len(data) > MAX_RESOURCE_SIZE:
             raise ValueError("Resource too large: " + str(len(data)))
@@ -180,7 +178,6 @@ class Resource:
     @staticmethod
     def accept(adv_data, link):
         """Create a receiver-side Resource from an advertisement."""
-        import gc
         _gc_collect()
 
         r = object.__new__(Resource)
@@ -551,7 +548,6 @@ class Resource:
 
     def assemble(self):
         """(Receiver) Assemble all parts, decrypt, verify, and prove."""
-        import gc
 
         self.status = ASSEMBLING
         t0 = time.time()
@@ -648,7 +644,7 @@ class Resource:
         # Free encrypted data
         self.encrypted = None
         self.parts = None
-        import gc; _gc_collect()
+        _gc_collect()
 
         self._conclude()
         return True

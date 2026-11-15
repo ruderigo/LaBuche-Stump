@@ -945,7 +945,6 @@ class Transport:
                 log("Inbound: packet too short for IFAC, dropping", LOG_DEBUG)
                 return None
 
-            import gc
             from .crypto.hkdf import hkdf
 
             from .interfaces import _ticks, slow_ifac
