@@ -14,7 +14,7 @@ from .identity import Identity
 from .destination import Destination
 from .packet import Packet
 from .transport import Transport
-from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_NOTICE, LOG_INFO, LOG_WARNING, sl
+from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_NOTICE, LOG_WARNING, sl
 from .crypto.hashes import sha256
 
 APP_NAME = "lxmf"
@@ -31,6 +31,12 @@ STAMP_SIZE = 32
 WORKBLOCK_EXPAND_ROUNDS = 3000
 TICKETS_MAX = 64            # tickets kept (one per contact)
 COSTS_MAX = 128             # stamp costs kept (one per announced contact)
+# Names learned from announces, and the ids of messages taken in (so one
+# sent again isn't delivered twice): both grew with every new address
+# and every message, checked or not, until the board had no memory left.
+# The oldest go first. A board keeps fewer, like urns/const.py's tables.
+PEERS_MAX = 160 if sys.platform == "esp32" else 768
+DELIVERED_MAX = 256 if sys.platform == "esp32" else 4096
 # Off unless the admin turns it on (/admin -> Stump settings -> Announcing,
 # config.LXMF_STAMPS): off, no ticket is kept or used, no stamp made,
 # exactly as before 1.0.0-beta.53.
@@ -54,6 +60,22 @@ def stamp_cost_from_app_data(app_data):
     except Exception:
         pass
     return None
+
+
+def _first_four(packed):
+    """A packed payload's first four items as a four-item array, byte
+    for byte as received."""
+    b0 = packed[0]
+    if 0x90 <= b0 <= 0x9f:
+        start = 1
+    elif b0 == 0xdc:
+        start = 3
+    else:
+        raise ValueError("not an LXMF payload")
+    end = start
+    for _ in range(4):
+        _, end = umsgpack._unpack(packed, end)
+    return b"\x94" + bytes(packed[start:end])
 
 
 def ticket_stamp(ticket, message_id):
@@ -293,7 +315,7 @@ class LXMessage:
         signed_part = hashed_part + self.hash
         self.signature = self._source.sign(signed_part)
         try:
-            import gc; _gc_collect()
+            _gc_collect()
         except:
             pass
         self.signature_validated = True
@@ -383,12 +405,15 @@ class LXMessage:
                 or not isinstance(unpacked_payload[3], (dict, type(None)))):
             raise ValueError("not an LXMF payload")
 
-        # Extract stamp if present (5th element)
-        stamp = None
+        # A stamp, if any, is a fifth item, outside what's hashed and
+        # signed: the first four, as their sender wrote them. Taken from
+        # the bytes received, not packed again -- a board's floats are 32
+        # bits, so a timestamp read and written back is not the sender's
+        # eight bytes, and every stamped message failed its signature
+        # there (never on a computer, nor in the tests against upstream).
         if len(unpacked_payload) > 4:
-            stamp = unpacked_payload[4]
+            packed_payload = _first_four(packed_payload)
             unpacked_payload = unpacked_payload[:4]
-            packed_payload = umsgpack.packb(unpacked_payload)
 
         # Compute message hash
         hashed_part = destination_hash + source_hash + packed_payload
@@ -491,13 +516,15 @@ class LXMRouter:
         self.delivery_destination = None
         self.delivery_identity = None
         self.display_name = None
+        self.stamp_cost = None      # what this node's announce asks for (None: no stamps)
 
         self._delivery_callback = None
         self._announce_callback = None
         self._progress_callback = None
 
-        self.peers = {}  # hash -> {name, timestamp, identity}
-        self.delivered_ids = {}  # message_hash -> timestamp (dedup)
+        self.peers = {}  # hash -> {name, timestamp}, at most PEERS_MAX
+        self.delivered_ids = {}  # message_hash -> timestamp (dedup), at most DELIVERED_MAX
+        self._cleaned_at = 0
 
         self.MESSAGE_EXPIRY = 30 * 24 * 60 * 60  # 30 days
 
@@ -520,6 +547,7 @@ class LXMRouter:
         Creates the lxmf.delivery destination and sets up callbacks."""
         self.delivery_identity = identity
         self.display_name = display_name
+        self.stamp_cost = stamp_cost
 
         self.delivery_destination = Destination(
             identity, Destination.IN, Destination.SINGLE,
@@ -537,14 +565,10 @@ class LXMRouter:
 
         # Set app_data for announces
         if display_name is not None:
-            dn = display_name.encode("utf-8") if isinstance(display_name, str) else display_name
-            # [display_name, stamp_cost, supported_functionality] — upstream
-            # LXMF shape; empty functionality list = no LXMF compression.
             # set_default_app_data so plain Destination.announce() calls (path
             # responses, post-clock-sync re-announces) also carry the LXMF
             # app_data — announce() falls back to default_app_data.
-            self.delivery_destination.set_default_app_data(
-                umsgpack.packb([dn, stamp_cost, []]))
+            self.delivery_destination.set_default_app_data(self._get_announce_app_data())
 
         log("LXMF delivery registered: " + self.delivery_destination.hexhash, LOG_NOTICE)
         return self.delivery_destination
@@ -578,7 +602,7 @@ class LXMRouter:
         dn = None
         if self.display_name:
             dn = self.display_name.encode("utf-8") if isinstance(self.display_name, str) else self.display_name
-        return umsgpack.packb([dn, None, []])
+        return umsgpack.packb([dn, self.stamp_cost, []])
 
     def send_message(self, destination_hash, content, title="",
                      fields=None, desired_method=None, via=None):
@@ -594,7 +618,6 @@ class LXMRouter:
         or None on hard failure (reachable but identity still unknown).
         """
         _doing("sending an LXMF message")
-        from .transport import Transport
 
         if via is not None:
             return self._send_via(destination_hash, content, title, fields, via)
@@ -819,7 +842,6 @@ class LXMRouter:
         not on links it OPENED — a message sent back over the peer's own
         link transfers and proves at the Resource layer but is silently
         discarded by the peer's app (observed with MeshChat image replies)."""
-        from .transport import Transport
         from .link import OutgoingLink
         for link in Transport.active_links:
             if link.status != 0x01:  # ACTIVE
@@ -949,43 +971,11 @@ class LXMRouter:
         try:
             # DIRECT delivery sends full packed: dest_hash + source_hash + sig + payload
             # (unlike OPPORTUNISTIC which strips dest_hash)
-            lxmf_data = plaintext
             if sl(LOG_DEBUG):
-                log("LXMF link packet: " + str(len(lxmf_data)) + "B", LOG_DEBUG)
-
-            message = LXMessage.unpack_from_bytes(lxmf_data)
+                log("LXMF link packet: " + str(len(plaintext)) + "B", LOG_DEBUG)
+            message = LXMessage.unpack_from_bytes(plaintext)
             message.receiving_interface = getattr(packet, "receiving_interface", None)   # which link it came in on (rrc_mesh: #mesh)
-            message.transport_encrypted = True
-            message.transport_encryption = "Curve25519"
-
-            if message.signature_validated:
-                log("LXMF link message from " + message.source_hash.hex()[:8] +
-                    ": " + (message.content_as_string() or "(binary)"), LOG_NOTICE)
-            else:
-                reason = "unknown source" if message.unverified_reason == LXMessage.SOURCE_UNKNOWN else "invalid signature"
-                log("LXMF unverified link message (" + reason + ") from " +
-                    message.source_hash.hex()[:8], LOG_NOTICE)
-                if message.unverified_reason == LXMessage.SIGNATURE_INVALID:
-                    # Forged or corrupted: someone else's address on it.
-                    log("LXMF message dropped: its signature doesn't match its sender", LOG_WARNING)
-                    return
-
-            # Dedup check
-            if message.hash in self.delivered_ids:
-                if sl(LOG_DEBUG):
-                    log("LXMF duplicate ignored: " + message.hash.hex()[:8], LOG_DEBUG)
-                return
-
-            self.delivered_ids[message.hash] = time.time()
-            self._clean_delivered_ids()
-
-            self._take_ticket(message)
-            if self._delivery_callback:
-                try:
-                    self._delivery_callback(message)
-                except Exception as e:
-                    log("LXMF delivery callback error: " + str(e), LOG_ERROR)
-
+            self._take_in(message, "link ")
         except Exception as e:
             log("LXMF link packet error: " + str(e), LOG_ERROR)
 
@@ -1008,48 +998,11 @@ class LXMRouter:
                 return
 
             # DIRECT delivery sends full packed: dest_hash + source_hash + sig + payload
-            lxmf_data = data
             if sl(LOG_DEBUG):
-                log("LXMF resource unpacking: " + str(len(lxmf_data)) + "B", LOG_DEBUG)
-
-            message = LXMessage.unpack_from_bytes(lxmf_data)
+                log("LXMF resource unpacking: " + str(len(data)) + "B", LOG_DEBUG)
+            message = LXMessage.unpack_from_bytes(data)
             message.receiving_interface = getattr(getattr(resource, "link", None), "attached_interface", None)   # which link it came in on (rrc_mesh: #mesh)
-            message.transport_encrypted = True
-            message.transport_encryption = "Curve25519"
-
-            if message.signature_validated:
-                log("LXMF resource message from " + message.source_hash.hex()[:8] +
-                    ": " + (message.content_as_string() or "(binary)"), LOG_NOTICE)
-            else:
-                reason = "unknown source" if message.unverified_reason == LXMessage.SOURCE_UNKNOWN else "invalid signature"
-                log("LXMF unverified resource message (" + reason + ") from " +
-                    message.source_hash.hex()[:8], LOG_NOTICE)
-                if message.unverified_reason == LXMessage.SIGNATURE_INVALID:
-                    # Forged or corrupted: someone else's address on it.
-                    log("LXMF message dropped: its signature doesn't match its sender", LOG_WARNING)
-                    return
-
-            # Remember which LXMF peer this link carries (see _link_packet_received).
-            link = getattr(resource, "link", None)
-            if link is not None:
-                link.lxmf_source_hash = message.source_hash
-
-            # Dedup check
-            if message.hash in self.delivered_ids:
-                if sl(LOG_DEBUG):
-                    log("LXMF duplicate ignored: " + message.hash.hex()[:8], LOG_DEBUG)
-                return
-
-            self.delivered_ids[message.hash] = time.time()
-            self._clean_delivered_ids()
-
-            self._take_ticket(message)
-            if self._delivery_callback:
-                try:
-                    self._delivery_callback(message)
-                except Exception as e:
-                    log("LXMF delivery callback error: " + str(e), LOG_ERROR)
-
+            self._take_in(message, "resource ")
         except Exception as e:
             log("LXMF resource delivery error: " + str(e), LOG_ERROR)
 
@@ -1058,61 +1011,65 @@ class LXMRouter:
         try:
             if sl(LOG_DEBUG):
                 log("LXMF delivery_packet: " + str(len(data)) + "B", LOG_DEBUG)
-
             # For opportunistic delivery, prepend destination hash
             # (it's inferred from the packet destination, not included in payload)
-            dest_hash = self.delivery_destination.hash
-            lxmf_data = dest_hash + data
-
-            if sl(LOG_DEBUG):
-                log("LXMF unpacking: " + str(len(lxmf_data)) + "B total", LOG_DEBUG)
-            message = LXMessage.unpack_from_bytes(lxmf_data)
+            message = LXMessage.unpack_from_bytes(self.delivery_destination.hash + data)
             message.receiving_interface = getattr(packet, "receiving_interface", None)   # which link it came in on (rrc_mesh: #mesh)
+            self._take_in(message, "", packet)
+        except Exception as e:
+            log("LXMF delivery packet error: " + str(e), LOG_ERROR)
 
-            if message.signature_validated:
-                log("LXMF message from " + message.source_hash.hex()[:8] +
-                    ": " + (message.content_as_string() or "(binary)"), LOG_NOTICE)
-            else:
-                reason = "unknown source" if message.unverified_reason == LXMessage.SOURCE_UNKNOWN else "invalid signature"
-                log("LXMF unverified message (" + reason + ") from " +
-                    message.source_hash.hex()[:8], LOG_NOTICE)
-                if message.unverified_reason == LXMessage.SIGNATURE_INVALID:
-                    # Forged or corrupted: someone else's address on it.
-                    log("LXMF message dropped: its signature doesn't match its sender", LOG_WARNING)
-                    return
+    def _take_in(self, message, how, packet=None):
+        """A message just unpacked, however it came (`how`: "" for a packet
+        of its own, "link " or "resource " over a link): dropped when its
+        signature is wrong, delivered once. `packet`: the opportunistic
+        packet to prove (a link proves its own packets and resources)."""
+        message.transport_encrypted = True
+        message.transport_encryption = "Curve25519"
 
-            # Dedup check. A copy of a message already taken in is the
-            # sender trying again because our proof didn't reach it: prove
-            # it again (else it keeps resending, then shows "not sent"),
-            # but don't deliver it twice.
-            if message.hash in self.delivered_ids:
-                log("LXMF duplicate from " + message.source_hash.hex()[:8] + ": proved again, not delivered twice", LOG_NOTICE)
-                try:
-                    packet.prove()
-                except Exception:
-                    pass
+        if message.signature_validated:
+            log("LXMF " + how + "message from " + message.source_hash.hex()[:8] +
+                ": " + (message.content_as_string() or "(binary)"), LOG_NOTICE)
+        else:
+            reason = "unknown source" if message.unverified_reason == LXMessage.SOURCE_UNKNOWN else "invalid signature"
+            log("LXMF unverified " + how + "message (" + reason + ") from " +
+                message.source_hash.hex()[:8], LOG_NOTICE)
+            if message.unverified_reason == LXMessage.SIGNATURE_INVALID:
+                # Forged or corrupted: someone else's address on it.
+                log("LXMF message dropped: its signature doesn't match its sender", LOG_WARNING)
                 return
 
-            self.delivered_ids[message.hash] = time.time()
-            self._clean_delivered_ids()
+        if message.hash in self.delivered_ids:
+            if packet is None:
+                if sl(LOG_DEBUG):
+                    log("LXMF duplicate ignored: " + message.hash.hex()[:8], LOG_DEBUG)
+                return
+            # A copy of a packet already taken in is the sender trying
+            # again because our proof didn't reach it: prove it again
+            # (else it keeps resending, then shows "not sent"), but
+            # don't deliver it twice.
+            log("LXMF duplicate from " + message.source_hash.hex()[:8] + ": proved again, not delivered twice", LOG_NOTICE)
+            try:
+                packet.prove()
+            except Exception:
+                pass
+            return
+        self._remember(message.hash)
 
+        if packet is not None:
             # Send delivery proof (so sender knows we received it)
             try:
-                import gc; _gc_collect()
+                _gc_collect()
             except:
                 pass
             packet.prove()
 
-            # Deliver to application
-            self._take_ticket(message)
-            if self._delivery_callback:
-                try:
-                    self._delivery_callback(message)
-                except Exception as e:
-                    log("LXMF delivery callback error: " + str(e), LOG_ERROR)
-
-        except Exception as e:
-            log("LXMF delivery packet error: " + str(e), LOG_ERROR)
+        self._take_ticket(message)
+        if self._delivery_callback:
+            try:
+                self._delivery_callback(message)
+            except Exception as e:
+                log("LXMF delivery callback error: " + str(e), LOG_ERROR)
 
     def _announce_handler(self, destination_hash, app_data, packet):
         """Called by Transport when any announce is received"""
@@ -1125,6 +1082,8 @@ class LXMRouter:
         if app_data:
             display_name = self._parse_display_name(app_data)
 
+        if destination_hash not in self.peers and len(self.peers) >= PEERS_MAX:
+            self.peers.pop(min(self.peers, key=lambda k: self.peers[k]["timestamp"]))
         self.peers[destination_hash] = {
             "name": display_name,
             "timestamp": time.time(),
@@ -1172,13 +1131,19 @@ class LXMRouter:
         except Exception:
             return None
 
-    def _clean_delivered_ids(self):
-        """Remove expired message IDs from dedup cache"""
+    def _remember(self, message_hash):
+        """Notes a message as taken in. Expired ids are cleared at most
+        once a minute (it was a pass over all of them at every message);
+        at DELIVERED_MAX the oldest goes."""
         now = time.time()
-        expired = [h for h, ts in self.delivered_ids.items()
-                   if now - ts > self.MESSAGE_EXPIRY]
-        for h in expired:
-            del self.delivered_ids[h]
+        ids = self.delivered_ids
+        if now - self._cleaned_at > 60:
+            self._cleaned_at = now
+            for h in [h for h, ts in ids.items() if now - ts > self.MESSAGE_EXPIRY]:
+                del ids[h]
+        if len(ids) >= DELIVERED_MAX:
+            ids.pop(min(ids, key=lambda k: ids[k]))
+        ids[message_hash] = now
 
     @staticmethod
     def display_name_from_app_data(app_data):

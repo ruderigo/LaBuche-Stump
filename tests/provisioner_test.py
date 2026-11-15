@@ -13,6 +13,15 @@ def check(n, c, i=''):
 files = P.manifest_candidates(fw)
 check('manifest keeps plugin.json', 'fservbot/plugin.json' in files and 'stumpid/plugin.json' in files)
 check('manifest drops plugin files', not any(f.startswith(('fservbot/', 'stumpid/')) and not f.endswith('plugin.json') for f in files))
+# a tool's own files left in the folder (a linter's cache, an editor's) are never firmware
+_fw2 = Path(tempfile.mkdtemp()) / 'fw'
+shutil.copytree(fw, _fw2, ignore=shutil.ignore_patterns('__pycache__', 'third_party', 'tools_payload'))
+_before = P.manifest_candidates(_fw2)
+(_fw2 / '.ruff_cache' / '0.1').mkdir(parents=True); (_fw2 / '.ruff_cache' / '0.1' / '123').write_text('x')
+(_fw2 / 'urns' / '.idea').mkdir(); (_fw2 / 'urns' / '.idea' / 'x.xml').write_text('x')
+(_fw2 / '.DS_Store').write_text('x'); (_fw2 / 'urns' / '.lxmf.py.swo').write_text('x')
+check('manifest drops hidden files and folders', P.manifest_candidates(_fw2) == _before,
+      sorted(set(P.manifest_candidates(_fw2)) - set(_before)))
 check('api', P.firmware_plugin_api(fw) == 4)
 check('the firmware zip is named with its release', re.match(r'^Stump-1\.0\.0-beta\.\d+\.zip$', P.firmware_zip_name(fw)) is not None
       and P._is_old_firmware_zip('Stump_Beta_A.zip', P.firmware_zip_name(fw)) and not P._is_old_firmware_zip(P.firmware_zip_name(fw), P.firmware_zip_name(fw)), P.firmware_zip_name(fw))

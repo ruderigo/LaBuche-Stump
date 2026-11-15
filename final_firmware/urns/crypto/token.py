@@ -74,5 +74,5 @@ class Token:
                     ciphertext=ciphertext,
                     key=self._encryption_key,
                     iv=iv))
-        except Exception as e:
+        except Exception:
             raise ValueError("Could not decrypt token")

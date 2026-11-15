@@ -4,9 +4,8 @@
 from urns.mem import collect as _gc_collect
 import os
 import gc
-import time
 from . import const
-from .log import log, set_loglevel, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_NOTICE, LOG_INFO, sl
+from .log import log, set_loglevel, LOG_VERBOSE, LOG_ERROR, LOG_NOTICE, LOG_INFO, sl
 from .identity import Identity
 from .transport import Transport
 from .interfaces import Interface as _BaseInterface

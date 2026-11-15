@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased (code review, Nov 2026)
+- **A message carrying an LXMF stamp was dropped by a board as forged.** A stamp is a fifth item after the four that are hashed and signed; to get the message's id the router packed those four again. A board's floats are 32 bits: the timestamp read and written back wasn't the sender's eight bytes, the id came out different, the signature failed ("its signature doesn't match its sender"). Never on a computer Stump, nor in the tests against upstream LXMF (both have 64-bit floats). The id is now made from the bytes received.
+- **The LXMF router remembered without limit**: the id of every message taken in (30 days each, and a pass over all of them at each message), and a name for every address that ever announced, of any kind. Messages from addresses not heard yet cost their sender nothing to make, so a radio (or a device on the Wi-Fi) could fill a board's memory. Both are bounded now (256 ids and 160 names on a board, 4096 and 768 on a computer), the oldest going first; expired ids are cleared once a minute.
+- A packet, a link packet and a resource are taken in by one function (three copies had drifted: only one marked how the message was encrypted, only one proved a repeated packet). The announce's data is made in one place: a stamp cost asked for at registration was in the first announce only.
+- The Provisioner's manifest leaves out hidden files and folders (a linter's cache left in `final_firmware/` was taken for firmware).
+- urns: imports nothing used (49, mostly `gc` beside `_gc_collect()`), in 19 files. No change in behaviour.
+- Tests: `lxmf_router` (a stamped message with a real 64-bit timestamp; the three ways in; repeated packets; the caps); `provisioner` (hidden files). `lxmf_router` fails on beta.73: the stamped message refused, 204 ids held where 50 are allowed.
+- Noted for later, not changed: docs/TODO.md (*From the review of November 2026*).
+
 ## 1.0.0-beta.73
 - **stumpid could be left switched off, and /admin with it** (the kit's WROVERs). If the board was reset while stumpid was starting, safe mode switched it off until someone turned it back on in /admin; but stumpid checks /admin's password, so every password was refused there, and `/auth`, `/whoami` answered "unknown command". Arborist and the Provisioner reset the board, or stop it for a prompt, each time they connect, so it happened in normal use. Now:
   - safe mode never switches stumpid off (it's the access control); one an older firmware switched off is back on at the next start;

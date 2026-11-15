@@ -150,7 +150,6 @@ print("\nD. Link encryption at the ends, by part (per packet)")
 from urns.crypto.token import Token
 from urns.crypto.pkcs7 import PKCS7
 from urns.crypto.hmac import new as hmac_new
-from urns.crypto import aes as A
 key = Token.generate_key()
 tok = Token(key)
 plain = bytes(PAYLOAD - 64)
