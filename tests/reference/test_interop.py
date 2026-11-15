@@ -264,3 +264,95 @@ def test_a_stump_app_tag_in_an_announce_is_ignored_by_reference_lxmf():
     assert LXMF.stamp_cost_from_app_data(app_data) == 8
     import rrc
     assert rrc.app_tag_in(app_data)
+
+
+# ---- packed text (urns/ztext.py) -------------------------------------------
+
+def test_the_packed_text_flag_in_an_announce_is_ignored_by_reference_lxmf():
+    """A Stump's own LXMF announce, with its fifth item {"z": 1}: upstream
+    LXMF reads the name, the stamp cost and compression as it always did."""
+    from urns import lxmf as ulxmf_mod
+    r = _router()
+    app_data = r._get_announce_app_data()
+    assert RNS.vendor.umsgpack.unpackb(app_data) == [b"Stump", None, [], None, {"z": 1}]
+    assert LXMF.display_name_from_app_data(app_data) == "Stump"
+    assert LXMF.stamp_cost_from_app_data(app_data) is None
+    assert LXMF.compression_support_from_app_data(app_data) is False
+    assert ulxmf_mod.reads_packed(app_data)
+    ref = RNS.vendor.umsgpack.packb([b"Rod", 8, [LXMF.SF_COMPRESSION], "stump:firefly-android/0.6.3.b.74", {"z": 1}])
+    assert ulxmf_mod.reads_packed(ref) and ulxmf.stamp_cost_from_app_data(ref) == 8
+    assert not ulxmf_mod.reads_packed(RNS.vendor.umsgpack.packb([b"Rod", 8, [LXMF.SF_COMPRESSION]]))
+
+
+def _inflate_by_the_book(content):
+    """Packed text read with nothing but zlib and the format's constants:
+    what any other LXMF app would write to read it."""
+    import zlib
+    from urns import ztext
+    assert content[0] == 0xFF
+    n = len(ztext._DICT)
+    stored = bytes((0, n & 255, n >> 8, ~n & 255, (~n >> 8) & 255)) + ztext._DICT
+    d = zlib.decompressobj(-15)
+    out = d.decompress(stored + ztext._HEAD + content[1:])
+    assert d.eof and not d.unused_data
+    return out[n:]
+
+
+def test_a_packed_urns_message_reads_in_reference_lxmf():
+    """urns packs for a peer that says "z"; reference LXMF carries the
+    content as bytes, signature and id intact, and plain zlib reads it."""
+    r = _router()
+    src, dst = _pair()
+    r.handle_announce(dst.hash, RNS.vendor.umsgpack.packb([b"Rod", None, [], "stump:firefly-android/0.6.3.b.74", {"z": 1}]))
+    text = "<Rod@LaBuche> on se rejoint au camp à 18h, apporte les piles et de l'eau\n<alice> ok I'm on my way"
+    content = r._packed(dst.hash, text)
+    assert content[0] == 0xFF and len(content) < 0.7 * len(text.encode())
+    m = ULXMessage(dst, src, content, title="#lora-mesh")
+    m.pack()
+    got = LXMF.LXMessage.unpack_from_bytes(m.packed)
+    assert got.signature_validated and got.hash == m.hash
+    assert got.content == content
+    assert _inflate_by_the_book(got.content).decode() == text
+
+
+def test_a_packed_reference_message_reads_in_urns():
+    """The other way: FireFly (reference LXMF, zlib) to a Stump."""
+    from urns import ztext
+    sender, receiver = RNS.Identity(), RNS.Identity()
+    src = RNS.Destination(sender, RNS.Destination.OUT, RNS.Destination.SINGLE, "lxmf", "delivery")
+    dst = RNS.Destination(receiver, RNS.Destination.OUT, RNS.Destination.SINGLE, "lxmf", "delivery")
+    text = "/msg alice est-ce que quelqu'un a des nouvelles de la tempête? on a perdu le courant depuis ce matin"
+    packed = ztext.pack(text.encode())
+    assert packed[0] == 0xFF
+    m = LXMF.LXMessage(dst, src, packed, desired_method=LXMF.LXMessage.OPPORTUNISTIC)
+    m.pack()
+    assert m.method == LXMF.LXMessage.OPPORTUNISTIC
+    UIdentity.remember(os.urandom(32), src.hash, sender.get_public_key())
+    got = ULXMessage.unpack_from_bytes(m.packed)
+    assert got.signature_validated and got.hash == m.hash
+    _router()._unpack(got)
+    assert got.content_as_string() == text
+
+
+def test_more_text_fits_one_packet_packed():
+    """Reference LXMF's own rule for one opportunistic packet (295 bytes of
+    content): a batch too long for it plain fits packed."""
+    from urns import ztext
+    sender, receiver = RNS.Identity(), RNS.Identity()
+    src = RNS.Destination(sender, RNS.Destination.OUT, RNS.Destination.SINGLE, "lxmf", "delivery")
+    dst = RNS.Destination(receiver, RNS.Destination.OUT, RNS.Destination.SINGLE, "lxmf", "delivery")
+    batch = "\n".join([
+        "<sam> Anyone know if the bridge on route 117 is open again? Heard it was closed after the storm last week.",
+        "<lee> still closed as of this morning, take the detour through Val-d'Or",
+        "<sam> thanks, that adds an hour but ok",
+        "<lee> no problem, drive safe and call me when you get back to the station",
+        "<kim> the weather is turning, wind picking up from the west and it looks like rain before dark",
+    ])
+    assert len(batch.encode()) > LXMF.LXMessage.ENCRYPTED_PACKET_MAX_CONTENT
+    plain = LXMF.LXMessage(dst, src, batch, title="#lora-mesh", desired_method=LXMF.LXMessage.OPPORTUNISTIC)
+    plain.pack()
+    assert plain.method == LXMF.LXMessage.DIRECT          # a link, then the message: several packets
+    packed = LXMF.LXMessage(dst, src, ztext.pack(batch.encode()), title="#lora-mesh",
+                            desired_method=LXMF.LXMessage.OPPORTUNISTIC)
+    packed.pack()
+    assert packed.method == LXMF.LXMessage.OPPORTUNISTIC  # one packet
