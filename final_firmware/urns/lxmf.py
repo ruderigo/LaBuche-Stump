@@ -10,6 +10,7 @@ except ImportError:
 from urns.mem import collect as _gc_collect
 import time, sys
 from . import umsgpack
+from . import ztext
 from .identity import Identity
 from .destination import Destination
 from .packet import Packet
@@ -42,6 +43,29 @@ DELIVERED_MAX = 256 if sys.platform == "esp32" else 4096
 # exactly as before 1.0.0-beta.53.
 STAMPS = [False]
 ROUTER = [None]             # the node's router (for /admin's status line)
+
+# Packed text (urns/ztext.py): a message's content written shorter, to and
+# from those whose LXMF announce says they read it -- a fifth item after
+# LXMF's own three and FireFly's app tag, {"z": 1}. Every other app gets,
+# and sends, plain text as before. config.LXMF_PACKED_TEXT = False turns it
+# off: nothing said in the announce, nothing packed, nothing unpacked.
+PACKED_TEXT = [True]
+PACKS_MAX = 128             # peers remembered as reading packed text
+
+
+def reads_packed(app_data):
+    """True when an LXMF announce says its sender reads packed text:
+    [name, cost, functions, tag, {"z": version}]."""
+    try:
+        b0 = app_data[0]
+        if (0x90 <= b0 <= 0x9f) or b0 == 0xdc:
+            d = umsgpack.unpackb(app_data)
+            if isinstance(d, list) and len(d) > 4 and isinstance(d[4], dict):
+                z = d[4].get("z")
+                return isinstance(z, int) and not isinstance(z, bool) and z >= 1
+    except Exception:
+        pass
+    return False
 
 
 def stamp_cost_from_app_data(app_data):
@@ -540,6 +564,7 @@ class LXMRouter:
         self._stamp_queue = []      # [message, destination, interface] waiting for a stamp
         self._stamp_job = None
         self.stamps_made = 0
+        self.packs = {}             # destination hash -> 1: its announce says it reads packed text
         ROUTER[0] = self
 
     def register_delivery_identity(self, identity, display_name=None, stamp_cost=None):
@@ -598,11 +623,16 @@ class LXMRouter:
     def _get_announce_app_data(self):
         """Build announce app_data: msgpack([display_name_bytes, stamp_cost,
         supported_functionality]) — matches upstream LXMF; the empty
-        functionality list tells peers we don't support LXMF compression."""
+        functionality list tells peers we don't support LXMF compression.
+        Then, where packed text is on: no app tag (that's a Stump app's),
+        and {"z": 1}. Upstream LXMF reads the first three items only."""
         dn = None
         if self.display_name:
             dn = self.display_name.encode("utf-8") if isinstance(self.display_name, str) else self.display_name
-        return umsgpack.packb([dn, self.stamp_cost, []])
+        data = [dn, self.stamp_cost, []]
+        if PACKED_TEXT[0] and ztext.available():
+            data += [None, {"z": 1}]
+        return umsgpack.packb(data)
 
     def send_message(self, destination_hash, content, title="",
                      fields=None, desired_method=None, via=None):
@@ -660,7 +690,7 @@ class LXMRouter:
         msg = LXMessage(
             destination=dest,
             source=source,
-            content=content,
+            content=self._packed(destination_hash, content),
             title=title,
             fields=fields,
             desired_method=desired_method or LXMessage.OPPORTUNISTIC,
@@ -684,6 +714,37 @@ class LXMRouter:
         elif msg.method == LXMessage.DIRECT:
             self._send_direct(msg, dest)
         return msg
+
+    # ---- packed text (urns/ztext.py) ----
+
+    def packs_for(self, destination_hash):
+        """True when text to this destination goes packed."""
+        return PACKED_TEXT[0] and bytes(destination_hash) in self.packs
+
+    def packed_size(self, destination_hash, text):
+        """The bytes `text` takes as a message's content to this destination."""
+        data = text.encode("utf-8") if isinstance(text, str) else text
+        return len(ztext.pack(data)) if self.packs_for(destination_hash) else len(data)
+
+    def _packed(self, destination_hash, content):
+        if not self.packs_for(destination_hash):
+            return content
+        data = content.encode("utf-8") if isinstance(content, str) else content
+        out = ztext.pack(data)
+        if len(out) < len(data) and sl(LOG_VERBOSE):
+            log("LXMF text packed for " + bytes(destination_hash).hex()[:8] + ": " + str(len(data))
+                + " -> " + str(len(out)) + "B", LOG_VERBOSE)
+        return out
+
+    def _unpack(self, message):
+        """A packed content, read: the message then holds the text itself
+        (its id and signature are those of what was sent, as they must be).
+        One that can't be read stays as it came, as any binary content."""
+        c = message.content
+        if PACKED_TEXT[0] and c and c[0] >= ztext.PLAIN:
+            text = ztext.unpack(c)
+            if text is not None:
+                message.content = text
 
     # ---- stamps and tickets ----
 
@@ -829,8 +890,8 @@ class LXMRouter:
             return None
         dest = Destination(dest_identity, Destination.OUT, Destination.SINGLE, APP_NAME, "delivery")
         source = Destination(self.delivery_identity, Destination.OUT, Destination.SINGLE, APP_NAME, "delivery")
-        msg = LXMessage(destination=dest, source=source, content=content, title=title,
-                        fields=fields, desired_method=LXMessage.OPPORTUNISTIC)
+        msg = LXMessage(destination=dest, source=source, content=self._packed(destination_hash, content),
+                        title=title, fields=fields, desired_method=LXMessage.OPPORTUNISTIC)
         if self._stamp_first(msg, destination_hash, dest, interface):
             return msg
         return self._dispatch(msg, dest, interface)
@@ -1026,6 +1087,8 @@ class LXMRouter:
         packet to prove (a link proves its own packets and resources)."""
         message.transport_encrypted = True
         message.transport_encryption = "Curve25519"
+        if message.unverified_reason != LXMessage.SIGNATURE_INVALID:
+            self._unpack(message)
 
         if message.signature_validated:
             log("LXMF " + how + "message from " + message.source_hash.hex()[:8] +
@@ -1088,6 +1151,12 @@ class LXMRouter:
             "name": display_name,
             "timestamp": time.time(),
         }
+        if app_data and reads_packed(app_data):
+            if destination_hash not in self.packs and len(self.packs) >= PACKS_MAX:
+                self.packs.pop(next(iter(self.packs)))
+            self.packs[bytes(destination_hash)] = 1
+        else:
+            self.packs.pop(destination_hash, None)
         cost = stamp_cost_from_app_data(app_data)
         if cost:
             if destination_hash not in self.stamp_costs and len(self.stamp_costs) >= COSTS_MAX:
