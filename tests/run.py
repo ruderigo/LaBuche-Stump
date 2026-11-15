@@ -28,6 +28,7 @@ TEST_PLUGINS = [HERE / "plugins" / n for n in ("dice", "crashy", "future")]
 PACK_PLUGINS = [PACKS / "tavern-pack" / "tavern", PACKS / "rnfs-pack" / "rnfs"]
 NOMADNET = [PACKS / "nomadnet-pack" / "nomadnet"]
 SIMPLE = [PACKS / "simple-pack" / "simple"]
+METER = [PACKS / "meter-pack" / "meter"]
 
 # name, kind, extra plugin folders
 TESTS = [
@@ -83,6 +84,7 @@ TESTS = [
     ("heltec_connect", "assert", []),
     ("mem_low", "assert", []),
     ("simple_pack", "assert", SIMPLE),
+    ("meter_pack", "assert", METER),
     ("mods_room", "assert", []),
     ("default_lang", "assert", []),
     ("mods_more", "assert", []),

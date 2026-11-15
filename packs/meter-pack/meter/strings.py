@@ -1,0 +1,31 @@
+# Meter -- a tester's counter (see ../README.md).
+# Meter's own strings: French (the node's default), English, Spanish.
+# Each is one line of at most 200 characters once filled in (the mesh cuts there).
+STRINGS = {
+    "help": {"fr": "/meter : ce que la Bûche envoie aux apps (octets, paquets) ; /meter 1|2|3 : un texte d'essai",
+             "en": "/meter: what the Stump sends apps (bytes, packets); /meter 1|2|3: a test text",
+             "es": "/meter: lo que el Tronco envía a las apps (bytes, paquetes); /meter 1|2|3: un texto de prueba"},
+    "usage": {"fr": "/meter · /meter 1|2|3 (texte d'essai) · /meter last · /meter reset",
+              "en": "/meter · /meter 1|2|3 (test text) · /meter last · /meter reset",
+              "es": "/meter · /meter 1|2|3 (texto de prueba) · /meter last · /meter reset"},
+    "head": {"fr": "meter · {rel} · texte compacté : {state}",
+             "en": "meter · {rel} · packed text: {state}",
+             "es": "meter · {rel} · texto compactado: {state}"},
+    "state_none": {"fr": "pas dans ce firmware", "en": "not in this firmware", "es": "no está en este firmware"},
+    "state_off": {"fr": "désactivé", "en": "off", "es": "desactivado"},
+    "state_on": {"fr": "actif, {n} adresse(s) le lisent", "en": "on, {n} address(es) read it", "es": "activo, {n} dirección(es) lo leen"},
+    "bytes": {"fr": "vers les apps en {mins} min : {msgs} messages, {text} o de texte → {sent} o envoyés ({pct} %), {packed} compactés",
+              "en": "to apps in {mins} min: {msgs} messages, {text} B of text → {sent} B sent ({pct}%), {packed} packed",
+              "es": "a las apps en {mins} min: {msgs} mensajes, {text} B de texto → {sent} B enviados ({pct} %), {packed} compactados"},
+    "packets": {"fr": "un seul paquet : {one} sur {msgs} (en texte brut : {plain})",
+                "en": "one packet: {one} of {msgs} (as plain text: {plain})",
+                "es": "un solo paquete: {one} de {msgs} (en texto sin compactar: {plain})"},
+    "last": {"fr": "votre dernier essai : {lines} ligne(s), {text} o de texte → {sent} o envoyés ({pct} %), {how}",
+             "en": "your last test: {lines} line(s), {text} B of text → {sent} B sent ({pct}%), {how}",
+             "es": "su última prueba: {lines} línea(s), {text} B de texto → {sent} B enviados ({pct} %), {how}"},
+    "how_one": {"fr": "un seul paquet", "en": "one packet", "es": "un solo paquete"},
+    "how_link": {"fr": "par un lien (plusieurs paquets)", "en": "over a link (several packets)", "es": "por un enlace (varios paquetes)"},
+    "last_none": {"fr": "Pas encore d'essai : /meter 1, 2 ou 3.", "en": "No test yet: /meter 1, 2 or 3.", "es": "Aún no hay prueba: /meter 1, 2 o 3."},
+    "wait": {"fr": "Un essai à la fois : encore {secs} s.", "en": "One test at a time: {secs} s more.", "es": "Una prueba a la vez: {secs} s más."},
+    "reset": {"fr": "Compteurs remis à zéro.", "en": "Counters back to zero.", "es": "Contadores a cero."},
+}

@@ -373,7 +373,7 @@ EXPECTED_FILE_HASHES = {
     "docs/HIDDEN_FEATURES.md": "568bc132ab83a91b",
     "docs/HOME_BRANDING.md": "e1a1a9cf854dcdce",
     "docs/HTTPS_SETUP.md": "12cbbf2de7c38810",
-    "docs/PACKS.md": "acb8642931a96b42",
+    "docs/PACKS.md": "b7a5d51fa9fe622a",
     "docs/PC.md": "e90244ab4b47d68e",
     "docs/PLUGINS.md": "8085ca56b773b64a",
     "example_node.py": "9c60bf616e901816",
