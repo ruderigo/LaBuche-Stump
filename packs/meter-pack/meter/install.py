@@ -6,7 +6,9 @@
 # packed to the apps that read it (urns/ztext.py), and the numbers say
 # by how much.
 #
-#   /meter          the numbers since the Stump started (or the last reset)
+#   /meter          the numbers since the Stump started (or the last reset):
+#                   to apps, from apps, to other Stumps (radio / chain)
+#   /meter info     the firmware, whether it packs text, for how long it has counted
 #   /meter 1|2|3    sends you a fixed text of 1, 2 or 3 lines to measure
 #   /meter last     what your last test took
 #   /meter room     an estimate from this room's latest lines
@@ -28,7 +30,7 @@
 
 import time
 
-VERSION = "1.2"
+VERSION = "1.3"
 STUMP_API = 2
 
 # One opportunistic LXMF packet: LXMessage.ENCRYPTED_PACKET_MAX_CONTENT.
@@ -63,13 +65,17 @@ def setup(stump):
     # what is sent.
     stump.mesh_out(_out, priority=95)
     stump.every(60, _minute)
+    # What people's apps send (1.3): each line a person on an app writes
+    # in a room. Looked at, never answered.
+    stump.on_message(_in, priority=95)
     _watch_stumps()
 
 
 def _zero():
     _n.clear()
     _n.update({"mins": 0, "msgs": 0, "text": 0, "sent": 0, "packed": 0, "one": 0, "one_plain": 0,
-               "s_msgs": 0, "s_text": 0, "s_sent": 0, "s_packed": 0})
+               "f_msgs": 0, "f_text": 0, "f_sent": 0, "f_one": 0, "f_one_plain": 0,
+               "r_msgs": 0, "r_text": 0, "r_sent": 0, "c_msgs": 0, "c_text": 0, "c_sent": 0})
     _tests.clear()
 
 
@@ -102,11 +108,26 @@ def _active():
         return True
 
 
+def _by_radio(item):
+    """True when this queued message leaves by the radio: the broadcast
+    always; an LXMF message sent on the radio itself, or one left to
+    its route when that route isn't the chain and a radio is on."""
+    import rrc_mesh
+    if item[0] == "lb":
+        return True
+    radio = rrc_mesh._radio()
+    via = item[5] if len(item) > 5 else None
+    if via is not None:
+        return via is radio
+    return radio is not None and rrc_mesh._chain_iface(item[1]) is None
+
+
 def _to_stump(item):
     """Counts one queued message if it is for another Stump: the radio
     broadcast ("lb", text, interface[, packed]) or an LXMF message
     (router, address, text, ...) to an address that is a Stump's. One
-    to a person's app is counted by _out, not here."""
+    to a person's app is counted by _out, not here. Radio and chain
+    apart (1.3): bytes only matter on the first."""
     if not _active():
         return
     if item[0] == "lb":
@@ -124,11 +145,33 @@ def _to_stump(item):
         text = item[2]
         data = text.encode() if isinstance(text, str) else bytes(text or b"")
         sent = _sent_size(h, data)
-    _n["s_msgs"] += 1
-    _n["s_text"] += len(data)
-    _n["s_sent"] += sent
-    if sent < len(data):
-        _n["s_packed"] += 1
+    k = "r_" if _by_radio(item) else "c_"
+    _n[k + "msgs"] += 1
+    _n[k + "text"] += len(data)
+    _n[k + "sent"] += sent
+
+
+def _in(ctx):
+    """Counts one room line written by a person on an app: its bytes as
+    text, and as that app sent them (packed when this firmware and the
+    app both pack: the same packing on both sides, so the same bytes)."""
+    try:
+        if not ctx.is_mesh or not isinstance(ctx.text, str):
+            return
+        data = ctx.text.encode()
+        sent = _sent_size(ctx.client_id, data)
+        _n["f_msgs"] += 1
+        _n["f_text"] += len(data)
+        _n["f_sent"] += sent
+        if _one_packet(0, sent):
+            _n["f_one"] += 1
+        if _one_packet(0, len(data)):
+            _n["f_one_plain"] += 1
+    except Exception as e:
+        try:
+            _api[0].log("count in:", e)
+        except Exception:
+            pass
 
 
 def _minute():
@@ -245,7 +288,7 @@ def _release():
         return "?"
 
 
-def _stats(ctx):
+def _info(ctx):
     p = _packing()
     if p is None:
         state = ctx.t("state_none")
@@ -253,15 +296,21 @@ def _stats(ctx):
         state = ctx.t("state_off")
     else:
         state = ctx.t("state_on", n=p[1])
+    return [ctx.t("head", rel=_release(), state=state, mins=_n["mins"])]
+
+
+def _stats(ctx):
     out = [
-        ctx.t("head", rel=_release(), state=state, mins=_n["mins"]),
         ctx.t("apps", msgs=_n["msgs"], text=_n["text"], sent=_n["sent"], pct=_pct(_n["sent"], _n["text"]),
               packed=_n["packed"], one=_n["one"], plain=_n["one_plain"]),
-        ctx.t("stumps", msgs=_n["s_msgs"], text=_n["s_text"], sent=_n["s_sent"],
-              pct=_pct(_n["s_sent"], _n["s_text"]), packed=_n["s_packed"]) if _wrapped else ctx.t("stumps_none"),
+        ctx.t("from", msgs=_n["f_msgs"], text=_n["f_text"], sent=_n["f_sent"], pct=_pct(_n["f_sent"], _n["f_text"]),
+              one=_n["f_one"], plain=_n["f_one_plain"]),
+        ctx.t("stumps", rm=_n["r_msgs"], rt=_n["r_text"], rs=_n["r_sent"], rp=_pct(_n["r_sent"], _n["r_text"]),
+              cm=_n["c_msgs"], ct=_n["c_text"], cs=_n["c_sent"]) if _wrapped else ctx.t("stumps_none"),
     ]
     if not ctx.is_mesh:
-        out.append(ctx.t("wifi"))       # (a fourth line: the Wi-Fi page has room for it)
+        # The Wi-Fi page has room for more than the mesh's three lines.
+        out = _info(ctx) + out + [ctx.t("wifi")]
     return out
 
 
@@ -326,6 +375,8 @@ def _meter(ctx, arg):
         return _last(ctx)
     if a == "room":
         return _room(ctx)
+    if a == "info":
+        return _info(ctx)
     if a == "reset":
         _zero()
         return [ctx.t("reset")]
