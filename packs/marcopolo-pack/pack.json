@@ -1,0 +1,16 @@
+{
+  "name": "marcopolo",
+  "version": "1.0",
+  "author": "Project Stump",
+  "license": "MIT",
+  "stump_api": 2,
+  "description": "A tester's call and answer between Stumps: one says marco in a shared room, the others answer polo, and the caller times each round trip and counts the lost ones. /marco start, /marco, /marco stop.",
+  "ram_kb": 8,
+  "plugins": [
+    "marcopolo"
+  ],
+  "hashes": {},
+  "plugin_hashes": {
+    "marcopolo": "00a8bdcd85c6586b"
+  }
+}

@@ -29,6 +29,7 @@ PACK_PLUGINS = [PACKS / "tavern-pack" / "tavern", PACKS / "rnfs-pack" / "rnfs"]
 NOMADNET = [PACKS / "nomadnet-pack" / "nomadnet"]
 SIMPLE = [PACKS / "simple-pack" / "simple"]
 METER = [PACKS / "meter-pack" / "meter"]
+MARCOPOLO = [PACKS / "marcopolo-pack" / "marcopolo"]
 
 # name, kind, extra plugin folders
 TESTS = [
@@ -85,6 +86,7 @@ TESTS = [
     ("mem_low", "assert", []),
     ("simple_pack", "assert", SIMPLE),
     ("meter_pack", "assert", METER),
+    ("marcopolo_pack", "assert", MARCOPOLO),
     ("mods_room", "assert", []),
     ("default_lang", "assert", []),
     ("mods_more", "assert", []),

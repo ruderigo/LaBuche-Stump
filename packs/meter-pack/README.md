@@ -10,6 +10,7 @@ the apps that read it (CLIENT_QUICKSTART, *Packed text*).
 | You write | You get |
 |---|---|
 | `/meter` | The numbers since the Stump started, or since the last reset |
+| `/meter info` | The firmware, whether it packs text, and for how long it has counted |
 | `/meter 3` (or `1`, `2`) | A fixed test text of that many lines, sent to you |
 | `/meter last` | What your last test took |
 | `/meter room` | An estimate from the latest lines of the room you're in |
@@ -21,8 +22,11 @@ Slash only: nothing of it shows in the room.
 
 - **to apps**: messages to a person's app (FireFly, Sideband...), over
   LoRa or any other Reticulum route;
-- **to other Stumps** (1.2): a room's lines going to the next Stump,
-  over the chain or the radio, and the `#lora-mesh` radio broadcast.
+- **from apps** (1.3): the room lines people write from an app. On a
+  firmware and an app that both pack, their size as they arrived;
+- **to other Stumps** (1.2): a room's lines going to the next Stump
+  and the `#lora-mesh` radio broadcast, **by radio** apart from **by
+  the chain** (1.3): bytes only cost on the first.
 
 What the **Wi-Fi page** shows is not LXMF and isn't counted. So with
 everyone on Wi-Fi pages, *to apps* stays at 0; a line someone writes
@@ -73,10 +77,13 @@ Then use the Stump normally for a while, and ask for the totals (the
 figures here are only an example):
 
 ```
-meter · 1.0.0-beta.78 · packed text: on, 2 address(es) read it · for 42 min
 to apps: 57 messages, 9120 B of text → 5630 B sent (62%), 49 packed; in one packet: 55 (as plain text: 46)
-to other Stumps: 31 messages, 6040 B of text → 3810 B sent (63%), 28 packed
+from apps: 12 lines, 2310 B of text → 1420 B received (61%); in one packet: 12 (as plain text: 9)
+to other Stumps: by radio 31 messages, 6040 B of text → 3810 B sent (63%); by the chain 640 messages, 108100 B → 108100 B
 ```
+
+Over the mesh those are the three lines; on the Wi-Fi page the
+`/meter info` line comes first.
 
 ## What the numbers are
 
@@ -101,6 +108,9 @@ carries 18 to 34 bytes more than the one-packet rule here assumes.
 
 ## Good to know
 
+- 1.3: lines **from apps**; **radio** apart from **chain**; the state
+  line moved to `/meter info`. To time what the bytes cost, see the
+  Marco Polo pack.
 - 1.2: what goes **to other Stumps** is counted too. For that the pack
   puts a counter in front of the Stump's own send function
   (`rrc_mesh._send_item`), in memory: it counts, then calls the real

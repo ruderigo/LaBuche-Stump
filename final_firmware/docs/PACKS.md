@@ -15,7 +15,7 @@ tavern-pack/
   home/            optional: a home-page section (SD card, HOME_BRANDING.md)
 ```
 
-Five packs ship in `packs/`:
+Six packs ship in `packs/`:
 
 - **tavern**: `!roll`, `!8ball`, `!slap`, `!seen`, `!quote`, `!vote`, a
   flood guard, a theme and a persona.
@@ -29,6 +29,10 @@ Five packs ship in `packs/`:
   many bytes and packets the Stump sends people's apps, `/meter 3`
   sends a fixed test text. Runs on older firmware too, to compare
   before and after packed text.
+- **marcopolo** (1.0.0-beta.78): a tester's call and answer. One Stump
+  says marco in a shared room, the others answer polo, the caller
+  times each round trip and counts the lost ones. Runs on older
+  firmware too.
 
 ## Installing a pack (technicians)
 

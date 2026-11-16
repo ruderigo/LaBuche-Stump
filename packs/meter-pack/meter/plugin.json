@@ -30,7 +30,7 @@
   ],
   "hashes": {
     "meter/__init__.py": "d1e66786f37bb7d6",
-    "meter/install.py": "a35ca1e334493433",
-    "meter/strings.py": "d088a468e41162b5"
+    "meter/install.py": "352d1755a6c71bb1",
+    "meter/strings.py": "e4a073cb9a6efdd1"
   }
 }
