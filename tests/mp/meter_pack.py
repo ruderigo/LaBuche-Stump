@@ -61,13 +61,14 @@ lxmf.ROUTER[0] = OldRouter()
 r = cmd(A, '/meter')
 check("/meter: three lines", len(r) == 3, r)
 check("... the release, and that this firmware doesn't pack", "1.0.0-test" in r[0] and "not in this firmware" in r[0], r[0])
-check("... nothing counted yet", " 0 messages" in r[1] and "one packet: 0 of 0" in r[2], r)
+check("... nothing counted yet, to apps or to other Stumps", "to apps: 0 messages" in r[1] and "in one packet: 0 " in r[1]
+      and "to other Stumps: 0 messages" in r[2], r)
 # A board starts in the year 2000 and jumps to today when it learns the
 # time: the minutes are counted, not read off the clock (a kit answered
 # "14134732 min").
 M._minute(); M._minute(); M._minute()
 r = cmd(A, '/meter')
-check("three minutes counted: 3 min, whatever the clock says", "in 3 min:" in r[1] and "since" not in M._n, r[1])
+check("three minutes counted: 3 min, whatever the clock says", "for 3 min" in r[0] and "since" not in M._n, r[0])
 check("... each fits a mesh line", all(len(l) <= plugins.MESH_LINE_CHARS for l in r), [len(l) for l in r])
 deliver(A, r)
 t3 = cmd(A, '/meter 3')
@@ -88,7 +89,7 @@ r = cmd(A, '/meter last')
 check("one line: one packet either way", "1 line(s)" in r[0] and "(100%), one packet" in r[0], r)
 r = cmd(A, '/meter')
 check("the totals: 3 messages, none packed", " 3 messages" in r[1] and "(100%), 0 packed" in r[1], r[1])
-check("... 2 of them in one packet, as plain text the same", "one packet: 2 of 3 (as plain text: 2)" in r[2], r[2])
+check("... 2 of them in one packet, as plain text the same", "in one packet: 2 (as plain text: 2)" in r[1], r[1])
 r = cmd(B, '/meter last')
 check("someone who ran no test: told how", "No test yet" in r[0], r)
 r = cmd(A, '/meter nonsense')
@@ -149,7 +150,7 @@ if HAS:
     check("... to one that doesn't: as it is, over a link", ("→ %d B sent (100%%), over a link" % n3) in r[0], r)
     r = cmd(A, '/meter')
     check("the totals tell them apart: 1 packed of 2", " 2 messages" in r[1] and ", 1 packed" in r[1], r[1])
-    check("... one packet where plain text had none", "one packet: 1 of 2 (as plain text: 0)" in r[2], r[2])
+    check("... one packet where plain text had none", "in one packet: 1 (as plain text: 0)" in r[1], r[1])
     lxmf.PACKED_TEXT[0] = False
     r = cmd(A, '/meter')
     check("packed text switched off in config: said so", "packed text: off" in r[0], r[0])
@@ -159,13 +160,65 @@ if HAS:
     check("... and counted as it is", "(100%), over a link" in r[0], r)
     lxmf.PACKED_TEXT[0] = True
 
+# 3b. What goes to other Stumps (1.2): counted on its way out of
+# rrc_mesh._send_item, which still sends exactly what it was given.
+cmd(A, '/meter reset')
+S = 'ab' * 16                       # a Stump on the chain
+G = '12' * 16                       # a Stump known by its beacon only
+rrc_mesh._peers[S] = {"nick": "Bûche2", "stump": True}
+rrc.mark_stump(G)
+
+
+class Rt:
+    def __init__(self):
+        self.sent = []
+
+    def send_message(self, dest, text, **kw):
+        self.sent.append((bytes(dest).hex(), text, kw.get("title")))
+
+
+rt2 = Rt()
+check("the pack's counter is in front of the Stump's own send, once",
+      len(M._wrapped) == 1 and rrc_mesh._send_item is not M._wrapped[0])
+M._watch_stumps()
+check("... and only once, however often it is asked", len(M._wrapped) == 1)
+lorem = "<laptop@LaBuche> Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore"
+rrc_mesh._send_item((rt2, bytes.fromhex(S), lorem, "#lora-mesh"))
+rrc_mesh._send_item((rt2, bytes.fromhex(G), lorem, "#lora-mesh"))
+check("a room's line to two other Stumps: sent as it was given",
+      rt2.sent == [(S, lorem, "#lora-mesh"), (G, lorem, "#lora-mesh")], rt2.sent)
+n = len(lorem.encode())
+check("... and counted: 2 messages, their bytes", M._n["s_msgs"] == 2 and M._n["s_text"] == 2 * n, M._n)
+rrc_mesh._send_item((rt2, bytes.fromhex(B), "hello you", ""))
+check("a message to a person's app: under apps, not under Stumps",
+      M._n["s_msgs"] == 2 and M._n["msgs"] == 1 and rt2.sent[-1] == (B, "hello you", None), (M._n, rt2.sent[-1]))
+rrc_mesh._send_item(("lb", lorem, None))
+check("the radio broadcast to several Stumps: counted", M._n["s_msgs"] == 3 and M._n["s_text"] == 3 * n, M._n)
+if HAS:
+    rrc_mesh._send_item(("lb", lorem, None, True))
+    check("... packed (lb2): its bytes as sent", M._n["s_msgs"] == 4 and M._n["s_packed"] == 1
+          and M._n["s_sent"] == 3 * n + len(ztext.pack(lorem.encode())), M._n)
+r = cmd(A, '/meter')
+check("/meter says so on its third line", r[2].startswith("to other Stumps: %d messages, %d B of text" % (M._n["s_msgs"], M._n["s_text"])), r[2])
+check("... still three lines within the mesh's length", len(r) == 3 and all(len(l) <= plugins.MESH_LINE_CHARS for l in r), [len(l) for l in r])
+before = dict(M._n)
+odd = object()
+rrc_mesh._send_item((rt2, bytes.fromhex(S), odd, "#lora-mesh"))
+check("an item it can't measure: handed to the Stump as it is, nothing counted, nothing raised by the pack",
+      M._n == before and rt2.sent[-1] == (S, odd, "#lora-mesh"), M._n)
+plugins.set_enabled('meter', False)
+rrc_mesh._send_item((rt2, bytes.fromhex(S), lorem, "#lora-mesh"))
+check("switched off in /admin: still sent, not counted", M._n["s_msgs"] == before["s_msgs"] and rt2.sent[-1][0] == S)
+plugins.set_enabled('meter', True)
+cmd(A, '/meter reset')
+
 # 4. Everywhere else.
 # On the Wi-Fi page nothing goes over LXMF: said so, and estimates instead.
 cmd(A, '/meter reset')
 M._asked.clear()
 r = cmd(W, '/meter', room='main')
 check("on the Wi-Fi: the same three lines, and why they may read zero",
-      len(r) == 4 and r[0].startswith("meter ·") and "only messages sent to apps over LoRa/LXMF are counted" in r[3], r)
+      len(r) == 4 and r[0].startswith("meter ·") and "What the Wi-Fi page shows isn't counted" in r[3], r)
 tw = cmd(W, '/meter 3', room='main')
 check("... /meter 3 there: the same test lines", tw == t3, tw)
 r = cmd(W, '/meter last', room='main')
@@ -201,7 +254,7 @@ check("... a busy room: only its latest lines (%d), one mesh line" % n, 1 <= n <
       and len(r[0]) <= plugins.MESH_LINE_CHARS, r)
 i18n.set_lang(A, 'fr')
 r = cmd(A, '/meter')
-check("in the person's language", "texte compacté" in r[0] and "un seul paquet" in r[2], r)
+check("in the person's language", "texte compacté" in r[0] and "un seul paquet" in r[1] and "autres Bûches" in r[2], r)
 i18n.set_lang(A, 'es')
 check("... Spanish too", "texto compactado" in cmd(A, '/meter')[0])
 i18n.set_lang(A, 'en')

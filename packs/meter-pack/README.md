@@ -17,10 +17,20 @@ the apps that read it (CLIENT_QUICKSTART, *Packed text*).
 
 Slash only: nothing of it shows in the room.
 
-**Where you ask from matters.** The counters are of messages the Stump
-sends an app over LXMF (LoRa, or any other Reticulum route). The Wi-Fi
-page isn't LXMF, so a Stump whose people are all on the Wi-Fi counts
-**0 messages**, and says why. From the Wi-Fi page you still get:
+**What is counted.** What this Stump sends over LXMF:
+
+- **to apps**: messages to a person's app (FireFly, Sideband...), over
+  LoRa or any other Reticulum route;
+- **to other Stumps** (1.2): a room's lines going to the next Stump,
+  over the chain or the radio, and the `#lora-mesh` radio broadcast.
+
+What the **Wi-Fi page** shows is not LXMF and isn't counted. So with
+everyone on Wi-Fi pages, *to apps* stays at 0; a line someone writes
+in a shared room (`#lora-mesh`, `#wifi-mesh`) is counted *to other
+Stumps* on the Stump it was written on, when it leaves for the others.
+Each Stump counts only what it sends itself: ask each one.
+
+From the Wi-Fi page you also get estimates:
 
 - `/meter room`: the room's latest lines (up to 20), each measured as
   it would go to an app. On a firmware with packed text: their size as
@@ -63,9 +73,9 @@ Then use the Stump normally for a while, and ask for the totals (the
 figures here are only an example):
 
 ```
-meter · 1.0.0-beta.78 · packed text: on, 2 address(es) read it
-to apps in 42 min: 57 messages, 9120 B of text → 5630 B sent (62%), 49 packed
-one packet: 55 of 57 (as plain text: 46)
+meter · 1.0.0-beta.78 · packed text: on, 2 address(es) read it · for 42 min
+to apps: 57 messages, 9120 B of text → 5630 B sent (62%), 49 packed; in one packet: 55 (as plain text: 46)
+to other Stumps: 31 messages, 6040 B of text → 3810 B sent (63%), 28 packed
 ```
 
 ## What the numbers are
@@ -83,13 +93,21 @@ one packet: 55 of 57 (as plain text: 46)
   than the apps you see.
 
 What it doesn't measure: airtime, time to deliver, or lost packets.
-Those you time yourself, with the same `/meter 3` each time. It doesn't
-count what Stumps send each other (`#lora-mesh` between Stumps, the
-chain), nor voice notes. With stamps on (`LXMF_STAMPS`), a message
+Those you time yourself, with the same `/meter 3` each time. Voice
+notes and beacons aren't counted. *To other Stumps* includes
+everything one Stump sends another as a message: room lines, and also
+the lists of names and profiles they keep in step. With stamps on (`LXMF_STAMPS`), a message
 carries 18 to 34 bytes more than the one-packet rule here assumes.
 
 ## Good to know
 
+- 1.2: what goes **to other Stumps** is counted too. For that the pack
+  puts a counter in front of the Stump's own send function
+  (`rrc_mesh._send_item`), in memory: it counts, then calls the real
+  one with the same message. No file of the Stump is changed, and
+  switching the plugin off stops the counting. On a firmware where
+  that function isn't there, the line reads "not counted on this
+  firmware".
 - 1.1: the minutes are counted by the pack (1.0 read the clock, and a
   board's jumps from the year 2000 to today: "in 14134732 min"); the
   Wi-Fi page is told why it reads zero, and gets `/meter room` and an

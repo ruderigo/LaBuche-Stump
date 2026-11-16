@@ -14,14 +14,21 @@
 #
 # It only counts: the mesh_out hook (plugin API 2) looks at each message
 # to a person's app and returns None, so nothing sent is changed. It
-# keeps nothing on the SD card and starts no task. Messages between
-# Stumps don't go through the hook and aren't counted. Nor is anything
-# shown on the Wi-Fi page (that isn't LXMF): asked from there, a test and
-# /meter room give an estimate of what LoRa would carry instead.
+# keeps nothing on the SD card.
+#
+# What a Stump sends another Stump (a room's lines over the chain or the
+# radio, the #lora-mesh broadcast) doesn't go through that hook. To count
+# it too (1.2), the pack puts a counter in front of rrc_mesh._send_item,
+# the one function every queued message leaves by: it counts, then calls
+# the real one with the same item, whatever happened while counting. On a
+# firmware where that function isn't there, Stumps just aren't counted.
+#
+# Nothing shown on the Wi-Fi page is counted (that isn't LXMF): asked
+# from there, a test and /meter room give an estimate instead.
 
 import time
 
-VERSION = "1.1"
+VERSION = "1.2"
 STUMP_API = 2
 
 # One opportunistic LXMF packet: LXMessage.ENCRYPTED_PACKET_MAX_CONTENT.
@@ -43,6 +50,7 @@ LINES = (
 
 _api = []
 _n = {}                # the counters (see _zero)
+_wrapped = []          # [the firmware's own rrc_mesh._send_item], once ours is in front of it
 _tests = {}            # who -> (lines, text bytes, sent bytes, one packet?, an estimate?)
 _asked = {}            # LXMF address (hex) -> when it last asked for a test
 
@@ -55,12 +63,72 @@ def setup(stump):
     # what is sent.
     stump.mesh_out(_out, priority=95)
     stump.every(60, _minute)
+    _watch_stumps()
 
 
 def _zero():
     _n.clear()
-    _n.update({"mins": 0, "msgs": 0, "text": 0, "sent": 0, "packed": 0, "one": 0, "one_plain": 0})
+    _n.update({"mins": 0, "msgs": 0, "text": 0, "sent": 0, "packed": 0, "one": 0, "one_plain": 0,
+               "s_msgs": 0, "s_text": 0, "s_sent": 0, "s_packed": 0})
     _tests.clear()
+
+
+def _watch_stumps():
+    """Our counter in front of rrc_mesh._send_item, once."""
+    if _wrapped:
+        return
+    try:
+        import rrc_mesh
+        real = rrc_mesh._send_item
+    except Exception:
+        return                      # another firmware: Stumps aren't counted
+
+    def counted(item):
+        try:
+            _to_stump(item)
+        except Exception:
+            pass
+        return real(item)
+
+    _wrapped.append(real)
+    rrc_mesh._send_item = counted
+
+
+def _active():
+    try:
+        import plugins
+        return plugins._active("meter")
+    except Exception:
+        return True
+
+
+def _to_stump(item):
+    """Counts one queued message if it is for another Stump: the radio
+    broadcast ("lb", text, interface[, packed]) or an LXMF message
+    (router, address, text, ...) to an address that is a Stump's. One
+    to a person's app is counted by _out, not here."""
+    if not _active():
+        return
+    if item[0] == "lb":
+        data = item[1].encode()
+        sent = len(data)
+        if len(item) > 3 and item[3]:
+            from urns import ztext
+            sent = len(ztext.pack(data))
+    else:
+        import rrc, rrc_mesh
+        h = bytes(item[1]).hex()
+        p = rrc_mesh._peers.get(h)
+        if not ((p and p.get("stump")) or rrc.is_stump(h)):
+            return
+        text = item[2]
+        data = text.encode() if isinstance(text, str) else bytes(text or b"")
+        sent = _sent_size(h, data)
+    _n["s_msgs"] += 1
+    _n["s_text"] += len(data)
+    _n["s_sent"] += sent
+    if sent < len(data):
+        _n["s_packed"] += 1
 
 
 def _minute():
@@ -186,10 +254,11 @@ def _stats(ctx):
     else:
         state = ctx.t("state_on", n=p[1])
     out = [
-        ctx.t("head", rel=_release(), state=state),
-        ctx.t("bytes", msgs=_n["msgs"], mins=_n["mins"], text=_n["text"], sent=_n["sent"],
-              pct=_pct(_n["sent"], _n["text"]), packed=_n["packed"]),
-        ctx.t("packets", one=_n["one"], msgs=_n["msgs"], plain=_n["one_plain"]),
+        ctx.t("head", rel=_release(), state=state, mins=_n["mins"]),
+        ctx.t("apps", msgs=_n["msgs"], text=_n["text"], sent=_n["sent"], pct=_pct(_n["sent"], _n["text"]),
+              packed=_n["packed"], one=_n["one"], plain=_n["one_plain"]),
+        ctx.t("stumps", msgs=_n["s_msgs"], text=_n["s_text"], sent=_n["s_sent"],
+              pct=_pct(_n["s_sent"], _n["s_text"]), packed=_n["s_packed"]) if _wrapped else ctx.t("stumps_none"),
     ]
     if not ctx.is_mesh:
         out.append(ctx.t("wifi"))       # (a fourth line: the Wi-Fi page has room for it)
