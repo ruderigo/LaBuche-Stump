@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-beta.77
+- **Choices in the Provisioner's questions are bold**: the key and what it does, "Press **e** to **change a section**", "**s**: **the storage** · **a**: **all the questions again** · **Enter**: **nothing**", **[Y/n]**, a numbered option's number and name. They read as part of the sentence before, easy to miss. Bold only on a terminal that shows it; piped or in a log, plain. An answers file keys each question by its words, as before.
+- Tests: `provisioner` (marked, the same words, the same answers-file key; bold on a terminal, plain elsewhere; no prompt left offering Enter unmarked).
+
 ## 1.0.0-beta.76
 - **A Stump's identity, kept in a file.** A fresh install made a new Stump on the mesh: a new address, a stranger to the Stumps it was chained with. Now its identity (its Reticulum keys, and its propagation mailbox's) can be saved in one file, `<its name>.stump-identity`, and brought back:
   - `--save-identity [PORT|FOLDER] [FILE]` and `--restore-identity PORT|FOLDER FILE`; the restore also takes an old Stump's folder (`~/Stump.old`) in place of the file. The identity it had is saved first.
