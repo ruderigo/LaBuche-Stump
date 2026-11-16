@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-beta.75
+- **Packs, on their own.** Changing a Stump's packs meant going through its whole setup again. Now:
+  - **`python3 provisioner.py --packs`** (or `--packs PORT` / `--packs FOLDER`): one Stump's packs, a board's or a computer Stump's, each pack here and each pack it has, with the version on it and the one here; **install**, **update** or **remove**. Removing asks whether what the pack keeps goes too: its saved data, Tools section, home files and theme. Nothing else is asked or changed. The Provisioner's menu for a CAM opens the same screen.
+  - **The setup asks packs in a step of their own**, **Packs**, with their own settings, before "Everything else" (which no longer has them); the review's `e` asks it again alone. A pack's bot and look are offered there.
+  - **A `--pc` update** brings the packs it has up to date, then offers `p` for its packs screen, instead of a question per missing pack (an answers file still answers those, as the RK3326 Provisioner does).
+  - **Arborist** gets a **Packs** tab: what the Stump has (with *Remove*, asking the same), and *Install or update a pack* (moved from the SD card tab).
+  - Each install records the pack in its plugin folders (`.from_pack`: name, version, Tools section, home files, theme), so it's updated and removed whole later. A pack from before beta.75 shows its version as not recorded until its next update.
+- Tests: `provisioner` (the screen on a computer Stump: install, update, remove with and without its data; a board's packs read; the setup's Packs step from an answers file; the `--pc` update), `arborist` (records, listing and removal on the pretend board; the Packs tab).
+
 ## 1.0.0-beta.74
 - **Updates clean up after themselves.** An update copied the new files and never removed the ones a release had dropped: a computer Stump updated through beta.73 still had `flasher_ui.py`, retired in beta.41. Now every update (`--pc`, `--upload-app` and the wizard's on a board, Arborist's **Update a Stump**) removes the files an earlier release put there and this one no longer has, and names them. Only those: a Stump's settings, identity, data and packs are never touched, nor a file inside a pack's folder.
 - The list is `RETIRED_FILES` in `provisioner.py` (for now `flasher_ui.py` and the native `lib/ed25519_fast_xtensawin.mpy`, 49 KB on a WROVER). `scripts/update_manifest.py` adds a file there when it leaves the firmware, and takes it off if it comes back; Arborist carries the list.

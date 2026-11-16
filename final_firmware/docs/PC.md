@@ -59,7 +59,9 @@ this one no longer has (named as it goes; since 1.0.0-beta.74), keeps
 up to date, and restarts the Stump if
 it starts at login. It shows the Stump's settings and asks whether to
 change them; a Heltec plugged in by USB since is noticed and offered
-(the other settings stay). `--pc --reconfigure` runs the wizard again.
+(the other settings stay). Then `p` opens its packs (install, update,
+remove; since 1.0.0-beta.75), or `python3 provisioner.py --packs` any
+time, without updating. `--pc --reconfigure` runs the wizard again.
 
 **With no one at the keyboard** (since 1.0.0-beta.48; asked by the
 RK3326 Provisioner, which sets a Stump up from a handheld's gamepad):

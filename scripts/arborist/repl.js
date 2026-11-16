@@ -908,9 +908,9 @@
     if (miss.length) return no("Its pack.json has no " + miss.join(", ") + ".");
     if (!/^[a-z][a-z0-9_-]{0,31}$/.test(spec.name)) return no("The pack's name isn't a plain name.");
     known = known || {};
-    var plan = { name: spec.name, version: spec.version, plugins: [], card: [], byReader: [], theme: spec.theme || null,
-                 questions: [], refused: [] };
     var plugins = spec.plugins || [];
+    var plan = { name: spec.name, version: spec.version, plugins: [], card: [], byReader: [], theme: spec.theme || null,
+                 questions: [], refused: [], names: plugins.slice() };
     for (var i = 0; i < plugins.length; i++) {
       var pn = plugins[i];
       if (typeof pn !== "string" || !/^[a-z][a-z0-9_]{1,23}$/.test(pn)) return no("A plugin's name is 2-24 lowercase letters, digits or _.");
@@ -967,9 +967,27 @@
   // A checked pack onto the board: its plugins on the flash (as source;
   // a compiled copy left from before goes), its tools and home files on the
   // card, its theme into themes.json. It starts at the next restart.
+  // What a pack installs is recorded in each of its plugin folders
+  // (.from_pack, as the Provisioner writes it, 1.0.0-beta.75): which pack,
+  // which version, its Tools section, home files and theme, so it can be
+  // updated and removed whole.
+  var PACK_MARK = ".from_pack";
+  function packRecord(plan) {
+    var tools = {}, home = [];
+    plan.card.concat(plan.byReader.map(function (p) { return { path: p }; })).forEach(function (f) {
+      var m = /^tools\/([^/]+)\//.exec(f.path);
+      if (m) tools["tools/" + m[1]] = 1;
+      else if (/^home\//.test(f.path)) home.push(f.path.slice(5));
+    });
+    return { pack: plan.name, version: String(plan.version), plugins: plan.names || [],
+             theme: plan.theme && plan.theme.name || null, tools: Object.keys(tools).sort(), home: home.sort() };
+  }
   async function installPack(repl, plan, progress) {
     if (plan.plugins.length) await upload(repl, plan.plugins, progress);
     if (plan.card.length) await toCard(repl, plan.card, progress);
+    var rec = enc.encode(JSON.stringify(packRecord(plan)));
+    for (var i = 0; i < (plan.names || []).length; i++)
+      await upload(repl, [{ path: plan.names[i] + "/" + PACK_MARK, data: rec, sha256: await shaHex(rec) }]);
     if (plan.theme && plan.theme.name) {
       var out = await repl.run("import json\ntry:\n d=json.load(open('themes.json'))\nexcept Exception:\n d={}\nprint('TH'+json.dumps(d))\n");
       var m = /TH(\{.*\})/.exec(out), cur = m ? JSON.parse(m[1]) : {};
@@ -1035,6 +1053,46 @@
                     .sort(function (a, b) { return b.split("/").length - a.split("/").length; });
     var out = await repl.run("import os\nn=0\nfor m in " + JSON.stringify(names) + ":\n for p in (m+'.py',m+'.mpy'):\n  try:\n   os.remove(p)\n   n+=1\n  except OSError:\n   pass\n" +
                              "for d in " + JSON.stringify(dirs) + ":\n try:\n  if not os.listdir(d):\n   os.rmdir(d)\n except OSError:\n  pass\nprint('GONE%d' % n)\n", 60000);
+    var m = /GONE(\d+)/.exec(out);
+    return m ? +m[1] : 0;
+  }
+
+  // The packs on a board: its plugins that aren't built in, each with its
+  // record (null for one installed before 1.0.0-beta.75, or by hand),
+  // grouped by pack: [{name, plugins, record}].
+  async function listPacks(repl, builtins) {
+    var skip = (builtins || []).concat(["rns", "sd", "__pycache__", "lib", "urns", "web", "peripherals"]);
+    var out = await repl.run(
+      "import os,json\nout={}\nfor n in os.listdir():\n if n in " + JSON.stringify(skip) + ":\n  continue\n ok=False\n" +
+      " for f in ('/install.py','/install.mpy'):\n  try:\n   os.stat(n+f)\n   ok=True\n  except OSError:\n   pass\n" +
+      " if not ok:\n  continue\n r=None\n try:\n  with open(n+'/" + PACK_MARK + "') as f:\n   r=json.loads(f.read())\n" +
+      " except Exception:\n  pass\n out[n]=r\nprint('PACKS'+json.dumps(out))\n", 30000);
+    var m = /PACKS(\{.*\})/.exec(out), found = m ? JSON.parse(m[1]) : {}, groups = [], by = {};
+    Object.keys(found).sort().forEach(function (pn) {
+      var r = found[pn];
+      if (r && r.pack) {
+        if (!by[r.pack]) { by[r.pack] = { name: r.pack, plugins: [], record: r }; groups.push(by[r.pack]); }
+        by[r.pack].plugins.push(pn);
+      } else groups.push({ name: pn, plugins: [pn], record: null });
+    });
+    return groups;
+  }
+  // A pack off the board: its plugin folders; with also, what it keeps too
+  // (its saved data in plugins/ on the card, its Tools sections, its home
+  // files, its theme). Returns how many paths went.
+  async function removePack(repl, pack, also) {
+    var rec = pack.record || {}, card = [];
+    if (also) {
+      card = pack.plugins.map(function (p) { return "plugins/" + p; }).concat(rec.tools || [])
+                         .concat((rec.home || []).map(function (h) { return "home/" + h; }));
+    }
+    var out = await repl.run(
+      "import os\nn=0\ndef rm(p):\n global n\n try:\n  for e in os.listdir(p):\n   rm(p+'/'+e)\n  os.rmdir(p)\n  n+=1\n" +
+      " except OSError:\n  try:\n   os.remove(p)\n   n+=1\n  except OSError:\n   pass\n" +
+      "for p in " + JSON.stringify(pack.plugins) + ":\n rm(p)\n" +
+      (card.length ? "try:\n import fserv\n fserv.mount_sd()\nexcept Exception:\n pass\nfor p in " + JSON.stringify(card) + ":\n rm(" + py(CARD.root) + "+'/'+p)\n" : "") +
+      (also && rec.theme ? "import json\ntry:\n d=json.load(open('themes.json'))\n d.pop(" + py(rec.theme) + ",None)\n f=open('themes.json','w')\n f.write(json.dumps(d))\n f.close()\nexcept Exception:\n pass\n" : "") +
+      "print('GONE%d' % n)\n", 120000);
     var m = /GONE(\d+)/.exec(out);
     return m ? +m[1] : 0;
   }
@@ -1139,7 +1197,7 @@
               clearLeftovers: clearLeftovers, flashUse: flashUse, boardInfo: boardInfo, memory: memory,
               scanWifi: scanWifi, lookAround: lookAround, offers: offers, chainIdOf: chainIdOf, wifiPass: wifiPass,
               IMAGE_FOR: IMAGE_FOR, imageForChip: imageForChip, imageInfo: imageInfo, notFrozen: notFrozen,
-              removeFrozenCopies: removeFrozenCopies, removeRetired: removeRetired, HELTEC_ON_HOTSPOT: HELTEC_ON_HOTSPOT, HELTEC_FIRST: HELTEC_FIRST,
+              removeFrozenCopies: removeFrozenCopies, removeRetired: removeRetired, listPacks: listPacks, removePack: removePack, PACK_MARK: PACK_MARK, HELTEC_ON_HOTSPOT: HELTEC_ON_HOTSPOT, HELTEC_FIRST: HELTEC_FIRST,
               CARD: CARD, USB_MAX: USB_MAX, cardStatus: cardStatus, wipeCard: wipeCard, toCard: toCard,
               readZip: readZip, packFrom: packFrom, installPack: installPack, fillTools: fillTools, shaHex: shaHex,
               readSettings: readSettings, writeSettings: writeSettings,

@@ -31,16 +31,32 @@ Four packs ship in `packs/`:
 Put the pack, as a folder or a `.zip`, in **`packs/` next to
 `provisioner.py`**. Then:
 
-- **The wizard** (`python3 provisioner.py`) asks once which packs to
-  install, then asks each plugin's own questions with the others. A
-  pack's persona is offered as the bot's name and mesh welcome; its
-  theme is added to the theme choices.
+- **`python3 provisioner.py --packs`** (since 1.0.0-beta.75): one Stump's
+  packs, on their own. It asks whose (this computer's Stump, a board on
+  USB, or another folder), or takes `--packs PORT` / `--packs FOLDER`,
+  and lists every pack here and every pack the Stump has, with the
+  version on it and the one here: **install**, **update** or **remove**.
+  Removing asks whether what the pack keeps goes too (its saved data in
+  `sd/plugins/`, its Tools section, home files and theme). Nothing else
+  about the Stump is asked or changed. The same screen is in the
+  Provisioner's menu for a CAM, and in Arborist's **Packs** tab.
+- **The wizard** (`python3 provisioner.py`) asks which packs to install
+  in a step of its own, **Packs**, with their own settings; the review's
+  `e` asks that step again without the others. A pack's bot and look
+  are offered there ("Use its bot (Tavernier) and its look (tavern)?").
 - **`--upload-app PORT`** offers the packs it finds after the upload
   (their settings keep their defaults).
 - **`--install-pack PORT packs/tavern-pack`** adds one to a node that's
   already set up; on a computer Stump, give its folder instead of a port.
-- **On a computer** (`python3 provisioner.py --pc`), an update offers
-  every pack the Stump doesn't have yet.
+- **On a computer** (`python3 provisioner.py --pc`), an update brings
+  the packs it has up to date, then offers `p` for its packs screen.
+  (With an answers file, it asks for each pack it doesn't have, as
+  before.)
+
+Each install records the pack in its plugin folder (`.from_pack`: its
+name, version, Tools section, home files and theme), so it can be
+updated and removed whole later; a pack installed before beta.75 shows
+as "installed", its version not recorded, until its next update.
 
 Then restart the node.
 

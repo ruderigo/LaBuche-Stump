@@ -429,6 +429,30 @@ with zipfile.ZipFile(out / "climb.zip", "w") as zf:
       check("... its tools in their section, its home files, its theme",
             fs.readFileSync(path.join(card, "tools/demo/thing.bin")).length === 5120 && fs.existsSync(path.join(card, "home/banner.txt"))
             && th.demo && th.demo.colors["--bg"] === "#000");
+      // Its pack recorded, listed, removed (1.0.0-beta.75).
+      const rec = JSON.parse(fs.readFileSync(path.join(root, "demo/" + R.PACK_MARK), "utf8"));
+      check("installed: its pack recorded in its folder (version, Tools section, home files, theme)",
+            rec.pack === "demo" && rec.version === "1.0" && rec.plugins.join() === "demo" && rec.tools.join() === "tools/demo"
+            && rec.home.join() === "banner.txt" && rec.theme === "demo", JSON.stringify(rec));
+      let have = await R.listPacks(repl, ["fservbot", "stumpid"]);
+      check("its packs read: the pack, with its record; nothing of the Stump's own", have.length === 1 && have[0].name === "demo"
+            && have[0].record.version === "1.0" && have[0].plugins.join() === "demo", JSON.stringify(have));
+      fs.mkdirSync(path.join(card, "plugins/demo"), { recursive: true });
+      fs.writeFileSync(path.join(card, "plugins/demo/data.json"), "{}");
+      await R.removePack(repl, have[0], false);
+      check("removed, what it keeps kept: the plugin gone; its data, Tools section, home file and theme stay",
+            !fs.existsSync(path.join(root, "demo")) && fs.existsSync(path.join(card, "plugins/demo/data.json"))
+            && fs.existsSync(path.join(card, "tools/demo/thing.bin")) && fs.existsSync(path.join(card, "home/banner.txt"))
+            && JSON.parse(fs.readFileSync(path.join(root, "themes.json"), "utf8")).demo);
+      check("... and not listed any more", (await R.listPacks(repl, ["fservbot", "stumpid"])).length === 0);
+      await R.installPack(repl, demo.plan);
+      have = await R.listPacks(repl, ["fservbot", "stumpid"]);
+      await R.removePack(repl, have[0], true);
+      check("removed with what it keeps: its data, Tools section, home file and theme gone too",
+            !fs.existsSync(path.join(root, "demo")) && !fs.existsSync(path.join(card, "plugins/demo"))
+            && !fs.existsSync(path.join(card, "tools/demo")) && !fs.existsSync(path.join(card, "home/banner.txt"))
+            && !JSON.parse(fs.readFileSync(path.join(root, "themes.json"), "utf8")).demo);
+      await R.installPack(repl, demo.plan);
       // The Tools page.
       const tools = [["tools/provisioner/provisioner.py", "print('p')\n"], ["tools/provisioner/Stump-1.0.0-beta.9.zip", "new zip"],
                      ["tools/firefly/README.md", "# FireFly\n"]].map(([p, d]) => ({ path: p, data: new Uint8Array(Buffer.from(d)), sha256: sha(Buffer.from(d)) }));
