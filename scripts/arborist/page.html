@@ -87,6 +87,7 @@
   <button type="button" role="tab" data-tab="make" aria-selected="true">Make or update</button>
   <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
   <button type="button" role="tab" data-tab="check" aria-selected="false">Check</button>
+  <button type="button" role="tab" data-tab="packs" aria-selected="false">Packs</button>
   <button type="button" role="tab" data-tab="card" aria-selected="false">SD card</button>
 </nav>
 
@@ -158,19 +159,28 @@
   </div>
 </section>
 
+<!-- Packs (1.0.0-beta.75) ------------------------------------------------------------- -->
+<section class="card hidden" id="tab-packs">
+  <p style="margin-top:0">A Stump's packs, through its USB: what it has, a new or a newer one, or one removed. Nothing else about the Stump changes.</p>
+  <h3>What it has</h3>
+  <button type="button" class="plain" id="pk-read">Look at its packs</button>
+  <div id="pk-list" class="hidden"></div>
+
+  <h3>Install or update a pack</h3>
+  <p class="hint">A pack's zip from the release (<code>tavern-pack-….zip</code>, <code>rnfs-pack-….zip</code>). One the Stump already has is updated: its settings stay. Every file is checked against the pack's own hashes before anything is copied; it starts the next time the Stump does.</p>
+  <input type="file" id="card-pack" accept=".zip,application/zip">
+  <p class="hint" id="card-pack-info"></p>
+  <div id="card-pack-qs"></div>
+  <div class="row"><button type="button" class="plain" id="card-pack-go" disabled>Install it</button></div>
+  <p class="err" id="pk-err"></p>
+</section>
+
 <!-- SD card -------------------------------------------------------------------------- -->
 <section class="card hidden" id="tab-card">
   <p style="margin-top:0">The Stump's SD card, through its USB. Copies over USB are slow, about 1 KB a second: each part below says how long. With a card reader, files go faster.</p>
   <h3>What's on it</h3>
   <button type="button" class="plain" id="card-read">Look at the card</button>
   <dl class="sum hidden" id="card-sum"></dl>
-
-  <h3>Install a pack</h3>
-  <p class="hint">A pack's zip from the release (<code>tavern-pack-….zip</code>, <code>rnfs-pack-….zip</code>). Every file is checked against the pack's own hashes before anything is copied; it starts the next time the Stump does.</p>
-  <input type="file" id="card-pack" accept=".zip,application/zip">
-  <p class="hint" id="card-pack-info"></p>
-  <div id="card-pack-qs"></div>
-  <div class="row"><button type="button" class="plain" id="card-pack-go" disabled>Install it</button></div>
 
   <h3>Fill the Tools page</h3>
   <p class="hint">What visitors can download from the Stump with no internet: the Provisioner, the firmware zip and the FireFly app, with each section's description (<span id="card-tools-size">about 1.5 MB</span>: <span id="card-tools-time">25 to 30 minutes</span> over USB). Files already there are replaced.</p>
@@ -354,7 +364,7 @@ function showTab(t) {
   if (BUSY) return;
   TAB = t;
   qa("nav button").forEach(function (b) { b.setAttribute("aria-selected", b.dataset.tab === t ? "true" : "false"); });
-  ["make", "settings", "check", "card"].forEach(function (x) { $("tab-" + x).classList.toggle("hidden", x !== t); });
+  ["make", "settings", "check", "packs", "card"].forEach(function (x) { $("tab-" + x).classList.toggle("hidden", x !== t); });
   placeForm();
 }
 qa("nav button").forEach(function (b) { b.onclick = function () { showTab(b.dataset.tab); }; });
@@ -1540,6 +1550,7 @@ $("card-pack").onchange = async function () {
       (card ? ", " + kb(card) + " for the card" : "") + (PACK.theme ? ", a theme" : "") + " — " + usbTime(flash + card) + " over USB." +
       (PACK.byReader.length ? " Too big for USB, copy by card reader: " + PACK.byReader.join(", ") + "." : "");
     packQuestionsView(PACK);
+    packGoLabel();
     $("card-pack-go").disabled = false;
   } catch (e) { $("card-pack-info").className = "err"; $("card-pack-info").textContent = e.message; }
 };
@@ -1547,13 +1558,14 @@ async function cardPack() {
   if (!PACK) return;
   var answers = packAnswers();
   var pre = R.packValues(PACK.questions, answers, {});        // checked before anything is copied
-  if (pre.error) { $("card-err").textContent = pre.error; return false; }
+  if (pre.error) { $("pk-err").textContent = pre.error; return false; }
   var qs = PACK.questions.length;
   steps("Installing " + PACK.name + " " + PACK.version, ["Choose the board", "Connect", "Copy it"].concat(qs ? ["Its settings"] : []).concat(["Restart"]));
   step(0); await choosePort();
   step(1); var repl = await readyRepl();
   CURRENT = repl;
   step(2); await R.installPack(repl, PACK, progressTo("Copying"));
+  HAVE = await R.listPacks(repl, (await payload()).head.builtins || []);
   var written = [];
   if (qs) {
     step(3);
@@ -1567,9 +1579,59 @@ async function cardPack() {
   step(qs ? 4 : 3); await R.restart(repl); await closePort();
   CURRENT = null;
   done("");
+  packsView();
   $("result").appendChild(para(PACK.name + " is on the Stump; it starts now, with the Stump." +
     (written.length ? " Set in its config.py: " + written.join(", ") + "." : "") +
     (PACK.byReader.length ? " Still to copy by card reader: " + PACK.byReader.join(", ") + "." : "")));
+}
+// -- the Packs tab (1.0.0-beta.75) ------------------------------------------------
+var HAVE = null;      // the packs read from the Stump: [{name, plugins, record}], or null
+function packGoLabel() {
+  var g = PACK && HAVE ? HAVE.filter(function (h) { return h.name === PACK.name; })[0] : null;
+  $("card-pack-go").textContent = g ? "Update it" : "Install it";
+  if (g) $("card-pack-info").textContent += " The Stump has " + (g.record ? g.record.version : "it (version not recorded)") + ": this updates it, its settings kept.";
+}
+function packsView() {
+  var box = $("pk-list"); box.innerHTML = ""; box.classList.remove("hidden");
+  if (!HAVE.length) { box.appendChild(para("No packs on this Stump.", "hint")); return; }
+  HAVE.forEach(function (g) {
+    var row = document.createElement("div"); row.className = "row"; row.style.alignItems = "center";
+    var t = document.createElement("span"); t.style.flex = "1";
+    t.textContent = g.name + " " + (g.record ? g.record.version : "(version not recorded)") +
+                    (g.plugins.length > 1 || g.plugins[0] !== g.name ? " · " + g.plugins.join(", ") : "");
+    var b = document.createElement("button"); b.type = "button"; b.className = "plain small"; b.textContent = "Remove";
+    b.dataset.pack = g.name;
+    b.onclick = function () { act(function () { return packRemove(g); }, "pk-err"); };
+    row.appendChild(t); row.appendChild(b); box.appendChild(row);
+  });
+  if (PACK) { $("card-pack-info").textContent = $("card-pack-info").textContent.replace(/ The Stump has .*$/, ""); packGoLabel(); }
+}
+async function packsRead() {
+  steps("Looking at its packs", ["Choose the board", "Connect", "Read its packs", "Restart"]);
+  step(0); await choosePort();
+  step(1); var repl = await readyRepl();
+  step(2); HAVE = await R.listPacks(repl, (await payload()).head.builtins || []);
+  step(3); await R.restart(repl); await closePort();
+  packsView();
+  done("");
+  $("result").appendChild(para(HAVE.length ? HAVE.length + " pack" + (HAVE.length === 1 ? "" : "s") + " on this Stump." : "No packs on this Stump."));
+}
+async function packRemove(g) {
+  if (!confirm("Remove " + g.name + " from this Stump?")) return false;
+  var keeps = ["its saved data"].concat(g.record && g.record.tools && g.record.tools.length ? ["its Tools page section"] : [])
+                                .concat(g.record && g.record.theme ? ["its theme (" + g.record.theme + ")"] : []);
+  var also = confirm("Delete what " + g.name + " keeps too: " + keeps.join(", ") + "?\n\nOK: delete them too · Cancel: keep them");
+  steps("Removing " + g.name, ["Choose the board", "Connect", "Remove it", "Restart"]);
+  step(0); await choosePort();
+  step(1); var repl = await readyRepl();
+  CURRENT = repl;
+  step(2); await R.removePack(repl, g, also);
+  HAVE = await R.listPacks(repl, (await payload()).head.builtins || []);
+  step(3); await R.restart(repl); await closePort();
+  CURRENT = null;
+  packsView();
+  done("");
+  $("result").appendChild(para(g.name + " is off the Stump" + (also ? ", with what it kept." : "; what it kept (its saved data) stays.") + " The Stump restarts."));
 }
 async function cardTools() {
   var files = await toolsFiles(), n = files.reduce(function (a, f) { return a + f.data.length; }, 0);
@@ -1633,7 +1695,8 @@ $("set-save").onclick = function () { act(saveIt, "set-err"); };
 $("set-put").onclick = function () { act(putIt); };
 $("chk-go").onclick = function () { act(checkIt); };
 $("card-read").onclick = function () { act(cardRead, "card-err"); };
-$("card-pack-go").onclick = function () { act(cardPack, "card-err"); };
+$("card-pack-go").onclick = function () { act(cardPack, "pk-err"); };
+$("pk-read").onclick = function () { act(packsRead, "pk-err"); };
 $("card-tools-go").onclick = function () { act(cardTools, "card-err"); };
 $("card-wipe-go").onclick = function () { act(cardWipe, "card-err"); };
 placeForm();

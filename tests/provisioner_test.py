@@ -585,6 +585,26 @@ check('... an answer is never printed (passwords among them)', SECRET not in tex
 check('... a question left out takes its default, said so', "(the default)" in text)
 check('... keys no question asked are reported', P.answers_unused() == ["nobody asks this"], P.answers_unused())
 P.ANSWERS.update(map=None, file=None, asked={}, used=set())
+# A pack chosen in its own step (1.0.0-beta.75): its settings asked there,
+# its bot and look offered (taken by default), kept by "Everything else".
+(tmp / "c.json").write_text(json.dumps({
+    "Node name": "Packed", "Admin password (/admin)": SECRET + "-admin", "Is this Stump part of a chain?": "no",
+    "The Heltec": 3, "Install tavern?": True, "Keep these defaults? (n: go through them)": True}))
+P.load_answers(tmp / "c.json")
+out = io.StringIO()
+try:
+    with contextlib.redirect_stdout(out):
+        prof, _ = P.config_wizard("pc")
+    ok = True
+except SystemExit as e:
+    prof, ok = {}, ("exit", e.code)
+text = out.getvalue()
+check('setup: a pack in its own step; its settings, bot and look kept with the other defaults',
+      ok is True and any("tavern-pack" in x for x in prof.get("packs", [])) and prof.get("bot_name") == "Tavernier"
+      and prof.get("theme") == "tavern" and 0 <= text.find("TAVERN_NICK") < text.find("Everything else")
+      and "pack_config" not in prof and "builtin_config" not in prof, (ok, {k: prof.get(k) for k in ("packs", "bot_name", "theme")}, text[-400:]))
+check('... the Packs step comes before Everything else', 0 <= text.find("Packs") < text.find("Everything else"), text[:300])
+P.ANSWERS.update(map=None, file=None, asked={}, used=set())
 (tmp / "b.json").write_text(json.dumps({"Node name": "X"}))
 P.load_answers(tmp / "b.json")
 with contextlib.redirect_stdout(io.StringIO()):
@@ -644,31 +664,39 @@ check('computer Stump: Arborist on its Tools page, with its READMEs, the old one
       sorted(x.name for x in arb.iterdir()))
 check('the Tools page READMEs include Arborist\'s (kept up to date on a card)',
       any(sec == "arborist" for _, sec in P._tool_readmes(P.Path(P.__file__).resolve().parent)))
-# Updating a computer Stump offers the packs it doesn't have yet (an
-# update used to keep the installed ones only: a new pack never reached
-# a Stump set up before it existed). And --install-pack takes its folder.
+# Updating a computer Stump: with an answers file (the RK3326 Provisioner)
+# the packs it doesn't have are asked one by one, as before; at the
+# keyboard, "p" opens its packs screen instead (1.0.0-beta.75: changing
+# packs isn't the whole setup again). The installed ones are brought up
+# to date either way, and each now records its pack.
 upd = P.Path(tempfile.mkdtemp(prefix="stump-upd-"))
 with contextlib.redirect_stdout(io.StringIO()):
     P._pc_copy_firmware(P.STUMP_APP_DIR, upd)
 shutil.copy(P.Path(P.__file__).resolve().parent / "tests" / "config.py", upd / "config.py")
-saved = (P._pc_ensure_venv, P._pc_configure_existing, P._pc_install_tools, P.ask_yes_no)
-asked = []
+saved = (P._pc_ensure_venv, P._pc_configure_existing, P._pc_install_tools, P.ask_yes_no, P.ask, P.packs_screen)
+asked, screens = [], []
 P._pc_ensure_venv = lambda f: sys.executable
 P._pc_configure_existing = lambda r, f: False
 P._pc_install_tools = lambda fw, f: None
 P.ask_yes_no = lambda q, d=False: (asked.append(q), "nomadnet" in q)[1]
+P.ANSWERS["map"] = {}
 with contextlib.redirect_stdout(io.StringIO()) as out:
     P.setup_pc(folder=str(upd))
-check('a --pc update offers each pack the Stump lacks; installs the ones said yes to',
+P.ANSWERS["map"] = None
+check('a --pc update with an answers file: each pack it lacks asked; the ones said yes to installed, with their pack recorded',
       any("Install nomadnet?" in q for q in asked) and any("Install simple?" in q for q in asked)
-      and (upd / "nomadnet" / "install.py").is_file() and not (upd / "simple").exists(),
-      asked)
+      and (upd / "nomadnet" / "install.py").is_file() and not (upd / "simple").exists()
+      and json.loads((upd / "nomadnet" / P.PACK_MARK).read_text())["pack"] == "nomadnet", asked)
 asked.clear()
+P.ask = lambda q, d=None: (asked.append(q), "p" if q.startswith("p: its packs") else d)[1]
+P.packs_screen = lambda target, packs=None: screens.append(str(target)) or True
+(upd / "nomadnet" / "install.py").write_text("# an older copy\n")
 with contextlib.redirect_stdout(io.StringIO()):
     P.setup_pc(folder=str(upd))
-check('... and next time, nomadnet is kept up to date, not offered again',
-      not any("Install nomadnet?" in q for q in asked) and any("Install simple?" in q for q in asked), asked)
-P._pc_ensure_venv, P._pc_configure_existing, P._pc_install_tools, P.ask_yes_no = saved
+check('... at the keyboard: no pack asked one by one; p opens its packs screen, for this Stump',
+      not any(q.startswith("Install ") for q in asked) and screens == [str(upd)], (asked, screens))
+check('... and nomadnet, installed, brought up to date', "older copy" not in (upd / "nomadnet" / "install.py").read_text())
+P._pc_ensure_venv, P._pc_configure_existing, P._pc_install_tools, P.ask_yes_no, P.ask, P.packs_screen = saved
 # An update removes the files an earlier release put there and this one
 # no longer has (1.0.0-beta.74): flasher_ui.py, retired in beta.41, was
 # still on a computer Stump updated through beta.73. Never its settings,
@@ -742,6 +770,81 @@ blk = re.search(r"RETIRED_FILES = \((.*?)\n\)", (mt / "provisioner.py").read_tex
 check('... and back in the firmware: not retired any more', '"qr.py"' not in blk and '"flasher_ui.py"' in blk, r.stdout + r.stderr)
 shutil.rmtree(mt, ignore_errors=True)
 shutil.rmtree(upd, ignore_errors=True)
+# Packs, on their own (1.0.0-beta.75): --packs lists a Stump's packs and
+# installs, updates or removes one; removing asks whether what it keeps
+# goes too. Nothing else about the Stump is asked.
+ps = P.Path(tempfile.mkdtemp(prefix="stump-packs-"))
+with contextlib.redirect_stdout(io.StringIO()):
+    P._pc_copy_firmware(P.STUMP_APP_DIR, ps)
+shutil.copy(P.Path(P.__file__).resolve().parent / "tests" / "config.py", ps / "config.py")
+(ps / "meter").mkdir(); (ps / "meter" / "install.py").write_text("def setup(s):\n    pass\n")   # copied in by hand
+here = [P.load_pack(W / "packs" / n) for n in ("tavern-pack", "simple-pack")]
+said = []
+real_ask, real_yn = P.ask, P.ask_yes_no
+def script(*a):
+    it = iter(a)
+    P.ask = lambda q, d=None: (said.append(q), next(it))[1]
+    P.ask_yes_no = lambda q, d=True: (said.append(q), next(it) == "y")[1]
+script("2", "i", "1", "i", "")
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    P.packs_screen(str(ps), packs=here)
+rec = json.loads((ps / "tavern" / P.PACK_MARK).read_text())
+check('--packs on a computer Stump: each pack listed, the one copied in by hand too',
+      all(n in out.getvalue() for n in ("simple", "tavern", "meter")) and "not among the packs here" in out.getvalue(), out.getvalue()[-600:])
+check('... install: its plugin there, its pack recorded (version, theme), its theme added',
+      (ps / "tavern" / "install.py").is_file() and rec["pack"] == "tavern" and rec["version"] == here[0]["spec"]["version"]
+      and rec["theme"] == "tavern" and "tavern" in json.loads((ps / "themes.json").read_text())
+      and (ps / "simple" / P.PACK_MARK).is_file(), rec)
+check('... nothing else asked (no setup question)', all(q.startswith(("A pack's number", "tavern:", "simple:")) for q in said), said)
+rows = P.pack_rows(here, P.pc_installed_packs(ps))
+check('... then: up to date, and the hand-copied one as not among the packs here',
+      [(r["name"], r["state"]) for r in rows] == [("simple", "same"), ("tavern", "same"), ("meter", "yours")], rows)
+r0 = json.loads((ps / "simple" / P.PACK_MARK).read_text()); r0["version"] = "0.9"
+(ps / "simple" / P.PACK_MARK).write_text(json.dumps(r0))
+check('... an older version installed: offered as an update', P.pack_rows(here, P.pc_installed_packs(ps))[0]["state"] == "update")
+for d in ("tavern", "meter"):
+    (ps / "sd" / "plugins" / d).mkdir(parents=True, exist_ok=True); (ps / "sd" / "plugins" / d / "data.json").write_text("{}")
+said.clear()
+script("1", "u", "2", "r", "y", "y", "3", "r", "y", "n", "")
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    P.packs_screen(str(ps), packs=here)
+check('... update: the newer one, recorded', json.loads((ps / "simple" / P.PACK_MARK).read_text())["version"] == here[1]["spec"]["version"])
+check('... remove, its data too (said yes): plugin, saved data and theme gone',
+      not (ps / "tavern").exists() and not (ps / "sd" / "plugins" / "tavern").exists()
+      and "tavern" not in json.loads((ps / "themes.json").read_text()), out.getvalue()[-500:])
+check('... the question names what it keeps', any(q.startswith("Delete what it keeps too: its saved data (sd/plugins/tavern)")
+      and "its theme (tavern)" in q for q in said), said)
+check('... remove, its data kept (said no): the plugin gone, its data stays',
+      not (ps / "meter").exists() and (ps / "sd" / "plugins" / "meter" / "data.json").is_file())
+check('... a running Stump restarts on the change', (ps / ".updated").is_file())
+P.ask, P.ask_yes_no = real_ask, real_yn
+shutil.rmtree(ps, ignore_errors=True)
+# On a board: what it has, read in one call (run here as the board would).
+brd = Path(tempfile.mkdtemp(prefix="board-"))
+for rel, data in (("tavern/install.mpy", "x"), ("tavern/" + P.PACK_MARK, json.dumps({"pack": "tavern", "version": "1.2"})),
+                  ("simple/install.py", "x"), ("stumpid/install.mpy", "x"), ("urns/__init__.mpy", "x"), ("config.py", "x")):
+    (brd / rel).parent.mkdir(parents=True, exist_ok=True); (brd / rel).write_text(data)
+real_run = P.run
+def _brd(cmd, timeout=None):
+    here_ = os.getcwd(); os.chdir(brd)
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            exec(cmd[-1], {})
+    finally:
+        os.chdir(here_)
+    return True, buf.getvalue()
+P.run = _brd
+got = P.board_installed_packs("/dev/ttyUSB0")
+P.run = real_run
+check('a board\'s packs: its plugins that aren\'t built in, with their record (none before beta.75)',
+      got == {"tavern": {"pack": "tavern", "version": "1.2"}, "simple": None}, got)
+shutil.rmtree(brd, ignore_errors=True)
+# The setup: packs are a step of their own, before "Everything else"
+# (which no longer has them); a pack's bot and look are offered there.
+src = P.Path(P.__file__).read_text()
+check('setup: Packs is its own step, before Everything else',
+      '("Packs", sec_packs), ("Everything else"' in src and "Answer n to go through them now: the bot" in src)
 shutil.rmtree(tmp, ignore_errors=True)
 # The board step, a Stump board on a USB bridge (the WROVER: one USB port,
 # a CH340): the chip is asked, not the USB ids, and a WROVER goes through

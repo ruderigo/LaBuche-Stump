@@ -341,7 +341,10 @@ async function run(name, root, simArgs, fill, keep, pageFile, chip) {
   // -- the SD card tab (the board side: repl_test.js) ---------------------------------
   {
     const root = path.join(SCRATCH, "page_card");
-    const t = await run("card", root, []);
+    const t = await run("card", root, [], (r) => {
+      fs.mkdirSync(path.join(r, "meter"), { recursive: true });                     // a plugin copied in by hand
+      fs.writeFileSync(path.join(r, "meter/install.py"), "def setup(s):\n    pass\n");
+    });
     const page = t.page;
     await page.click("nav button[data-tab=card]");
     check("SD card tab: shown, the form hidden", await page.isVisible("#tab-card") && !(await page.isVisible("#form")));
@@ -363,6 +366,19 @@ for name, swap in (("good.zip", False), ("bad.zip", True)):
                     data += b"\\n# changed\\n"
                 zf.writestr(pack.name + "/" + f.relative_to(pack).as_posix(), data)
 `, path.join(__dirname, "../../packs/tavern-pack"), zips]);
+    // The Packs tab (1.0.0-beta.75): what it has, removed (both questions answered yes here).
+    await page.click("nav button[data-tab=packs]");
+    check("Packs tab: shown, with the pack install", await page.isVisible("#tab-packs") && await page.isVisible("#card-pack")
+          && !(await page.isVisible("#tab-card")));
+    await page.click("#pk-read");
+    try { await page.waitForSelector("#worktitle .ok, #worktitle .err", { timeout: 60000 }); } catch (e) {}
+    check("... its packs read: the one copied in by hand, version not recorded", /meter \(version not recorded\)/.test(await page.textContent("#pk-list")),
+          (await page.textContent("#pk-list")) + " | " + (await page.textContent("#worktitle")) + " | " + (await page.textContent("#result")) + " | " + (await page.textContent("#log")).slice(-1500));
+    await page.click("#pk-list button[data-pack=meter]");
+    try { await page.waitForFunction(() => /off the Stump/.test(document.getElementById("result").textContent), null, { timeout: 60000 }); } catch (e) {}
+    check("... removed (its data on the card: repl_test.js): its folder gone, the list says so", !fs.existsSync(path.join(root, "meter"))
+          && /No packs on this Stump/.test(await page.textContent("#pk-list")) && /with what it kept/.test(await page.textContent("#result")),
+          (await page.textContent("#result")) + " | " + (await page.textContent("#log")).slice(-400));
     await page.setInputFiles("#card-pack", path.join(zips, "good.zip"));
     await page.waitForFunction(() => document.getElementById("card-pack-info").textContent.length > 0, null, { timeout: 15000 });
     const info = await page.textContent("#card-pack-info");
@@ -389,10 +405,12 @@ with zipfile.ZipFile(out / "bavard.zip", "w", zipfile.ZIP_DEFLATED) as zf:
     await page.waitForFunction(() => document.getElementById("card-pack-info").className === "err", null, { timeout: 15000 });
     const bad = await page.textContent("#card-pack-info");
     check("a pack with a file changed: refused before anything is copied", /changed since/.test(bad) && await page.isDisabled("#card-pack-go"), bad);
+    await page.click("nav button[data-tab=card]");
     await page.check("input[name=wipe][value=all]");
+    const before = await page.textContent("#worktitle");
     await page.click("#card-wipe-go");
     check("wipe without typing WIPE: asks for it, nothing done", /Type WIPE/.test(await page.textContent("#card-err"))
-          && !(await page.isVisible("#work")));
+          && (await page.textContent("#worktitle")) === before);
     await t.browser.close(); t.sim.kill();
   }
 

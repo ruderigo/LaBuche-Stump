@@ -102,6 +102,7 @@ python3 provisioner.py --diag PORT        # serial, SD and radio checks
 python3 provisioner.py --wipe-sd PORT     # reformat a problem SD card
 python3 provisioner.py --erase-flash PORT # erase a CAM's or a Heltec's whole flash, to start it over
 python3 provisioner.py --list-packs       # the packs in packs/, with their hashes
+python3 provisioner.py --packs [PORT|FOLDER]                   # a Stump's packs: install, update, remove
 python3 provisioner.py --install-pack PORT packs/tavern-pack   # add a pack to a node
 python3 provisioner.py --remove-plugin PORT tavern             # take a plugin off a node
 ```

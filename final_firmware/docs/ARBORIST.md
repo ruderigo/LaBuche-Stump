@@ -142,14 +142,16 @@ release it runs, whether its pages came up, what went wrong (a
 traceback, the Wi-Fi it couldn't join). *Save what it said* keeps the
 whole of it as a file, to send to whoever helps.
 
-**SD card** (since 1.0.0-beta.49) works on the Stump's card through its
-USB. Copies over USB run at about 1 KB a second, so each part says how
-long it takes:
+**Packs** (since 1.0.0-beta.75) works on the Stump's packs alone;
+nothing else about the Stump changes:
 
-- *What's on it*: the card's size and free space, and each folder's
-  (the shared files, the Tools page, the home page, the messages kept
-  for others, the plugins' data). Seconds.
-- *Install a pack*: choose a pack's zip from a release
+- *What it has*: the packs on the board, each with its version (a pack
+  installed before beta.75, or copied in by hand, says "version not
+  recorded"), and a *Remove* button. Removing asks first, then asks
+  whether what the pack keeps goes too: its saved data
+  (`/sd/plugins/<plugin>/`), its Tools page section, its home files and
+  its theme. Say no and they stay, for a reinstall later.
+- *Install or update a pack*: choose a pack's zip from a release
   (`tavern-pack-<v>.zip`, `rnfs-pack-<v>.zip`). Before anything is
   copied, every file is checked against the pack's own hashes, as the
   Provisioner checks them; a pack that would replace the Stump's own
@@ -170,6 +172,17 @@ long it takes:
   A pack only sets settings of its own (its name in capitals first,
   `BAVARD_...`): anything else it asks for (`CHAIN_SECRET`, `WIFI_PASS`,
   another pack's) is refused and said, not asked.
+  Each install records the pack in its plugin folder (`.from_pack`:
+  its name, version, Tools section, home files and theme), as the
+  Provisioner does, so either can update or remove it later.
+
+**SD card** (since 1.0.0-beta.49) works on the Stump's card through its
+USB. Copies over USB run at about 1 KB a second, so each part says how
+long it takes:
+
+- *What's on it*: the card's size and free space, and each folder's
+  (the shared files, the Tools page, the home page, the messages kept
+  for others, the plugins' data). Seconds.
 - *Fill the Tools page*: what visitors download with no internet: the
   Provisioner, its README and licence, the firmware zip, the FireFly
   handheld app, and each section's description, as the Provisioner puts
@@ -225,8 +238,7 @@ which the Stump applies to the bridge at boot and sends to the Heltec on
 connect -- the same shape as how Settings writes `config.py`. They default
 to the deployed mesh's values and must match every Stump on the mesh.
 
-Not done here (the Provisioner does them): the SD card's Tools and packs,
-the **Heltec's own provisioning** (EEPROM signing, `-w STATION` Wi-Fi,
+Not done here (the Provisioner does them): the **Heltec's own provisioning** (EEPROM signing, `-w STATION` Wi-Fi,
 Bluetooth -- `rnodeconf`, GPL-3), a Stump on a computer, checking a chain
 over the network.
 
