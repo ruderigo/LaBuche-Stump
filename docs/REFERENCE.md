@@ -82,6 +82,9 @@ Each section then opens with a header and where you are on the route,
 asks before touching the board, and ends with done, skipped or what
 went wrong. The run ends on a summary: each section's result, and what
 to keep (addresses, the chain secret, the next command).
+A choice in a question shows its key and what it does in bold (Press
+**e** to **change a section**; since 1.0.0-beta.77), on a terminal that
+shows bold; piped or logged, it's plain text.
 
 **Optional, recommended:** `pip3 install mpy-cross==1.28.0.post2`. With it,
 the Provisioner sends the CAM its modules compiled (`.mpy`): less than

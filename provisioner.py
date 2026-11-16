@@ -379,7 +379,7 @@ EXPECTED_FILE_HASHES = {
     "docs/PACKS.md": "2311036e4785b113",
     "docs/PC.md": "0f9263279ac36d79",
     "docs/PLUGINS.md": "8085ca56b773b64a",
-    "example_node.py": "f48881ce52dfb11a",
+    "example_node.py": "6de812487ba29d89",
     "features.py": "81e8af361c64a911",
     "fserv.py": "06b87b1d6fb95eb4",
     "fservbot/plugin.json": "12b3c544160411e3",
@@ -1366,16 +1366,16 @@ def _pick_packs(packs, fw_api):
     HELP[0] = "Packs add plugins (chat commands, pages), and sometimes a theme or a bot persona. A " \
               "pack is code with full access to the node: install only packs from people you trust.\n" + \
               "\n".join(u[3].rstrip() for u in usable)
-    print("\n  Packs (? for what each one does):")
+    print("\n  Packs (%s for %s):" % (bold("?"), bold("what each one does")))
     pad = max(len(u[0]["spec"]["name"]) for u in usable)
     room = max(30, _width() - pad - 10)
     for i, (pack, refusal, warnings, _) in enumerate(usable, 1):
         spec = pack["spec"]
-        about = "can't install here (? for why)" if refusal else _clip(_first_sentence(spec.get("description", "")), room)
+        about = "can't install here (%s for %s)" % (bold("?"), bold("why")) if refusal else _clip(_first_sentence(spec.get("description", "")), room)
         line = "%d  %-*s  %s" % (i, pad, spec["name"], about)
         print("    " + (dim(line) if refusal else line))
     while True:
-        raw = ask("  Packs to install (numbers, e.g. 1 3; Enter for none)", "")
+        raw = ask("  Packs to install (%s, e.g. 1 3; %s for %s)" % (_k("numbers"), _k("Enter"), _k("none")), "")
         nums = (raw or "").replace(",", " ").split()
         try:
             picked = sorted(set(int(n) for n in nums))
@@ -1387,7 +1387,7 @@ def _pick_packs(packs, fw_api):
             continue
         chosen = [usable[n - 1][0] for n in picked]
         notes = [usable[n - 1][0]["spec"]["name"] for n in picked if usable[n - 1][2]]
-        if notes and not ask_yes_no("  %s %s notes (? to read them). Install anyway?"
+        if notes and not ask_yes_no("  %s %s notes (" + _k("?") + " to " + _k("read them") + "). Install anyway?"
                                     % (", ".join(notes), "has" if len(notes) == 1 else "have"), False):
             continue
         return chosen
@@ -1827,7 +1827,7 @@ def packs_screen(target, packs=None):
         for i, r in enumerate(rows, 1):
             print("  %2d %s" % (i, _row_text(r)))
         print()
-        a = (ask("A pack's number · Enter: done") or "").strip()
+        a = (ask("%s · %s: %s" % (_k("A pack's number"), _k("Enter"), _k("done"))) or "").strip()
         if not a:
             break
         if not a.isdigit() or not 1 <= int(a) <= len(rows):
@@ -1842,7 +1842,8 @@ def packs_screen(target, packs=None):
             refusal, warnings = describe_pack(r["pack"], fw_api, files_listed=False)
             if refusal and r["state"] != "yours":
                 acts = [x for x in acts if x[0] == "r"]
-        what = (ask("%s: %s · Enter: back" % (r["name"], " · ".join("%s: %s" % x for x in acts))) or "").strip().lower()
+        what = (ask("%s: %s · %s: %s" % (r["name"], " · ".join("%s: %s" % (_k(a), _k(m)) for a, m in acts), _k("Enter"), _k("back")))
+                or "").strip().lower()
         if what == "i" and r["state"] == "new" or what == "u" and r["state"] in ("same", "update") and any(x[0] == "u" for x in acts):
             print()
             ok = pc_install_pack(where, r["pack"]) if is_pc else board_install_pack(where, r["pack"])
@@ -2059,7 +2060,8 @@ def ask_restore_identity():
     hint("Bringing back a Stump? Its saved identity (a %s file) or its old folder makes this one that "
          "same Stump. The old one must not run any more: two Stumps with one identity confuse the mesh." % KEEPSAKE_EXT)
     while True:
-        a = (ask("A saved identity to bring back: its file or old folder (Enter: none, a new Stump)", "") or "").strip()
+        a = (ask("A saved identity to bring back: its file or old folder (%s: %s)" % (_k("Enter"), _k("none, a new Stump")), "")
+             or "").strip()
         if not a:
             return None
         try:
@@ -2262,7 +2264,7 @@ def _in(prompt):
             direct = False
         if direct:
             prompt = "  " + prompt
-    return input(prompt)
+    return input(_shown(prompt))
 
 
 TIMINGS_FILE = Path.home() / ".provisioner" / "timings.json"
@@ -2564,6 +2566,29 @@ def _tty():
     return sys.stdout.isatty()
 
 
+# A choice in a prompt is shown bold, its key and what it does: "Press
+# **e** to **change** a section" (1.0.0-beta.77: they read as part of the
+# sentence before). Marked in the text, so an answers file still keys a
+# question by its words; drawn bold only on a terminal that shows it.
+_B0, _B1 = "\x01", "\x02"
+
+
+def _k(text):
+    """A key, or what it does, in a prompt: bold where it's shown."""
+    return _B0 + str(text) + _B1
+
+
+def _plain(text):
+    return str(text).replace(_B0, "").replace(_B1, "")
+
+
+def _shown(text):
+    t = str(text)
+    if _B0 not in t:
+        return t
+    return t.replace(_B0, "\033[1m").replace(_B1, "\033[0m") if _tty() else _plain(t)
+
+
 def _ansi(text, code):
     return f"\033[{code}m{text}\033[0m" if _tty() else text
 
@@ -2605,7 +2630,7 @@ ASK_LIMIT = 5             # the same question this often: the answers can't sett
 
 
 def _qkey(text):
-    t = str(text)
+    t = _plain(text)
     if "?" in t:
         t = t.split("?", 1)[0]
     out, depth = [], 0
@@ -2652,7 +2677,7 @@ def _from_answers(prompt):
         sys.exit(3)
     if k in ANSWERS["map"]:
         ANSWERS["used"].add(k)
-        print("%s: (answered from %s)" % (prompt, Path(ANSWERS["file"]).name))
+        print("%s: (answered from %s)" % (_plain(prompt), Path(ANSWERS["file"]).name))
         return ANSWERS["map"][k]
     return _NOT_GIVEN
 
@@ -2683,7 +2708,7 @@ def ask(prompt, default=None):
             return default if default is not None else ""
         if default is None:
             _no_answer(prompt)
-        print("%s: %s (the default)" % (prompt, default))
+        print("%s: %s (the default)" % (_plain(prompt), default))
         return default
     if a is not _NO_FILE:
         return "" if a is None else str(a)
@@ -2715,7 +2740,7 @@ def ask_yes_no(prompt, default=True):
         if ANSWERS["record"] is not None:
             _record(prompt, bool(default))
         else:
-            print("%s: %s (the default)" % (prompt, "yes" if default else "no"))
+            print("%s: %s (the default)" % (_plain(prompt), "yes" if default else "no"))
         return default
     if a is not _NO_FILE:
         if isinstance(a, bool):
@@ -2726,7 +2751,7 @@ def ask_yes_no(prompt, default=True):
             return False
         print(red("\"%s\": %r isn't a yes or a no in the answers file." % (_qkey(prompt), a)))
         sys.exit(3)
-    yn = "Y/n" if default else "y/N"
+    yn = _k("Y/n" if default else "y/N")
     while True:
         raw = _in(f"{prompt} [{yn}]: ").strip().lower()
         if raw == "?" and _show_help():
@@ -2738,6 +2763,17 @@ def ask_yes_no(prompt, default=True):
         if raw in _NO:
             return False
         print(f"  '{raw}' isn't a yes or a no -- please answer y or n.")
+
+
+def _option(i, opt):
+    """A numbered option, its number and its name bold (the name: what's
+    before " -- " or " — ", or all of it)."""
+    t = str(opt)
+    for sep in (" -- ", " — ", " - "):
+        if sep in t:
+            name, rest = t.split(sep, 1)
+            return "%s %s%s%s" % (_k("%d)" % i), _k(name), sep, rest)
+    return "%s %s" % (_k("%d)" % i), _k(t))
 
 
 def ask_choice(prompt, options):
@@ -2761,12 +2797,12 @@ def ask_choice(prompt, options):
         for i, o in enumerate(options, 1):
             print("  %d) %s" % (i, o))
         sys.exit(3)
-    print(prompt)
+    print(_shown(prompt))
     for i, opt in enumerate(options, 1):
-        print(f"  {i}) {opt}")
+        print("  " + _shown(_option(i, opt)))
     while True:
         # Enter takes the first option: the recommended one comes first.
-        raw = _in(f"Choose 1-{len(options)} [1]: ").strip() or "1"
+        raw = _in("Choose %s [%s]: " % (_k("1-%d" % len(options)), _k("1"))).strip() or "1"
         if raw == "?" and _show_help():
             continue
         if raw.isdigit() and 1 <= int(raw) <= len(options):
@@ -2965,8 +3001,8 @@ def ask_wifi(prompt, default="", scan=None):
                 print("  %2d) %s" % (i, n["ssid"]))
                 continue
             print("  %2d) %s %s%s" % (i, _bars(n["signal"]), n["ssid"], "" if n["open"] else ("  🔒" if _fancy() else "  (password)")))
-        print("   r) look again     or type a name that isn't listed")
-        raw = _in("Choose 1-%d%s: " % (len(nets), " [%s]" % default if default else "")).strip()
+        print("   " + bold("r)") + " " + bold("look again") + "     or type a name that isn't listed")
+        raw = _in("Choose %s%s: " % (_k("1-%d" % len(nets)), " [%s]" % default if default else "")).strip()
         if raw.lower() == "r":
             continue
         if not raw:
@@ -3441,8 +3477,8 @@ def resolve_path(default_path, description, remember_key=None, is_dir=True,
         if len(hints) == 1:
             # One match: Enter takes it ("blank to skip" here was a trap:
             # the file was right there and Enter skipped it).
-            more = ", or 'd' to download automatically" if download_fn else ""
-            raw = ask(f"  Enter to use 1, or type another path{more}, or 's' to skip")
+            more = ", or %s to %s" % (_k("d"), _k("download automatically")) if download_fn else ""
+            raw = ask("  %s to %s, or type another path%s, or %s to %s" % (_k("Enter"), _k("use 1"), more, _k("s"), _k("skip")))
             if not raw:
                 raw = "1"
             elif raw.strip().lower() in ("s", "skip"):
@@ -3995,7 +4031,7 @@ def _free_the_port(port):
         if not who:
             return True
         explain_port_busy(port)
-        ask("  Press Enter once it's closed")
+        ask("  Press %s once it's closed" % _k("Enter"))
     return not port_holder(port)
 
 
@@ -5513,7 +5549,7 @@ def config_wizard(board_type):
         for line in rest_defaults_text(profile):
             print("  " + dim(line))
         # With an answers file every old question is consulted, as before.
-        if ask_yes_no("Keep these defaults? (n: go through them)", ANSWERS["map"] is None):
+        if ask_yes_no("Keep these defaults? (%s: %s)" % (_k("n"), _k("go through them")), ANSWERS["map"] is None):
             apply_rest_defaults(profile)
         else:
             custom()
@@ -5635,7 +5671,7 @@ def ask_features():
         return [k for k, label in FEATURES if ask_yes_no("  Offer " + label + "?", True)]
     print("  Features: " + "  ".join("%d %s" % (i, label) for i, (k, label) in enumerate(FEATURES, 1)))
     while True:
-        raw = ask("  Features to offer (Enter: all four, or the numbers to keep)", "")
+        raw = ask("  Features to offer (%s: %s, or %s)" % (_k("Enter"), _k("all four"), _k("the numbers to keep")), "")
         if not raw:
             return [k for k, _ in FEATURES]
         try:
@@ -5732,7 +5768,8 @@ def review_answers(profile, sections):
         return
     while True:
         box("Your answers", review_lines(profile))
-        raw = _in("Enter to go on %s e to change a section: " % ("·" if _fancy() else "-")).strip().lower()
+        raw = _in("%s to %s %s %s to %s: " % (_k("Enter"), _k("go on"), "·" if _fancy() else "-",
+                                              _k("e"), _k("change a section"))).strip().lower()
         if raw != "e":
             return
         title = ask_choice("Which section?", [t for t, _ in sections])
@@ -6769,10 +6806,10 @@ def start_menu(version=None):
              "before anything touches a board.", "", "What are you setting up?", ""]
     width = max(len(t) for _, t, _ in ROLES)
     for i, (_, title, what) in enumerate(ROLES, 1):
-        lines.append("%d) %s  %s" % (i, bold(title.ljust(width)), what))
+        lines.append("%s %s  %s" % (bold("%d)" % i), bold(title.ljust(width)), what))
     box("The Provisioner", lines)
     while True:
-        raw = input("Choose 1-%d (blank to quit): " % len(ROLES)).strip()
+        raw = input(_shown("Choose %s (%s to %s): " % (_k("1-%d" % len(ROLES)), _k("blank"), _k("quit")))).strip()
         if not raw:
             return None
         if raw.isdigit() and 1 <= int(raw) <= len(ROLES):
@@ -6794,8 +6831,8 @@ def fix_menu():
         ("Erase a board's flash (a CAM or a Heltec): start it over", "erase"),
         ("Check the tools on this computer", "toolcheck"),
     ]
-    box("Check or fix something", ["%d) %s" % (i, a) for i, (a, _) in enumerate(actions, 1)])
-    raw = input("Choose 1-%d (blank to go back): " % len(actions)).strip()
+    box("Check or fix something", ["%s %s" % (bold("%d)" % i), a) for i, (a, _) in enumerate(actions, 1)])
+    raw = input(_shown("Choose %s (%s to %s): " % (_k("1-%d" % len(actions)), _k("blank"), _k("go back")))).strip()
     if not raw.isdigit() or not 1 <= int(raw) <= len(actions):
         return
     what = actions[int(raw) - 1][1]
@@ -7508,8 +7545,9 @@ def _pc_change_settings(r, folder, cfg):
     """An update keeps every setting. What to change, if anything: just
     the storage, or all the questions again. True for all the questions."""
     while True:
-        a = (ask("Change something? s: the storage (now %d MB) · a: all the questions again · Enter: nothing"
-                 % int(cfg.get("PC_STORAGE_MB") or PC_STORAGE_DEFAULT_MB)) or "").strip().lower()
+        a = (ask("Change something? %s: %s (now %d MB) · %s: %s · %s: %s"
+                 % (_k("s"), _k("the storage"), int(cfg.get("PC_STORAGE_MB") or PC_STORAGE_DEFAULT_MB),
+                    _k("a"), _k("all the questions again"), _k("Enter"), _k("nothing"))) or "").strip().lower()
         if a in ("", "n", "no", "nothing"):
             return False
         if a in ("a", "all", "y", "yes"):
@@ -8319,7 +8357,8 @@ def setup_pc(folder=None, reconfigure=False):
         manage = ANSWERS["map"] is None and ANSWERS["record"] is None
     for p in packs:
         pc_install_pack(folder, p)
-    if manage and (ask("p: its packs (install, update, remove) · Enter: go on") or "").strip().lower() == "p":
+    if manage and (ask("%s: %s (install, update, remove) · %s: %s" % (_k("p"), _k("its packs"), _k("Enter"), _k("go on")))
+                   or "").strip().lower() == "p":
         packs_screen(folder)
     _pc_install_tools(fw, folder)
     print("Tools page: ready")

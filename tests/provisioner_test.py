@@ -688,7 +688,7 @@ check('a --pc update with an answers file: each pack it lacks asked; the ones sa
       and (upd / "nomadnet" / "install.py").is_file() and not (upd / "simple").exists()
       and json.loads((upd / "nomadnet" / P.PACK_MARK).read_text())["pack"] == "nomadnet", asked)
 asked.clear()
-P.ask = lambda q, d=None: (asked.append(q), "p" if q.startswith("p: its packs") else d)[1]
+P.ask = lambda q, d=None: (asked.append(P._plain(q)), "p" if P._plain(q).startswith("p: its packs") else d)[1]
 P.packs_screen = lambda target, packs=None: screens.append(str(target)) or True
 (upd / "nomadnet" / "install.py").write_text("# an older copy\n")
 with contextlib.redirect_stdout(io.StringIO()):
@@ -783,8 +783,8 @@ said = []
 real_ask, real_yn = P.ask, P.ask_yes_no
 def script(*a):
     it = iter(a)
-    P.ask = lambda q, d=None: (said.append(q), next(it))[1]
-    P.ask_yes_no = lambda q, d=True: (said.append(q), next(it) == "y")[1]
+    P.ask = lambda q, d=None: (said.append(P._plain(q)), next(it))[1]
+    P.ask_yes_no = lambda q, d=True: (said.append(P._plain(q)), next(it) == "y")[1]
 script("2", "i", "1", "i", "")
 with contextlib.redirect_stdout(io.StringIO()) as out:
     P.packs_screen(str(ps), packs=here)
@@ -960,6 +960,29 @@ else:
     os.environ["HOME"] = old_home
 for d_ in (home, kf, fresh, bd):
     shutil.rmtree(d_, ignore_errors=True)
+# Choices in prompts, bold (1.0.0-beta.77): the key and what it does, on a
+# terminal; plain text elsewhere; an answers file keys a question by its
+# words, marks or not.
+q = "Change something? %s: %s · %s: %s" % (P._k("s"), P._k("the storage"), P._k("Enter"), P._k("nothing"))
+check('a choice in a prompt: marked, the words the same', P._plain(q) == "Change something? s: the storage · Enter: nothing")
+check('... an answers file keys it as before', P._qkey(q) == "change something" and P._qkey(P._k("Keep these defaults") + "?") == "keep these defaults")
+real_tty = P._tty
+P._tty = lambda: True
+check('... on a terminal: the key and its meaning bold', P._shown(q) == "Change something? \033[1ms\033[0m: \033[1mthe storage\033[0m · \033[1mEnter\033[0m: \033[1mnothing\033[0m")
+P._tty = lambda: False
+check('... piped or in a log: plain', P._shown(q) == P._plain(q))
+P._tty = real_tty
+check('... a numbered option: its number and its name', P._plain(P._option(2, "Amber -- warm dark")) == "2) Amber -- warm dark"
+      and P._option(2, "Amber -- warm dark").startswith(P._k("2)") + " " + P._k("Amber")))
+typed = []
+builtins.input = lambda pr="": (typed.append(pr), "")[1]
+with contextlib.redirect_stdout(io.StringIO()):
+    P.ask_yes_no("Go on?", True)
+check('... yes or no: [Y/n] bold, and no mark left in what the terminal gets', typed and P._B0 not in typed[0] and "Y/n" in typed[0], typed)
+builtins.input = lambda *a: (_ for _ in ()).throw(AssertionError("asked the keyboard"))
+src_ = P.Path(P.__file__).read_text()
+check('... every "Enter to/Enter:" a prompt offers is marked', not re.search(r'(ask|_in|input)\((f?)"[^"\n]*\bEnter( to|:) ', src_),
+      re.findall(r'(?:ask|_in|input)\(f?"[^"\n]*\bEnter(?: to|:) [^"\n]*"', src_)[:5])
 # The setup: packs are a step of their own, before "Everything else"
 # (which no longer has them); a pack's bot and look are offered there.
 src = P.Path(P.__file__).read_text()
