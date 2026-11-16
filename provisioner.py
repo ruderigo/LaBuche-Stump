@@ -28,6 +28,8 @@ Usage:
     python3 provisioner.py --version [PORT] # this folder's release, GitHub's, a CAM's
     python3 provisioner.py --list-packs    # show the packs in packs/ (and their hashes)
     python3 provisioner.py --packs [PORT|FOLDER]      # a Stump's packs: install, update, remove
+    python3 provisioner.py --save-identity [PORT|FOLDER] [FILE]   # a Stump's identity in a file to keep
+    python3 provisioner.py --restore-identity PORT|FOLDER FILE|OLD_FOLDER   # bring that Stump back
     python3 provisioner.py --install-pack PORT PACK   # add a pack (folder or .zip) to a node
     python3 provisioner.py --remove-plugin PORT NAME  # take a plugin off a node
     python3 provisioner.py --hash-pack FOLDER         # pack authors: hash before publishing
@@ -365,7 +367,7 @@ EXPECTED_FILE_HASHES = {
     "config.py": "e7eaea890e2b39ee",
     "conn.py": "b17cf4fb4f80fbbf",
     "discovery.py": "dabf766fa6524a71",
-    "docs/ARBORIST.md": "2e96890be974dc15",
+    "docs/ARBORIST.md": "6974376de39c17e5",
     "docs/CHAIN.md": "ef67046589363f45",
     "docs/CLIENT_QUICKSTART.md": "3c1616f8b440b666",
     "docs/COMMANDS.md": "6e7a758629ad38f8",
@@ -375,9 +377,9 @@ EXPECTED_FILE_HASHES = {
     "docs/HOME_BRANDING.md": "e1a1a9cf854dcdce",
     "docs/HTTPS_SETUP.md": "12cbbf2de7c38810",
     "docs/PACKS.md": "2311036e4785b113",
-    "docs/PC.md": "71eddccfe1bb07a3",
+    "docs/PC.md": "0f9263279ac36d79",
     "docs/PLUGINS.md": "8085ca56b773b64a",
-    "example_node.py": "ed96ab6098df29f9",
+    "example_node.py": "f48881ce52dfb11a",
     "features.py": "81e8af361c64a911",
     "fserv.py": "06b87b1d6fb95eb4",
     "fservbot/plugin.json": "12b3c544160411e3",
@@ -1783,13 +1785,13 @@ def board_remove_pack(port, row, also):
     return ok
 
 
-def ask_packs_target():
-    """Whose packs: this computer's Stump, a board on USB, or a computer
-    Stump in another folder. A port or a folder, or None."""
+def ask_stump_target(question="Which Stump's packs?"):
+    """Which Stump: this computer's, a board on USB, or a computer Stump in
+    another folder. A port or a folder, or None."""
     pc = pc_default_folder()
     opts = (["This computer's Stump (%s)" % pc] if (pc / "stump_pc.py").is_file() else []) + \
         ["A board on USB", "A computer Stump in another folder"]
-    c = ask_choice("Which Stump's packs?", opts)
+    c = ask_choice(question, opts)
     if c.startswith("This computer"):
         return str(pc)
     if c.startswith("A board"):
@@ -1867,6 +1869,265 @@ def packs_screen(target, packs=None):
         print("\n" + ("The Stump restarts on its own if it's running." if is_pc
                       else "Restart the Stump to start them (power-cycle, or Ctrl+D in mpremote)."))
         print("A new pack starts with its own settings: change them in /admin.")
+    return True
+
+
+# ---------------------------------------------------------------------------
+# The identity keepsake (1.0.0-beta.76): one file with a Stump's identity,
+# so a Stump installed fresh, or moved to another board or computer, can
+# be the same Stump on the mesh, the chain and LoRa. The identity only:
+# its settings are typed again. No passphrase: the file says to keep it
+# safe, as it's what makes a Stump itself.
+# ---------------------------------------------------------------------------
+IDENTITY_FILES = ("rns/identity", "pn_mailbox_identity")   # its address; its mailbox's (propagation)
+KEEPSAKE_EXT = ".stump-identity"
+KEEPSAKE_NOTE = ("A Stump's identity: whoever has this file can be that Stump on the mesh. "
+                 "Keep it safe, and don't share it.")
+
+
+def _identity_ok(files):
+    return len(files.get("rns/identity") or b"") == 64
+
+
+def identity_fingerprint(files):
+    import hashlib
+    h = hashlib.sha256(files["rns/identity"]).hexdigest()[:16]
+    return " ".join(h[i:i + 4] for i in range(0, 16, 4))
+
+
+def keepsake_bytes(files, name):
+    import base64
+    return (json.dumps({"stump_identity": 1, "name": name or "", "saved": time.strftime("%Y-%m-%d"),
+                        "release": EXPECTED_STUMP_VERSION, "fingerprint": identity_fingerprint(files),
+                        "note": KEEPSAKE_NOTE,
+                        "files": {k: base64.b64encode(v).decode() for k, v in sorted(files.items())}},
+                       indent=1, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def _keepsake_name(name):
+    return (re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name or "Stump").strip(" .") or "Stump") + KEEPSAKE_EXT
+
+
+def save_keepsake(files, name, path=None):
+    """Writes the keepsake (only its owner can read it, where that's up to
+    the system). Returns its path."""
+    path = Path(path or Path.home() / _keepsake_name(name)).expanduser()
+    if path.is_dir():
+        path = path / _keepsake_name(name)
+    path.write_bytes(keepsake_bytes(files, name))
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
+
+
+def _folder_name(folder):
+    try:
+        m = re.search(r'^NODE_NAME\s*=\s*([\'"])(.*?)\1', (Path(folder) / "config.py").read_text(encoding="utf-8", errors="replace"), re.M)
+        return m.group(2) if m else None
+    except OSError:
+        return None
+
+
+def read_identity_source(src):
+    """A keepsake file, or an old Stump's folder: ({path: bytes}, its name).
+    ValueError, with why, for anything else."""
+    import base64
+    src = Path(str(src).strip().strip("'\"")).expanduser()
+    if src.is_dir():
+        files = {}
+        for rel in IDENTITY_FILES:
+            try:
+                files[rel] = (src / rel).read_bytes()
+            except OSError:
+                pass
+        if not _identity_ok(files):
+            raise ValueError("%s has no Stump identity in it (rns/identity)." % src)
+        return files, _folder_name(src)
+    try:
+        d = json.loads(src.read_text(encoding="utf-8"))
+    except OSError:
+        raise ValueError("No file or folder at %s." % src)
+    except ValueError:
+        raise ValueError("%s isn't a saved Stump identity." % src)
+    if not isinstance(d, dict) or d.get("stump_identity") != 1 or not isinstance(d.get("files"), dict):
+        raise ValueError("%s isn't a saved Stump identity." % src)
+    try:
+        files = {k: base64.b64decode(v) for k, v in d["files"].items() if k in IDENTITY_FILES}
+    except (ValueError, TypeError):
+        raise ValueError("%s is damaged: its identity won't read." % src)
+    if not _identity_ok(files):
+        raise ValueError("%s is damaged: its identity isn't whole." % src)
+    return files, d.get("name") or None
+
+
+def pc_identity(folder):
+    files = {}
+    for rel in IDENTITY_FILES:
+        try:
+            files[rel] = (Path(folder) / rel).read_bytes()
+        except OSError:
+            pass
+    return files if _identity_ok(files) else None
+
+
+def pc_new_identity(folder):
+    """A computer Stump's identity, made here before it first starts (as the
+    Stump would make it: 64 random bytes, its two private keys), so it can
+    be saved at once. Kept if it has one."""
+    cur = pc_identity(folder)
+    if cur:
+        return cur
+    p = Path(folder) / "rns" / "identity"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(os.urandom(64))
+    return pc_identity(folder)
+
+
+def pc_put_identity(folder, files):
+    folder = Path(folder)
+    for rel, data in files.items():
+        p = folder / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+    if "pn_mailbox_identity" not in files:
+        try:
+            (folder / "pn_mailbox_identity").unlink()   # the old one's would go with another Stump's address
+        except OSError:
+            pass
+    _pc_mark_updated(folder)
+
+
+def board_identity(port):
+    tmp = Path(tempfile.mkdtemp())
+    files = {}
+    for rel in IDENTITY_FILES:
+        ok, _ = run(["mpremote", "connect", port, "fs", "cp", ":" + rel, str(tmp / rel.replace("/", "_"))], timeout=30)
+        if ok and (tmp / rel.replace("/", "_")).is_file():
+            files[rel] = (tmp / rel.replace("/", "_")).read_bytes()
+    return files if _identity_ok(files) else None
+
+
+def board_name(port):
+    ok, out = run(["mpremote", "connect", port, "fs", "cat", ":config.py"], timeout=20)
+    m = re.search(r'^NODE_NAME\s*=\s*([\'"])(.*?)\1', out or "", re.M) if ok else None
+    return m.group(2) if m else None
+
+
+def board_put_identity(port, files):
+    tmp = Path(tempfile.mkdtemp())
+    run(["mpremote", "connect", port, "fs", "mkdir", ":rns"], timeout=15)
+    ok = True
+    for rel, data in files.items():
+        f = tmp / rel.replace("/", "_")
+        f.write_bytes(data)
+        good, _ = run(["mpremote", "connect", port, "fs", "cp", str(f), ":" + rel], timeout=30)
+        ok = ok and good
+    if "pn_mailbox_identity" not in files:
+        run(["mpremote", "connect", port, "fs", "rm", ":pn_mailbox_identity"], timeout=15)
+    return ok
+
+
+def offer_save_identity(files, name):
+    """Asks to save the keepsake (yes at the keyboard; no with an answers
+    file, nobody being there to keep it). Its path, or None."""
+    if not files:
+        print("  It has no identity yet (it makes one as it first starts): save it later with"
+              " python3 provisioner.py --save-identity.")
+        return None
+    print()
+    hint("Its identity is what makes it this Stump on the mesh, the chain and LoRa. Saved in a file, a fresh "
+         "install or another board can be this same Stump again. Whoever has the file can be this Stump: keep it safe.")
+    if not ask_yes_no("Save this Stump's identity in a file?", ANSWERS["map"] is None):
+        return None
+    where = ask("Where", str(Path.home() / _keepsake_name(name)))
+    try:
+        p = save_keepsake(files, name, where)
+    except OSError as e:
+        print("  " + yellow("Couldn't write it there: %s" % e))
+        return None
+    print("  " + green("Saved: %s" % p) + "  (fingerprint %s)" % identity_fingerprint(files))
+    print("  Keep it somewhere safe (a USB key, a password manager). Don't share it.")
+    return p
+
+
+def ask_restore_identity():
+    """For a new Stump: a saved identity to bring back, if any.
+    ({path: bytes}, its name), or None for a new identity."""
+    print()
+    hint("Bringing back a Stump? Its saved identity (a %s file) or its old folder makes this one that "
+         "same Stump. The old one must not run any more: two Stumps with one identity confuse the mesh." % KEEPSAKE_EXT)
+    while True:
+        a = (ask("A saved identity to bring back: its file or old folder (Enter: none, a new Stump)", "") or "").strip()
+        if not a:
+            return None
+        try:
+            files, name = read_identity_source(a)
+        except ValueError as e:
+            print("  " + yellow(str(e)))
+            continue
+        print("  " + green("%s, fingerprint %s" % (name or "A Stump", identity_fingerprint(files))))
+        return files, name
+
+
+def _replacing(cur, files, name):
+    """Before an identity replaces another: the one there is saved first.
+    Its path, or None when there's nothing to keep (none, or the same)."""
+    if not cur or cur.get("rns/identity") == files.get("rns/identity"):
+        return None
+    p = save_keepsake(cur, (name or "Stump") + " (replaced " + time.strftime("%Y-%m-%d %H%M") + ")")
+    print("  The identity it had is saved first: %s" % p)
+    return p
+
+
+def restore_identity(target, src):
+    """--restore-identity: a keepsake or an old folder onto a Stump (a
+    computer Stump's folder, or a board's port)."""
+    try:
+        files, name = read_identity_source(src)
+    except ValueError as e:
+        print(yellow(str(e)))
+        return False
+    is_pc = (Path(str(target)).expanduser() / "stump_pc.py").is_file()
+    here = _folder_name(Path(str(target)).expanduser()) if is_pc else board_name(target)
+    print("Bringing back %s (fingerprint %s) onto %s." % (name or "a Stump", identity_fingerprint(files), here or target))
+    print("The Stump it came from must not run any more: two Stumps with one identity confuse the mesh.")
+    if not ask_yes_no("Go on?", True):
+        return False
+    if is_pc:
+        folder = Path(str(target)).expanduser()
+        _replacing(pc_identity(folder), files, here)
+        pc_put_identity(folder, files)
+        print(green("Done.") + " A running Stump restarts by itself in a few seconds, as %s." % (name or "that Stump"))
+        return True
+    _replacing(board_identity(target), files, here)
+    if not board_put_identity(target, files):
+        print(yellow("Not all of it arrived: try again."))
+        return False
+    run(["mpremote", "connect", target, "reset"], timeout=15)
+    print(green("Done.") + " The board restarts as %s." % (name or "that Stump"))
+    return True
+
+
+def save_identity(target, path=None):
+    """--save-identity: a Stump's identity into a keepsake."""
+    is_pc = (Path(str(target)).expanduser() / "stump_pc.py").is_file()
+    folder = Path(str(target)).expanduser()
+    files = pc_identity(folder) if is_pc else board_identity(target)
+    name = _folder_name(folder) if is_pc else board_name(target)
+    if not files:
+        print(yellow("No identity on that Stump yet: it makes one the first time it starts."))
+        return False
+    if not path:
+        hint("Whoever has this file can be this Stump on the mesh: keep it safe (a USB key, a password manager).")
+        path = ask("Where", str(Path.home() / _keepsake_name(name)))
+    try:
+        p = save_keepsake(files, name, path)
+    except OSError as e:
+        print(yellow("Couldn't write it there: %s" % e))
+        return False
+    print(green("Saved: %s" % p) + "  (fingerprint %s). Keep it safe; don't share it." % identity_fingerprint(files))
     return True
 
 
@@ -6759,6 +7020,12 @@ def interactive_wizard():
             ok = push_config_to_board(port, role, profile)
             if role == "cam" and profile.get("packs"):
                 ok = all([board_install_pack(port, p) for p in (load_pack(x) for x in profile["packs"]) if p]) and ok
+            if role == "cam" and flashed:
+                # A Stump brought back (1.0.0-beta.76): its identity on the
+                # board before it first starts.
+                back = ask_restore_identity()
+                if back and board_put_identity(port, back[0]):
+                    r.note("Identity", "%s, brought back" % (back[1] or identity_fingerprint(back[0])))
             if role == "cam":
                 banner("Finding the node's addresses")
                 print("Restarting the board so it boots with the new settings...")
@@ -6776,6 +7043,10 @@ def interactive_wizard():
                 else:
                     print("No address yet: that's normal right after an upload. Power-cycle the")
                     print("board, wait a few seconds, then: python3 provisioner.py --get-ip %s" % port)
+                if flashed:
+                    kept = offer_save_identity(board_identity(port), profile.get("node_name"))
+                    if kept:
+                        r.note("Identity", "saved in %s: keep it safe" % kept)
                 chain = profile.get("chain") or {}
                 if chain.get("enabled"):
                     r.note("Chain", "first Stump" if not chain.get("uplink_ssid") else
@@ -8002,6 +8273,14 @@ def setup_pc(folder=None, reconfigure=False):
     if rel:
         r.note("Release", rel)
     r.end("done", "%d file(s) updated%s, Stump %s" % (n, ", %d old one(s) removed" % len(gone) if gone else "", rel or "?"))
+    if first:
+        # A Stump brought back (1.0.0-beta.76): its saved identity, or its
+        # old folder. Otherwise its own, made now so it can be saved.
+        back = ask_restore_identity()
+        if back:
+            pc_put_identity(folder, back[0])
+            r.note("Identity", "%s, brought back" % (back[1] or identity_fingerprint(back[0])))
+        pc_new_identity(folder)
 
     r.start("Configure")
     profile = None
@@ -8104,6 +8383,10 @@ def setup_pc(folder=None, reconfigure=False):
         else:
             r.state[[n for n, _ in r.steps].index("Chain")] = "fail"
             r.note("Chain", red("not linked yet: python3 provisioner.py --check-chain"))
+    if first:
+        kept = offer_save_identity(pc_identity(folder), _folder_name(folder))
+        if kept:
+            r.note("Identity", "saved in %s: keep it safe" % kept)
     r.note("Open", "http://localhost/ on this computer (8080 if 80 was taken)")
     r.end("done", "running, and at every login" if started else "start it with the command below")
     r.summary("More: docs/PC.md (the hotspot, the Heltec, chaining with CAM Stumps).")
@@ -8221,8 +8504,20 @@ def main():
     elif "--packs" in args:
         idx = args.index("--packs")
         target = args[idx + 1] if len(args) > idx + 1 and not args[idx + 1].startswith("--") else None
-        target = target or ask_packs_target()
+        target = target or ask_stump_target()
         sys.exit(0 if target and packs_screen(target) else 1)
+    elif "--save-identity" in args:
+        idx = args.index("--save-identity")
+        rest = [a for a in args[idx + 1:idx + 3] if not a.startswith("--")]
+        target = rest[0] if rest else ask_stump_target("Whose identity?")
+        sys.exit(0 if target and save_identity(target, rest[1] if len(rest) > 1 else None) else 1)
+    elif "--restore-identity" in args:
+        idx = args.index("--restore-identity")
+        rest = [a for a in args[idx + 1:idx + 3] if not a.startswith("--")]
+        if len(rest) < 2:
+            print("Usage: provisioner.py --restore-identity PORT|STUMP_FOLDER FILE|OLD_STUMP_FOLDER")
+            sys.exit(1)
+        sys.exit(0 if restore_identity(rest[0], rest[1]) else 1)
     elif "--install-pack" in args:
         idx = args.index("--install-pack")
         if len(args) < idx + 3:

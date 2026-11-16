@@ -504,6 +504,46 @@ with zipfile.ZipFile(out / "climb.zip", "w") as zf:
     } finally { repl.stop(); }
   }
 
+  // -- the identity keepsake (1.0.0-beta.76) --------------------------------------
+  {
+    const root = path.join(SCRATCH, "identity");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(path.join(root, "rns"), { recursive: true });
+    const mine = crypto.randomBytes(64), mail = crypto.randomBytes(64);
+    fs.writeFileSync(path.join(root, "rns/identity"), mine);
+    fs.writeFileSync(path.join(root, "pn_mailbox_identity"), mail);
+    const repl = board(root);
+    try {
+      await R.prepare(repl, 8000);
+      const files = await R.readIdentity(repl);
+      check("a board's identity read: its keys and its mailbox", files && Buffer.from(files["rns/identity"]).equals(mine)
+            && Buffer.from(files["pn_mailbox_identity"]).equals(mail));
+      const text = await R.keepsake(files, "Bob's Glitch", "1.0.0-beta.76");
+      const kp = path.join(SCRATCH, "Bob.stump-identity");
+      fs.writeFileSync(kp, text);
+      const py = require("child_process").spawnSync("python3", ["-c",
+        "import sys; sys.path.insert(0, sys.argv[2]); import provisioner as P; f, n = P.read_identity_source(sys.argv[1]);" +
+        " print(n, f['rns/identity'].hex(), P.identity_fingerprint(f))", kp, path.join(__dirname, "../..")], { encoding: "utf8" });
+      check("... saved as the Provisioner saves it: it reads the file, the same identity and fingerprint",
+            py.status === 0 && py.stdout.trim() === "Bob's Glitch " + mine.toString("hex") + " " + (await R.identityFingerprint(files)), py.stdout + py.stderr);
+      const other = crypto.randomBytes(64);
+      const pk = require("child_process").spawnSync("python3", ["-c",
+        "import sys; sys.path.insert(0, sys.argv[2]); import provisioner as P; sys.stdout.buffer.write(P.keepsake_bytes({'rns/identity': bytes.fromhex(sys.argv[1])}, 'Gearn'))",
+        other.toString("hex"), path.join(__dirname, "../..")]);
+      const back = R.readKeepsake(pk.stdout.toString("utf8"));
+      check("... and the Provisioner's keepsake reads here", back.files && Buffer.from(back.files["rns/identity"]).equals(other) && back.name === "Gearn",
+            JSON.stringify(back.error || back.name));
+      await R.putIdentity(repl, back.files);
+      check("brought back onto the board: its identity there, the mailbox left from the other Stump gone",
+            fs.readFileSync(path.join(root, "rns/identity")).equals(other) && !fs.existsSync(path.join(root, "pn_mailbox_identity")));
+      check("a file that isn't one, or damaged: said", /isn't a saved/.test(R.readKeepsake("{}").error)
+            && /isn't whole/.test(R.readKeepsake(JSON.stringify({ stump_identity: 1, files: { "rns/identity": "AAAA" } })).error));
+      check("its file name, from the Stump's name (no characters a disk refuses)", R.keepsakeName('Bob/s "Glitch"') === "Bob_s _Glitch_.stump-identity");
+    } catch (e) {
+      check("the identity on a board: ran through", false, e.stack + (e.traceback ? "\n" + e.traceback : ""));
+    } finally { repl.stop(); }
+  }
+
   // -- the Heltec's Wi-Fi: RNode serial commands, to a fake RNode ---------------
   {
     function fakeRNode(opts) {

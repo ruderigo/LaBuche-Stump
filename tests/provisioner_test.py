@@ -840,6 +840,126 @@ P.run = real_run
 check('a board\'s packs: its plugins that aren\'t built in, with their record (none before beta.75)',
       got == {"tavern": {"pack": "tavern", "version": "1.2"}, "simple": None}, got)
 shutil.rmtree(brd, ignore_errors=True)
+# The identity keepsake (1.0.0-beta.76): a Stump's identity in one file,
+# to bring the same Stump back on a fresh install or another board.
+home = Path(tempfile.mkdtemp(prefix="home-")); old_home = os.environ.get("HOME"); os.environ["HOME"] = str(home)
+kf = P.Path(tempfile.mkdtemp(prefix="stump-id-"))
+with contextlib.redirect_stdout(io.StringIO()):
+    P._pc_copy_firmware(P.STUMP_APP_DIR, kf)
+(kf / "config.py").write_text("NODE_NAME = \"Bob's Glitch\"\n")
+first = P.pc_new_identity(kf)
+check('a new computer Stump: its identity made before it starts (64 bytes), kept the next time',
+      len(first["rns/identity"]) == 64 and P.pc_new_identity(kf) == first)
+(kf / "pn_mailbox_identity").write_bytes(b"m" * 64)
+files = P.pc_identity(kf)
+p1 = P.save_keepsake(files, P._folder_name(kf))
+d1 = json.loads(p1.read_text())
+check('saved: one file named after the Stump, in the home folder, readable by its owner only',
+      p1 == home / "Bob's Glitch.stump-identity" and (os.name == "nt" or (p1.stat().st_mode & 0o077) == 0)
+      and d1["name"] == "Bob's Glitch" and "keep it safe" in d1["note"].lower(), (p1, oct(p1.stat().st_mode)))
+check('... the identity only: its two keys and its mailbox, no setting nor password',
+      sorted(d1["files"]) == ["pn_mailbox_identity", "rns/identity"] and "config" not in p1.read_text().lower().replace("config.py", ""))
+got, nm = P.read_identity_source(p1)
+check('... read back whole', got == files and nm == "Bob's Glitch")
+got2, nm2 = P.read_identity_source(kf)
+check('... and an old Stump folder reads the same way', got2 == files and nm2 == "Bob's Glitch")
+for bad, why in (('{"a":1}', "isn't a saved"), (json.dumps(dict(d1, files={"rns/identity": "AAAA"})), "isn't whole"), ("not json", "isn't a saved")):
+    (home / "bad.stump-identity").write_text(bad)
+    try:
+        P.read_identity_source(home / "bad.stump-identity"); err = ""
+    except ValueError as e:
+        err = str(e)
+    check('... a file that isn\'t one, or damaged: said (%s)' % why, why in err, err)
+# Brought back onto another computer Stump (a fresh install): its own
+# identity saved first, the mailbox with it, the Stump restarted.
+fresh = P.Path(tempfile.mkdtemp(prefix="stump-fresh-"))
+with contextlib.redirect_stdout(io.StringIO()):
+    P._pc_copy_firmware(P.STUMP_APP_DIR, fresh)
+(fresh / "config.py").write_text("NODE_NAME = 'New one'\n")
+P.pc_new_identity(fresh)
+yn = P.ask_yes_no
+P.ask_yes_no = lambda q, d=True: True
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    ok = P.restore_identity(str(fresh), str(p1))
+P.ask_yes_no = yn
+saved_first = [x for x in home.glob("New one (replaced*")]
+check('--restore-identity onto a computer Stump: it is that Stump again, its mailbox too',
+      ok and P.pc_identity(fresh) == files and (fresh / ".updated").is_file(), out.getvalue())
+check('... the identity it had is saved first, and said', len(saved_first) == 1 and "saved first" in out.getvalue(),
+      (list(home.iterdir()), out.getvalue()))
+check('... it says the old one must not run any more', "must not run any more" in out.getvalue())
+only = home / "only.stump-identity"; only.write_bytes(P.keepsake_bytes({"rns/identity": files["rns/identity"]}, "x"))
+with contextlib.redirect_stdout(io.StringIO()):
+    P.ask_yes_no = lambda q, d=True: True
+    P.restore_identity(str(fresh), str(only))
+    P.ask_yes_no = yn
+check('... a keepsake without a mailbox: the mailbox left from before goes (it was another Stump\'s)',
+      not (fresh / "pn_mailbox_identity").exists())
+# Asked in a first setup: a path that's wrong is said and asked again; Enter: a new Stump.
+said = []
+real_ask = P.ask
+it = iter([str(home / "nope"), str(p1)])
+P.ask = lambda q, d=None: (said.append(q), next(it))[1]
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    back = P.ask_restore_identity()
+check('setup: a saved identity to bring back, asked; a wrong path said, then the file taken',
+      back and back[0] == files and "No file or folder" in out.getvalue() and len(said) == 2, out.getvalue())
+P.ask = lambda q, d=None: ""
+with contextlib.redirect_stdout(io.StringIO()):
+    check('... Enter: none, a new Stump', P.ask_restore_identity() is None)
+answers_ = []
+P.ask_yes_no = lambda q, d=True: (answers_.append((q, d)), True)[1]
+P.ask = lambda q, d=None: d
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    kept = P.offer_save_identity(files, "Bob's Glitch 2")
+check('setup: saving it offered (yes by default at the keyboard), where asked, said with its fingerprint',
+      kept == home / "Bob's Glitch 2.stump-identity" and answers_ and answers_[0][1] is True
+      and P.identity_fingerprint(files) in out.getvalue(), out.getvalue())
+P.ask, P.ask_yes_no = real_ask, yn
+# On a board: read and written over mpremote (a pretend board here).
+bd = Path(tempfile.mkdtemp(prefix="board-id-"))
+(bd / "rns").mkdir(); (bd / "rns" / "identity").write_bytes(b"b" * 64); (bd / "config.py").write_text("NODE_NAME = 'Gearn'\n")
+def _mp(cmd, timeout=None):
+    a = cmd[3:]
+    if a[:2] == ["fs", "cp"]:
+        src, dst = a[2], a[3]
+        rd = lambda x: (bd / x[1:]) if x.startswith(":") else Path(x)
+        try:
+            data = rd(src).read_bytes()
+        except OSError:
+            return False, "no such file"
+        rd(dst).parent.mkdir(parents=True, exist_ok=True); rd(dst).write_bytes(data)
+        return True, ""
+    if a[:2] == ["fs", "cat"]:
+        try:
+            return True, (bd / a[2][1:]).read_text()
+        except OSError:
+            return False, ""
+    if a[:2] == ["fs", "rm"]:
+        try:
+            (bd / a[2][1:]).unlink(); return True, ""
+        except OSError:
+            return False, ""
+    return True, ""
+real_run = P.run
+P.run = _mp
+bid = P.board_identity("/dev/ttyUSB0")
+check('a board\'s identity read (its mailbox only if it has one), and its name', bid == {"rns/identity": b"b" * 64}
+      and P.board_name("/dev/ttyUSB0") == "Gearn", bid)
+P.ask_yes_no = lambda q, d=True: True
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    ok = P.restore_identity("/dev/ttyUSB0", str(p1))
+P.ask_yes_no = yn
+P.run = real_run
+check('--restore-identity onto a board: its identity and mailbox there, the one it had saved first',
+      ok and (bd / "rns" / "identity").read_bytes() == files["rns/identity"] and (bd / "pn_mailbox_identity").read_bytes() == b"m" * 64
+      and list(home.glob("Gearn (replaced*")), out.getvalue())
+if old_home is None:
+    os.environ.pop("HOME", None)
+else:
+    os.environ["HOME"] = old_home
+for d_ in (home, kf, fresh, bd):
+    shutil.rmtree(d_, ignore_errors=True)
 # The setup: packs are a step of their own, before "Everything else"
 # (which no longer has them); a pack's bot and look are offered there.
 src = P.Path(P.__file__).read_text()

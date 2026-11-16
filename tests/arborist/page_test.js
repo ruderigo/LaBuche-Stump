@@ -10,7 +10,7 @@
 "use strict";
 const { chromium } = require("playwright");
 const { spawn, execFileSync } = require("child_process");
-const fs = require("fs"), path = require("path");
+const fs = require("fs"), path = require("path"), nodeCrypto = require("crypto");
 const [PAGE, MP, SCRATCH, PAGE_IMAGES] = process.argv.slice(2);
 const FAIL = [];
 function check(name, ok, info) {
@@ -335,6 +335,40 @@ async function run(name, root, simArgs, fill, keep, pageFile, chip) {
     check("... the new files there, the old source gone", fs.existsSync(path.join(root, "barkeep.mpy")) && !fs.existsSync(path.join(root, "barkeep.py")));
     check("... a file the release no longer has removed, and said (beta.74)", !fs.existsSync(path.join(root, "flasher_ui.py"))
           && /no longer has removed: flasher_ui\.py/.test(await page.textContent("#log")), (await page.textContent("#log")).slice(-600));
+    await t.browser.close(); t.sim.kill();
+  }
+
+  // -- its identity, saved and brought back (1.0.0-beta.76) ----------------------------
+  {
+    const root = path.join(SCRATCH, "page_identity");
+    const mine = nodeCrypto.randomBytes(64);
+    const t = await run("identity", root, [], (r) => { fs.mkdirSync(path.join(r, "rns")); fs.writeFileSync(path.join(r, "rns/identity"), mine); });
+    const { page } = t;
+    await page.click("nav button[data-tab=settings]");
+    check("Settings: its identity, with what the file is (keep it safe)", await page.isVisible("#id-save")
+          && /keep it safe/i.test(await page.textContent("#tab-settings")));
+    const dl = page.waitForEvent("download", { timeout: 60000 });
+    await page.click("#id-save");
+    const got = await dl;
+    const kp = path.join(SCRATCH, "page_identity.stump-identity");
+    await got.saveAs(kp);
+    const k = JSON.parse(fs.readFileSync(kp, "utf8"));
+    check("Save its identity: a .stump-identity file, the board's identity in it",
+          /\.stump-identity$/.test(got.suggestedFilename()) && Buffer.from(k.files["rns/identity"], "base64").equals(mine), got.suggestedFilename());
+    const other = nodeCrypto.randomBytes(64);
+    const okp = path.join(SCRATCH, "other.stump-identity");
+    fs.writeFileSync(okp, JSON.stringify({ stump_identity: 1, name: "Gearn", files: { "rns/identity": other.toString("base64") } }));
+    await page.click("#tab-settings details:last-of-type summary");
+    await page.setInputFiles("#id-file", okp);
+    await page.waitForFunction(() => /Gearn, fingerprint/.test(document.getElementById("id-info").textContent), null, { timeout: 15000 });
+    const dl2 = page.waitForEvent("download", { timeout: 60000 });
+    await page.click("#id-put");
+    const prev = await dl2;
+    try { await page.waitForFunction(() => /again/.test(document.getElementById("result").textContent), null, { timeout: 60000 }); } catch (e) {}
+    check("Bring it back: the board has that identity; the one it had saved first, to keep",
+          fs.readFileSync(path.join(root, "rns/identity")).equals(other) && /replaced/.test(prev.suggestedFilename())
+          && /Gearn again/.test(await page.textContent("#result")), (await page.textContent("#result")) + " | " + prev.suggestedFilename());
+    check("... no errors in the page", t.errors.length === 0, t.errors.join(" | "));
     await t.browser.close(); t.sim.kill();
   }
 
