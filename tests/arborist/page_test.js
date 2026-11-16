@@ -320,6 +320,7 @@ async function run(name, root, simArgs, fill, keep, pageFile, chip) {
       fs.writeFileSync(path.join(r, "config.py"), "NODE_NAME = 'Mine'\n");
       fs.mkdirSync(path.join(r, "rns")); fs.writeFileSync(path.join(r, "rns/identity"), "its identity");
       fs.writeFileSync(path.join(r, "barkeep.py"), "old");
+      fs.writeFileSync(path.join(r, "flasher_ui.py"), "retired in beta.41");
     });
     const { page } = t;
     await page.check("input[name=mode][value=update]");
@@ -332,6 +333,8 @@ async function run(name, root, simArgs, fill, keep, pageFile, chip) {
     check("... its config.py and identity kept", fs.readFileSync(path.join(root, "config.py"), "utf8") === "NODE_NAME = 'Mine'\n"
           && fs.readFileSync(path.join(root, "rns/identity"), "utf8") === "its identity");
     check("... the new files there, the old source gone", fs.existsSync(path.join(root, "barkeep.mpy")) && !fs.existsSync(path.join(root, "barkeep.py")));
+    check("... a file the release no longer has removed, and said (beta.74)", !fs.existsSync(path.join(root, "flasher_ui.py"))
+          && /no longer has removed: flasher_ui\.py/.test(await page.textContent("#log")), (await page.textContent("#log")).slice(-600));
     await t.browser.close(); t.sim.kill();
   }
 

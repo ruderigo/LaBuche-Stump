@@ -452,6 +452,34 @@ with zipfile.ZipFile(out / "climb.zip", "w") as zf:
     } finally { repl.stop(); R.CARD.root = "/sd"; }
   }
 
+  // -- an update removes the files the release no longer has (1.0.0-beta.74) ---
+  {
+    const root = path.join(SCRATCH, "retired");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(path.join(root, "lib"), { recursive: true });
+    fs.mkdirSync(path.join(root, "meter"), { recursive: true });
+    fs.mkdirSync(path.join(root, "fservbot"), { recursive: true });
+    for (const [p, d] of [["flasher_ui.mpy", "old"], ["lib/ed25519_fast_xtensawin.mpy", "old"], ["config.py", "NODE_NAME = 'Kept'\n"],
+                          ["rooms.json", "{}"], ["meter/install.py", "def setup(s):\n pass\n"], ["meter/old.py", "a pack's"],
+                          ["fservbot/install.mpy", "x"], ["fservbot/gone.mpy", "old"]])
+      fs.writeFileSync(path.join(root, p), d);
+    const repl = board(root);
+    try {
+      await R.prepare(repl, 8000);
+      const gone = await R.removeRetired(repl, ["flasher_ui.py", "flasher_ui.mpy", "lib/ed25519_fast_xtensawin.mpy",
+                                                "meter/old.py", "fservbot/gone.mpy"], ["fservbot", "stumpid"]);
+      check("an update: the files the release no longer has go (a .mpy, one in a folder, one in a built-in plugin)",
+            !fs.existsSync(path.join(root, "flasher_ui.mpy")) && !fs.existsSync(path.join(root, "lib/ed25519_fast_xtensawin.mpy"))
+            && !fs.existsSync(path.join(root, "fservbot/gone.mpy")) && gone.length === 3, JSON.stringify(gone));
+      check("... its settings, its data and a pack's own file stay",
+            fs.existsSync(path.join(root, "config.py")) && fs.existsSync(path.join(root, "rooms.json"))
+            && fs.readFileSync(path.join(root, "meter/old.py"), "utf8") === "a pack's" && fs.existsSync(path.join(root, "fservbot/install.mpy")));
+      check("... nothing to remove: nothing asked of the board", (await R.removeRetired(repl, [], [])).length === 0);
+    } catch (e) {
+      check("retired files on a board: ran through", false, e.stack + (e.traceback ? "\n" + e.traceback : ""));
+    } finally { repl.stop(); }
+  }
+
   // -- the Heltec's Wi-Fi: RNode serial commands, to a fake RNode ---------------
   {
     function fakeRNode(opts) {

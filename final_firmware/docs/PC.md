@@ -53,8 +53,10 @@ the SD card, and `venv/` is the folder's own Python with `cryptography`
 and `pyserial`. With start-at-login, the log is `stump.log`.
 
 **Updating:** `git pull`, then `python3 provisioner.py --pc` again. It
-copies what changed, keeps `config.py`, the identity and everything
-saved, brings the folder's packs up to date, and restarts the Stump if
+copies what changed, removes the files an earlier release put there and
+this one no longer has (named as it goes; since 1.0.0-beta.74), keeps
+`config.py`, the identity and everything saved, brings the folder's packs
+up to date, and restarts the Stump if
 it starts at login. It shows the Stump's settings and asks whether to
 change them; a Heltec plugged in by USB since is noticed and offered
 (the other settings stay). `--pc --reconfigure` runs the wizard again.

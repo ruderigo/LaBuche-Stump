@@ -252,7 +252,9 @@ def build(out_dir, mp_path=None, image_dirs=None):
     ssid = re.search(r'^DEFAULT_SSID = "([^"]*)"', (FW / "captive_portal.py").read_text(encoding="utf-8"), re.M).group(1)
     entries = [("micropython.bin", mp)] + [("app/" + p, d) for p, d in app] + [("sd/" + p, d) for p, d in tools]
     blob = pack(entries, {"release": rel, "micropython": MICROPYTHON_VERSION, "micropython_sha256": mp_sha,
-                          "mpy": mpy, "config_template": tpl, "default_ssid": ssid})
+                          "mpy": mpy, "config_template": tpl, "default_ssid": ssid,
+                          # removed from a board by an update (1.0.0-beta.74)
+                          "retired": P.retired_files(FW), "builtins": sorted(P._builtin_plugins(FW))})
     esptool = (FW / "tools_payload" / "flasher" / "esptool-bundle.js").read_text(encoding="utf-8")
     m = re.search(r"export\{([^}]*)\}\s*;?\s*$", esptool)
     if not m:
