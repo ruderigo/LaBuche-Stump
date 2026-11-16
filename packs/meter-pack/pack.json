@@ -1,0 +1,16 @@
+{
+  "name": "meter",
+  "version": "1.1",
+  "author": "Project Stump",
+  "license": "MIT",
+  "stump_api": 2,
+  "description": "A tester's counter: how many bytes and packets the Stump sends people's apps. /meter shows it, /meter 1|2|3 sends a fixed test text. To compare a kit before and after packed text (1.0.0-beta.74).",
+  "ram_kb": 8,
+  "plugins": [
+    "meter"
+  ],
+  "hashes": {},
+  "plugin_hashes": {
+    "meter": "f5a59d1c40e5af10"
+  }
+}
