@@ -394,6 +394,50 @@
     return u;
   }
 
+  // -- the identity keepsake (1.0.0-beta.76), as the Provisioner writes it --
+  var IDENTITY_FILES = ["rns/identity", "pn_mailbox_identity"];
+  function b64ToU8(t) { var s = atob(t || ""), u = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+  function u8ToB64(u) { var s = ""; for (var i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); }
+  async function readIdentity(repl) {
+    var out = await repl.run("import binascii,json\nd={}\nfor p in " + JSON.stringify(IDENTITY_FILES) + ":\n try:\n" +
+                             "  d[p]=binascii.b2a_base64(open(p,'rb').read()).decode().strip()\n except OSError:\n  pass\nprint('ID'+json.dumps(d))\n");
+    var m = /ID(\{.*\})/.exec(out), d = m ? JSON.parse(m[1]) : {}, files = {};
+    Object.keys(d).forEach(function (k) { files[k] = b64ToU8(d[k]); });
+    return files["rns/identity"] && files["rns/identity"].length === 64 ? files : null;
+  }
+  async function identityFingerprint(files) {
+    var h = (await shaHex(files["rns/identity"])).slice(0, 16);
+    return h.match(/.{4}/g).join(" ");
+  }
+  async function keepsake(files, name, release) {
+    var f = {};
+    Object.keys(files).sort().forEach(function (k) { f[k] = u8ToB64(files[k]); });
+    var now = new Date(), day = now.getFullYear() + "-" + ("0" + (now.getMonth() + 1)).slice(-2) + "-" + ("0" + now.getDate()).slice(-2);
+    return JSON.stringify({ stump_identity: 1, name: name || "", saved: day, release: release || "",
+                            fingerprint: await identityFingerprint(files),
+                            note: "A Stump's identity: whoever has this file can be that Stump on the mesh. Keep it safe, and don't share it.",
+                            files: f }, null, 1) + "\n";
+  }
+  function keepsakeName(name) { return ((name || "Stump").replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").replace(/^[ .]+|[ .]+$/g, "") || "Stump") + ".stump-identity"; }
+  // A keepsake's text -> {files, name} or {error}.
+  function readKeepsake(text) {
+    var d;
+    try { d = JSON.parse(text); } catch (e) { return { error: "That file isn't a saved Stump identity." }; }
+    if (!d || d.stump_identity !== 1 || typeof d.files !== "object") return { error: "That file isn't a saved Stump identity." };
+    var files = {};
+    try { IDENTITY_FILES.forEach(function (k) { if (d.files[k]) files[k] = b64ToU8(d.files[k]); }); }
+    catch (e) { return { error: "That file is damaged: its identity won't read." }; }
+    if (!files["rns/identity"] || files["rns/identity"].length !== 64) return { error: "That file is damaged: its identity isn't whole." };
+    return { files: files, name: d.name || "" };
+  }
+  async function putIdentity(repl, files) {
+    await repl.run("import os\ntry:\n os.mkdir('rns')\nexcept OSError:\n pass\n");
+    var up = [];
+    for (var k in files) up.push({ path: k, data: files[k], sha256: await shaHex(files[k]) });
+    await upload(repl, up);
+    if (!files["pn_mailbox_identity"]) await repl.run("import os\ntry:\n os.remove('pn_mailbox_identity')\nexcept OSError:\n pass\n");
+  }
+
   // values: {KEY: value} for config.py, and HELTEC: {enabled, host, port}.
   async function writeSettings(repl, values) {
     var top = {}, h = values.HELTEC || null;
@@ -1197,7 +1241,7 @@
               clearLeftovers: clearLeftovers, flashUse: flashUse, boardInfo: boardInfo, memory: memory,
               scanWifi: scanWifi, lookAround: lookAround, offers: offers, chainIdOf: chainIdOf, wifiPass: wifiPass,
               IMAGE_FOR: IMAGE_FOR, imageForChip: imageForChip, imageInfo: imageInfo, notFrozen: notFrozen,
-              removeFrozenCopies: removeFrozenCopies, removeRetired: removeRetired, listPacks: listPacks, removePack: removePack, PACK_MARK: PACK_MARK, HELTEC_ON_HOTSPOT: HELTEC_ON_HOTSPOT, HELTEC_FIRST: HELTEC_FIRST,
+              removeFrozenCopies: removeFrozenCopies, removeRetired: removeRetired, listPacks: listPacks, removePack: removePack, PACK_MARK: PACK_MARK, readIdentity: readIdentity, putIdentity: putIdentity, keepsake: keepsake, readKeepsake: readKeepsake, keepsakeName: keepsakeName, identityFingerprint: identityFingerprint, HELTEC_ON_HOTSPOT: HELTEC_ON_HOTSPOT, HELTEC_FIRST: HELTEC_FIRST,
               CARD: CARD, USB_MAX: USB_MAX, cardStatus: cardStatus, wipeCard: wipeCard, toCard: toCard,
               readZip: readZip, packFrom: packFrom, installPack: installPack, fillTools: fillTools, shaHex: shaHex,
               readSettings: readSettings, writeSettings: writeSettings,

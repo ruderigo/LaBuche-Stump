@@ -145,6 +145,16 @@
     <input type="file" id="set-file" accept=".py,text/x-python,text/plain">
     <div class="row"><button type="button" class="plain" id="set-put" disabled>Put it on the Stump</button></div>
   </details>
+
+  <h3>Its identity</h3>
+  <p class="hint">What makes it this Stump on the mesh, the chain and LoRa. Saved in a file, a Stump made again, or another board, can be this same Stump. <b>Whoever has the file can be this Stump: keep it safe, and don't share it.</b></p>
+  <div class="row"><button type="button" class="plain" id="id-save">Save its identity</button></div>
+  <details><summary>Bring a saved identity back onto it</summary>
+    <p class="hint">A <code>.stump-identity</code> file (from here or the Provisioner). The Stump it came from must not run any more: two Stumps with one identity confuse the mesh. The identity this one has now is saved first, for you to keep.</p>
+    <input type="file" id="id-file" accept=".stump-identity,application/json,text/plain">
+    <p class="hint" id="id-info"></p>
+    <div class="row"><button type="button" class="plain" id="id-put" disabled>Bring it back</button></div>
+  </details>
 </section>
 
 <!-- Check ---------------------------------------------------------------------- -->
@@ -1584,6 +1594,55 @@ async function cardPack() {
     (written.length ? " Set in its config.py: " + written.join(", ") + "." : "") +
     (PACK.byReader.length ? " Still to copy by card reader: " + PACK.byReader.join(", ") + "." : "")));
 }
+// -- the identity keepsake (1.0.0-beta.76) ----------------------------------------
+var KEEP = null;      // a keepsake chosen to bring back: {files, name}
+async function identitySave() {
+  steps("Saving its identity", ["Choose the board", "Connect", "Read its identity", "Restart"]);
+  step(0); await choosePort();
+  step(1); var repl = await readyRepl();
+  step(2); var files = await R.readIdentity(repl), name = await R.readSettings(repl).catch(function () { return null; });
+  step(3); await R.restart(repl); await closePort();
+  if (!files) throw new Error("It has no identity yet: a Stump makes it the first time it starts. Let it start once, then save it.");
+  var nm = name && name.NODE_NAME || "";
+  download(R.keepsakeName(nm), await R.keepsake(files, nm, (await payload()).head.release), "application/json");
+  done("");
+  $("result").appendChild(para("Its identity is saved: " + R.keepsakeName(nm) + " (fingerprint " + await R.identityFingerprint(files) +
+                               "). Keep it safe (a USB key, a password manager); don't share it."));
+}
+async function identityPut() {
+  if (!KEEP) return false;
+  if (!confirm("Bring " + (KEEP.name || "that Stump") + " back onto this board? The Stump it came from must not run any more.")) return false;
+  steps("Bringing back " + (KEEP.name || "a Stump"), ["Choose the board", "Connect", "Save the one it has", "Bring it back", "Restart"]);
+  step(0); await choosePort();
+  step(1); var repl = await readyRepl();
+  CURRENT = repl;
+  step(2);
+  var cur = await R.readIdentity(repl), same = cur && R.shaHex && (await R.shaHex(cur["rns/identity"])) === (await R.shaHex(KEEP.files["rns/identity"]));
+  if (cur && !same) {
+    var s = await R.readSettings(repl).catch(function () { return null; }), nm = (s && s.NODE_NAME || "Stump") + " (replaced)";
+    download(R.keepsakeName(nm), await R.keepsake(cur, nm, (await payload()).head.release), "application/json");
+    log("the identity it had, saved first: " + R.keepsakeName(nm));
+  }
+  step(3); await R.putIdentity(repl, KEEP.files);
+  step(4); await R.restart(repl); await closePort();
+  CURRENT = null;
+  done("");
+  $("result").appendChild(para("It's " + (KEEP.name || "that Stump") + " again: it restarts with that identity." +
+                               (cur && !same ? " The identity it had is saved in your downloads, to keep." : "")));
+}
+$("id-file").onchange = async function () {
+  KEEP = null; $("id-put").disabled = true; $("id-info").className = "hint"; $("id-info").textContent = "";
+  var f = $("id-file").files[0];
+  if (!f) return;
+  var r = R.readKeepsake(await f.text());
+  if (r.error) { $("id-info").className = "err"; $("id-info").textContent = r.error; return; }
+  KEEP = r;
+  $("id-info").textContent = (r.name || "A Stump") + ", fingerprint " + await R.identityFingerprint(r.files) + ".";
+  $("id-put").disabled = false;
+};
+$("id-save").onclick = function () { act(identitySave, "set-err"); };
+$("id-put").onclick = function () { act(identityPut, "set-err"); };
+
 // -- the Packs tab (1.0.0-beta.75) ------------------------------------------------
 var HAVE = null;      // the packs read from the Stump: [{name, plugins, record}], or null
 function packGoLabel() {
@@ -1684,6 +1743,7 @@ async function act(fn, errId) {
     qa("#main button, #main input, #main select").forEach(function (i) { i.disabled = false; });
     $("set-put").disabled = !$("set-file").files.length;
     $("card-pack-go").disabled = !PACK;
+    $("id-put").disabled = !KEEP;
   }
 }
 $("make-go").onclick = function () { act(mode() === "heltec" ? function () { return heltecWifi(helTarget()); } : make, "make-err"); };

@@ -136,6 +136,12 @@ files stay. Passwords aren't shown: left blank, they stay as they are.
 *Keep a copy of its config.py* saves it on the computer; *Put a config.py
 from this computer back* puts one back as it is (checked to be Python
 first). The one replaced stays on the board as `config.py.bak`.
+*Save its identity* (since 1.0.0-beta.76) downloads what makes it this
+Stump on the mesh, as a `.stump-identity` file (the Provisioner's own
+format); *Bring a saved identity back* puts one on a board made again,
+or another board, so it's that Stump again. The identity it had is
+downloaded first, to keep. Whoever has the file can be that Stump: keep
+it safe.
 
 **Check** restarts the Stump and listens to it start for a minute: the
 release it runs, whether its pages came up, what went wrong (a

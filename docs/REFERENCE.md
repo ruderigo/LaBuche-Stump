@@ -103,6 +103,8 @@ python3 provisioner.py --wipe-sd PORT     # reformat a problem SD card
 python3 provisioner.py --erase-flash PORT # erase a CAM's or a Heltec's whole flash, to start it over
 python3 provisioner.py --list-packs       # the packs in packs/, with their hashes
 python3 provisioner.py --packs [PORT|FOLDER]                   # a Stump's packs: install, update, remove
+python3 provisioner.py --save-identity [PORT|FOLDER] [FILE]    # a Stump's identity in a file to keep
+python3 provisioner.py --restore-identity PORT|FOLDER FILE     # bring that Stump back (a file, or an old Stump folder)
 python3 provisioner.py --install-pack PORT packs/tavern-pack   # add a pack to a node
 python3 provisioner.py --remove-plugin PORT tavern             # take a plugin off a node
 ```
@@ -121,6 +123,19 @@ wizard, answer **no** to "Flash firmware" and **yes** to the config
 wizard. (Up to 1.0.0-beta.2, `--upload-app` copied the folder's
 `config.py` over the node's — a node's theme changing after an update
 was the visible sign.)
+
+**Its identity, kept in a file** (since 1.0.0-beta.76): what makes a
+Stump itself on the mesh, the chain and LoRa (its Reticulum identity,
+and its propagation mailbox's). `--save-identity` writes it to one file,
+`<its name>.stump-identity`; a first setup offers to (on a computer at
+once, on a CAM once it has started), and asks whether there's one to
+bring back. `--restore-identity PORT|FOLDER FILE` puts it on a Stump
+made again, or on another board or computer: it is that Stump again,
+same address. It also takes an old Stump's folder in place of the file
+(`~/Stump.old`). The identity it had is saved first. Only the identity:
+settings are typed again. **Whoever has the file can be that Stump**:
+keep it safe (a USB key, a password manager), don't share it, and never
+run two Stumps with one identity.
 
 `--diag` automates the serial, SD card and radio checks. Network
 reachability is confirmed by hand at the end (it prints how): power-

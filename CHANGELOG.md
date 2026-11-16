@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0-beta.76
+- **A Stump's identity, kept in a file.** A fresh install made a new Stump on the mesh: a new address, a stranger to the Stumps it was chained with. Now its identity (its Reticulum keys, and its propagation mailbox's) can be saved in one file, `<its name>.stump-identity`, and brought back:
+  - `--save-identity [PORT|FOLDER] [FILE]` and `--restore-identity PORT|FOLDER FILE`; the restore also takes an old Stump's folder (`~/Stump.old`) in place of the file. The identity it had is saved first.
+  - A first setup asks whether there's one to bring back, and offers to save it: a computer Stump's identity is made before it first starts, so it's saved at once; a CAM's once it has started.
+  - Arborist's **Settings** tab: *Save its identity* and *Bring a saved identity back*, in the same format.
+  - Only the identity: settings are typed again. No passphrase; the file says what it is: whoever has it can be that Stump. Keep it safe, and never run two Stumps with one identity.
+- Tests: `provisioner` (saved, read back, a folder, damaged files; brought back onto a computer Stump and a board, the one it had saved first; the setup's questions), `arborist` (on the pretend board; the Provisioner's and Arborist's files read by each other; the Settings tab).
+
 ## 1.0.0-beta.75
 - **Packs, on their own.** Changing a Stump's packs meant going through its whole setup again. Now:
   - **`python3 provisioner.py --packs`** (or `--packs PORT` / `--packs FOLDER`): one Stump's packs, a board's or a computer Stump's, each pack here and each pack it has, with the version on it and the one here; **install**, **update** or **remove**. Removing asks whether what the pack keeps goes too: its saved data, Tools section, home files and theme. Nothing else is asked or changed. The Provisioner's menu for a CAM opens the same screen.
