@@ -52,12 +52,23 @@ plugins and `config.py` sit there as they do on the board, `sd/` is
 the SD card, and `venv/` is the folder's own Python with `cryptography`
 and `pyserial`. With start-at-login, the log is `stump.log`.
 
+**Its identity** (since 1.0.0-beta.76): a first setup asks whether
+there's a saved one to bring back (a `.stump-identity` file, or an old
+Stump folder such as `~/Stump.old`), then offers to save this Stump's in
+a file to keep. A fresh install from that file is the same Stump on the
+mesh. Any time: `python3 provisioner.py --save-identity ~/Stump`.
+Whoever has the file can be that Stump: keep it safe.
+
 **Updating:** `git pull`, then `python3 provisioner.py --pc` again. It
-copies what changed, keeps `config.py`, the identity and everything
-saved, brings the folder's packs up to date, and restarts the Stump if
+copies what changed, removes the files an earlier release put there and
+this one no longer has (named as it goes; since 1.0.0-beta.74), keeps
+`config.py`, the identity and everything saved, brings the folder's packs
+up to date, and restarts the Stump if
 it starts at login. It shows the Stump's settings and asks whether to
 change them; a Heltec plugged in by USB since is noticed and offered
-(the other settings stay). `--pc --reconfigure` runs the wizard again.
+(the other settings stay). Then `p` opens its packs (install, update,
+remove; since 1.0.0-beta.75), or `python3 provisioner.py --packs` any
+time, without updating. `--pc --reconfigure` runs the wizard again.
 
 **With no one at the keyboard** (since 1.0.0-beta.48; asked by the
 RK3326 Provisioner, which sets a Stump up from a handheld's gamepad):

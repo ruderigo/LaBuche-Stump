@@ -65,8 +65,9 @@ def dests():
 
 
 def removed():
+    # (the files a release no longer has go in a call of their own, beta.74)
     for c in calls:
-        if "exec" in c and "os.remove" in str(c[-1]):
+        if "exec" in c and "os.remove" in str(c[-1]) and "RETIRED:" not in str(c[-1]):
             return str(c[-1])
     return ""
 

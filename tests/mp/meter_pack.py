@@ -1,6 +1,6 @@
 # The Meter pack: a tester's counter of what the Stump sends people's
 # apps (bytes of text, bytes as sent, messages that fit one LoRa packet),
-# the same on a firmware with packed text (1.0.0-beta.74) and one
+# the same on a firmware with packed text (1.0.0-beta.78) and one
 # without, so a kit is measured before and after. It only counts.
 import sys
 exec(open(sys.argv[1] + '/harness.py').read())
@@ -24,7 +24,7 @@ def check(n, c, i=''):
 plugins.load_all()
 check("the pack starts (plugin API 2)", plugins._plugins.get('meter', {}).get('state') == 'on', plugins._plugins.get('meter'))
 import meter.install as M
-HAS = hasattr(lxmf, "PACKED_TEXT")          # this firmware packs text (1.0.0-beta.74 on)
+HAS = hasattr(lxmf, "PACKED_TEXT")          # this firmware packs text (1.0.0-beta.78 on)
 print("firmware with packed text:", HAS)
 rrc.NODE_INFO = {"version": "x", "release": "1.0.0-test"}
 
@@ -134,7 +134,7 @@ if HAS:
     from urns.identity import Identity
     rt = lxmf.LXMRouter(identity=Identity())
     rt.register_delivery_identity(rt.identity, display_name="Stump")
-    rt.handle_announce(bytes.fromhex(A), umsgpack.packb([b"Rod", None, [], "stump:firefly-android/0.6.2.b.74", {"z": 1}]))
+    rt.handle_announce(bytes.fromhex(A), umsgpack.packb([b"Rod", None, [], "stump:firefly-android/0.6.2.b.78", {"z": 1}]))
     rt.handle_announce(bytes.fromhex(B), umsgpack.packb([b"Alice", None, [0]]))
     r = cmd(A, '/meter')
     check("packed text on, one address reads it", "packed text: on, 1 address(es) read it" in r[0], r[0])

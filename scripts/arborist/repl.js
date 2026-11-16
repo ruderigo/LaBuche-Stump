@@ -394,6 +394,50 @@
     return u;
   }
 
+  // -- the identity keepsake (1.0.0-beta.76), as the Provisioner writes it --
+  var IDENTITY_FILES = ["rns/identity", "pn_mailbox_identity"];
+  function b64ToU8(t) { var s = atob(t || ""), u = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+  function u8ToB64(u) { var s = ""; for (var i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); }
+  async function readIdentity(repl) {
+    var out = await repl.run("import binascii,json\nd={}\nfor p in " + JSON.stringify(IDENTITY_FILES) + ":\n try:\n" +
+                             "  d[p]=binascii.b2a_base64(open(p,'rb').read()).decode().strip()\n except OSError:\n  pass\nprint('ID'+json.dumps(d))\n");
+    var m = /ID(\{.*\})/.exec(out), d = m ? JSON.parse(m[1]) : {}, files = {};
+    Object.keys(d).forEach(function (k) { files[k] = b64ToU8(d[k]); });
+    return files["rns/identity"] && files["rns/identity"].length === 64 ? files : null;
+  }
+  async function identityFingerprint(files) {
+    var h = (await shaHex(files["rns/identity"])).slice(0, 16);
+    return h.match(/.{4}/g).join(" ");
+  }
+  async function keepsake(files, name, release) {
+    var f = {};
+    Object.keys(files).sort().forEach(function (k) { f[k] = u8ToB64(files[k]); });
+    var now = new Date(), day = now.getFullYear() + "-" + ("0" + (now.getMonth() + 1)).slice(-2) + "-" + ("0" + now.getDate()).slice(-2);
+    return JSON.stringify({ stump_identity: 1, name: name || "", saved: day, release: release || "",
+                            fingerprint: await identityFingerprint(files),
+                            note: "A Stump's identity: whoever has this file can be that Stump on the mesh. Keep it safe, and don't share it.",
+                            files: f }, null, 1) + "\n";
+  }
+  function keepsakeName(name) { return ((name || "Stump").replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").replace(/^[ .]+|[ .]+$/g, "") || "Stump") + ".stump-identity"; }
+  // A keepsake's text -> {files, name} or {error}.
+  function readKeepsake(text) {
+    var d;
+    try { d = JSON.parse(text); } catch (e) { return { error: "That file isn't a saved Stump identity." }; }
+    if (!d || d.stump_identity !== 1 || typeof d.files !== "object") return { error: "That file isn't a saved Stump identity." };
+    var files = {};
+    try { IDENTITY_FILES.forEach(function (k) { if (d.files[k]) files[k] = b64ToU8(d.files[k]); }); }
+    catch (e) { return { error: "That file is damaged: its identity won't read." }; }
+    if (!files["rns/identity"] || files["rns/identity"].length !== 64) return { error: "That file is damaged: its identity isn't whole." };
+    return { files: files, name: d.name || "" };
+  }
+  async function putIdentity(repl, files) {
+    await repl.run("import os\ntry:\n os.mkdir('rns')\nexcept OSError:\n pass\n");
+    var up = [];
+    for (var k in files) up.push({ path: k, data: files[k], sha256: await shaHex(files[k]) });
+    await upload(repl, up);
+    if (!files["pn_mailbox_identity"]) await repl.run("import os\ntry:\n os.remove('pn_mailbox_identity')\nexcept OSError:\n pass\n");
+  }
+
   // values: {KEY: value} for config.py, and HELTEC: {enabled, host, port}.
   async function writeSettings(repl, values) {
     var top = {}, h = values.HELTEC || null;
@@ -908,9 +952,9 @@
     if (miss.length) return no("Its pack.json has no " + miss.join(", ") + ".");
     if (!/^[a-z][a-z0-9_-]{0,31}$/.test(spec.name)) return no("The pack's name isn't a plain name.");
     known = known || {};
-    var plan = { name: spec.name, version: spec.version, plugins: [], card: [], byReader: [], theme: spec.theme || null,
-                 questions: [], refused: [] };
     var plugins = spec.plugins || [];
+    var plan = { name: spec.name, version: spec.version, plugins: [], card: [], byReader: [], theme: spec.theme || null,
+                 questions: [], refused: [], names: plugins.slice() };
     for (var i = 0; i < plugins.length; i++) {
       var pn = plugins[i];
       if (typeof pn !== "string" || !/^[a-z][a-z0-9_]{1,23}$/.test(pn)) return no("A plugin's name is 2-24 lowercase letters, digits or _.");
@@ -967,9 +1011,27 @@
   // A checked pack onto the board: its plugins on the flash (as source;
   // a compiled copy left from before goes), its tools and home files on the
   // card, its theme into themes.json. It starts at the next restart.
+  // What a pack installs is recorded in each of its plugin folders
+  // (.from_pack, as the Provisioner writes it, 1.0.0-beta.75): which pack,
+  // which version, its Tools section, home files and theme, so it can be
+  // updated and removed whole.
+  var PACK_MARK = ".from_pack";
+  function packRecord(plan) {
+    var tools = {}, home = [];
+    plan.card.concat(plan.byReader.map(function (p) { return { path: p }; })).forEach(function (f) {
+      var m = /^tools\/([^/]+)\//.exec(f.path);
+      if (m) tools["tools/" + m[1]] = 1;
+      else if (/^home\//.test(f.path)) home.push(f.path.slice(5));
+    });
+    return { pack: plan.name, version: String(plan.version), plugins: plan.names || [],
+             theme: plan.theme && plan.theme.name || null, tools: Object.keys(tools).sort(), home: home.sort() };
+  }
   async function installPack(repl, plan, progress) {
     if (plan.plugins.length) await upload(repl, plan.plugins, progress);
     if (plan.card.length) await toCard(repl, plan.card, progress);
+    var rec = enc.encode(JSON.stringify(packRecord(plan)));
+    for (var i = 0; i < (plan.names || []).length; i++)
+      await upload(repl, [{ path: plan.names[i] + "/" + PACK_MARK, data: rec, sha256: await shaHex(rec) }]);
     if (plan.theme && plan.theme.name) {
       var out = await repl.run("import json\ntry:\n d=json.load(open('themes.json'))\nexcept Exception:\n d={}\nprint('TH'+json.dumps(d))\n");
       var m = /TH(\{.*\})/.exec(out), cur = m ? JSON.parse(m[1]) : {};
@@ -1037,6 +1099,61 @@
                              "for d in " + JSON.stringify(dirs) + ":\n try:\n  if not os.listdir(d):\n   os.rmdir(d)\n except OSError:\n  pass\nprint('GONE%d' % n)\n", 60000);
     var m = /GONE(\d+)/.exec(out);
     return m ? +m[1] : 0;
+  }
+
+  // The packs on a board: its plugins that aren't built in, each with its
+  // record (null for one installed before 1.0.0-beta.75, or by hand),
+  // grouped by pack: [{name, plugins, record}].
+  async function listPacks(repl, builtins) {
+    var skip = (builtins || []).concat(["rns", "sd", "__pycache__", "lib", "urns", "web", "peripherals"]);
+    var out = await repl.run(
+      "import os,json\nout={}\nfor n in os.listdir():\n if n in " + JSON.stringify(skip) + ":\n  continue\n ok=False\n" +
+      " for f in ('/install.py','/install.mpy'):\n  try:\n   os.stat(n+f)\n   ok=True\n  except OSError:\n   pass\n" +
+      " if not ok:\n  continue\n r=None\n try:\n  with open(n+'/" + PACK_MARK + "') as f:\n   r=json.loads(f.read())\n" +
+      " except Exception:\n  pass\n out[n]=r\nprint('PACKS'+json.dumps(out))\n", 30000);
+    var m = /PACKS(\{.*\})/.exec(out), found = m ? JSON.parse(m[1]) : {}, groups = [], by = {};
+    Object.keys(found).sort().forEach(function (pn) {
+      var r = found[pn];
+      if (r && r.pack) {
+        if (!by[r.pack]) { by[r.pack] = { name: r.pack, plugins: [], record: r }; groups.push(by[r.pack]); }
+        by[r.pack].plugins.push(pn);
+      } else groups.push({ name: pn, plugins: [pn], record: null });
+    });
+    return groups;
+  }
+  // A pack off the board: its plugin folders; with also, what it keeps too
+  // (its saved data in plugins/ on the card, its Tools sections, its home
+  // files, its theme). Returns how many paths went.
+  async function removePack(repl, pack, also) {
+    var rec = pack.record || {}, card = [];
+    if (also) {
+      card = pack.plugins.map(function (p) { return "plugins/" + p; }).concat(rec.tools || [])
+                         .concat((rec.home || []).map(function (h) { return "home/" + h; }));
+    }
+    var out = await repl.run(
+      "import os\nn=0\ndef rm(p):\n global n\n try:\n  for e in os.listdir(p):\n   rm(p+'/'+e)\n  os.rmdir(p)\n  n+=1\n" +
+      " except OSError:\n  try:\n   os.remove(p)\n   n+=1\n  except OSError:\n   pass\n" +
+      "for p in " + JSON.stringify(pack.plugins) + ":\n rm(p)\n" +
+      (card.length ? "try:\n import fserv\n fserv.mount_sd()\nexcept Exception:\n pass\nfor p in " + JSON.stringify(card) + ":\n rm(" + py(CARD.root) + "+'/'+p)\n" : "") +
+      (also && rec.theme ? "import json\ntry:\n d=json.load(open('themes.json'))\n d.pop(" + py(rec.theme) + ",None)\n f=open('themes.json','w')\n f.write(json.dumps(d))\n f.close()\nexcept Exception:\n pass\n" : "") +
+      "print('GONE%d' % n)\n", 120000);
+    var m = /GONE(\d+)/.exec(out);
+    return m ? +m[1] : 0;
+  }
+
+  // The files an earlier release put on the board and this one no longer
+  // has (1.0.0-beta.74), left behind by every update before. Not inside a
+  // folder that is a plugin the Stump doesn't ship (a pack's). Returns the
+  // paths removed.
+  async function removeRetired(repl, paths, builtins) {
+    if (!paths || !paths.length) return [];
+    var out = await repl.run(
+      "import os\ndef has(t):\n for f in ('/install.py','/install.mpy'):\n  try:\n   os.stat(t+f)\n   return True\n  except OSError:\n   pass\n return False\n" +
+      "gone=[]\nfor p in " + JSON.stringify(paths) + ":\n t=p.split('/')[0] if '/' in p else None\n" +
+      " if t and t not in " + JSON.stringify(builtins || []) + " and has(t):\n  continue\n" +
+      " try:\n  os.remove(p)\n  gone.append(p)\n except OSError:\n  pass\nprint('RETIRED:'+','.join(gone))\n", 60000);
+    var m = /RETIRED:(.*)/.exec(out);
+    return m ? m[1].trim().split(",").filter(function (g) { return g; }) : [];
   }
 
   // Free memory at the prompt (bytes), or null: a WROVER's or a CAM's
@@ -1124,7 +1241,7 @@
               clearLeftovers: clearLeftovers, flashUse: flashUse, boardInfo: boardInfo, memory: memory,
               scanWifi: scanWifi, lookAround: lookAround, offers: offers, chainIdOf: chainIdOf, wifiPass: wifiPass,
               IMAGE_FOR: IMAGE_FOR, imageForChip: imageForChip, imageInfo: imageInfo, notFrozen: notFrozen,
-              removeFrozenCopies: removeFrozenCopies, HELTEC_ON_HOTSPOT: HELTEC_ON_HOTSPOT, HELTEC_FIRST: HELTEC_FIRST,
+              removeFrozenCopies: removeFrozenCopies, removeRetired: removeRetired, listPacks: listPacks, removePack: removePack, PACK_MARK: PACK_MARK, readIdentity: readIdentity, putIdentity: putIdentity, keepsake: keepsake, readKeepsake: readKeepsake, keepsakeName: keepsakeName, identityFingerprint: identityFingerprint, HELTEC_ON_HOTSPOT: HELTEC_ON_HOTSPOT, HELTEC_FIRST: HELTEC_FIRST,
               CARD: CARD, USB_MAX: USB_MAX, cardStatus: cardStatus, wipeCard: wipeCard, toCard: toCard,
               readZip: readZip, packFrom: packFrom, installPack: installPack, fillTools: fillTools, shaHex: shaHex,
               readSettings: readSettings, writeSettings: writeSettings,

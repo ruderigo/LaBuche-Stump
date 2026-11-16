@@ -1,5 +1,5 @@
 import os
-import sys, json, re, hashlib, shutil, zipfile, builtins
+import sys, json, re, hashlib, shutil, zipfile, builtins, subprocess
 from pathlib import Path
 import tempfile
 W = Path(__file__).resolve().parent.parent
@@ -594,6 +594,26 @@ check('... an answer is never printed (passwords among them)', SECRET not in tex
 check('... a question left out takes its default, said so', "(the default)" in text)
 check('... keys no question asked are reported', P.answers_unused() == ["nobody asks this"], P.answers_unused())
 P.ANSWERS.update(map=None, file=None, asked={}, used=set())
+# A pack chosen in its own step (1.0.0-beta.75): its settings asked there,
+# its bot and look offered (taken by default), kept by "Everything else".
+(tmp / "c.json").write_text(json.dumps({
+    "Node name": "Packed", "Admin password (/admin)": SECRET + "-admin", "Is this Stump part of a chain?": "no",
+    "The Heltec": 3, "Install tavern?": True, "Keep these defaults? (n: go through them)": True}))
+P.load_answers(tmp / "c.json")
+out = io.StringIO()
+try:
+    with contextlib.redirect_stdout(out):
+        prof, _ = P.config_wizard("pc")
+    ok = True
+except SystemExit as e:
+    prof, ok = {}, ("exit", e.code)
+text = out.getvalue()
+check('setup: a pack in its own step; its settings, bot and look kept with the other defaults',
+      ok is True and any("tavern-pack" in x for x in prof.get("packs", [])) and prof.get("bot_name") == "Tavernier"
+      and prof.get("theme") == "tavern" and 0 <= text.find("TAVERN_NICK") < text.find("Everything else")
+      and "pack_config" not in prof and "builtin_config" not in prof, (ok, {k: prof.get(k) for k in ("packs", "bot_name", "theme")}, text[-400:]))
+check('... the Packs step comes before Everything else', 0 <= text.find("Packs") < text.find("Everything else"), text[:300])
+P.ANSWERS.update(map=None, file=None, asked={}, used=set())
 (tmp / "b.json").write_text(json.dumps({"Node name": "X"}))
 P.load_answers(tmp / "b.json")
 with contextlib.redirect_stdout(io.StringIO()):
@@ -653,32 +673,330 @@ check('computer Stump: Arborist on its Tools page, with its READMEs, the old one
       sorted(x.name for x in arb.iterdir()))
 check('the Tools page READMEs include Arborist\'s (kept up to date on a card)',
       any(sec == "arborist" for _, sec in P._tool_readmes(P.Path(P.__file__).resolve().parent)))
-# Updating a computer Stump offers the packs it doesn't have yet (an
-# update used to keep the installed ones only: a new pack never reached
-# a Stump set up before it existed). And --install-pack takes its folder.
+# Updating a computer Stump: with an answers file (the RK3326 Provisioner)
+# the packs it doesn't have are asked one by one, as before; at the
+# keyboard, "p" opens its packs screen instead (1.0.0-beta.75: changing
+# packs isn't the whole setup again). The installed ones are brought up
+# to date either way, and each now records its pack.
 upd = P.Path(tempfile.mkdtemp(prefix="stump-upd-"))
 with contextlib.redirect_stdout(io.StringIO()):
     P._pc_copy_firmware(P.STUMP_APP_DIR, upd)
 shutil.copy(P.Path(P.__file__).resolve().parent / "tests" / "config.py", upd / "config.py")
-saved = (P._pc_ensure_venv, P._pc_configure_existing, P._pc_install_tools, P.ask_yes_no)
-asked = []
+saved = (P._pc_ensure_venv, P._pc_configure_existing, P._pc_install_tools, P.ask_yes_no, P.ask, P.packs_screen)
+asked, screens = [], []
 P._pc_ensure_venv = lambda f: sys.executable
 P._pc_configure_existing = lambda r, f: False
 P._pc_install_tools = lambda fw, f: None
 P.ask_yes_no = lambda q, d=False: (asked.append(q), "nomadnet" in q)[1]
+P.ANSWERS["map"] = {}
 with contextlib.redirect_stdout(io.StringIO()) as out:
     P.setup_pc(folder=str(upd))
-check('a --pc update offers each pack the Stump lacks; installs the ones said yes to',
+P.ANSWERS["map"] = None
+check('a --pc update with an answers file: each pack it lacks asked; the ones said yes to installed, with their pack recorded',
       any("Install nomadnet?" in q for q in asked) and any("Install simple?" in q for q in asked)
-      and (upd / "nomadnet" / "install.py").is_file() and not (upd / "simple").exists(),
-      asked)
+      and (upd / "nomadnet" / "install.py").is_file() and not (upd / "simple").exists()
+      and json.loads((upd / "nomadnet" / P.PACK_MARK).read_text())["pack"] == "nomadnet", asked)
 asked.clear()
+P.ask = lambda q, d=None: (asked.append(P._plain(q)), "p" if P._plain(q).startswith("p: its packs") else d)[1]
+P.packs_screen = lambda target, packs=None: screens.append(str(target)) or True
+(upd / "nomadnet" / "install.py").write_text("# an older copy\n")
 with contextlib.redirect_stdout(io.StringIO()):
     P.setup_pc(folder=str(upd))
-check('... and next time, nomadnet is kept up to date, not offered again',
-      not any("Install nomadnet?" in q for q in asked) and any("Install simple?" in q for q in asked), asked)
-P._pc_ensure_venv, P._pc_configure_existing, P._pc_install_tools, P.ask_yes_no = saved
+check('... at the keyboard: no pack asked one by one; p opens its packs screen, for this Stump',
+      not any(q.startswith("Install ") for q in asked) and screens == [str(upd)], (asked, screens))
+check('... and nomadnet, installed, brought up to date', "older copy" not in (upd / "nomadnet" / "install.py").read_text())
+P._pc_ensure_venv, P._pc_configure_existing, P._pc_install_tools, P.ask_yes_no, P.ask, P.packs_screen = saved
+# An update removes the files an earlier release put there and this one
+# no longer has (1.0.0-beta.74): flasher_ui.py, retired in beta.41, was
+# still on a computer Stump updated through beta.73. Never its settings,
+# data, identity, nor a pack's files.
+shipped = set(P._board_files(P.STUMP_APP_DIR))
+check('retired files: none of them shipped by this release', not (set(P.RETIRED_FILES) & shipped),
+      set(P.RETIRED_FILES) & shipped)
+ret = P.retired_files(P.STUMP_APP_DIR)
+check('... a retired module, as its source and its compiled copy', "flasher_ui.py" in ret and "flasher_ui.mpy" in ret, ret)
+for rel, data in (("flasher_ui.py", "old"), ("lib/ed25519_fast_xtensawin.mpy", "old"), ("rooms.json", "{}"),
+                  ("rns/identity", "its identity"), ("meter/install.py", "def setup(s):\n    pass\n"), ("meter/old.py", "a pack's"),
+                  ("fservbot/gone.py", "old")):
+    (upd / rel).parent.mkdir(parents=True, exist_ok=True)
+    (upd / rel).write_text(data)
+cfg_before = (upd / "config.py").read_text()
+saved_ret = P.RETIRED_FILES
+P.RETIRED_FILES = saved_ret + ("meter/old.py", "fservbot/gone.py", "olddir/gone.py")
+(upd / "olddir").mkdir(); (upd / "olddir" / "gone.py").write_text("old")
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    gone = P._pc_remove_retired(P.STUMP_APP_DIR, upd)
+check('a --pc update: the files the release no longer has go, and are named',
+      sorted(gone) == ["flasher_ui.py", "fservbot/gone.py", "lib/ed25519_fast_xtensawin.mpy", "olddir/gone.py"]
+      and "flasher_ui.py" in out.getvalue(), (gone, out.getvalue()))
+check('... a folder left empty goes too; one with anything else in it stays', not (upd / "olddir").exists() and (upd / "fservbot").is_dir())
+check('... its settings, data, identity and a pack\'s own file stay',
+      (upd / "config.py").read_text() == cfg_before and (upd / "rooms.json").is_file()
+      and (upd / "rns" / "identity").read_text() == "its identity" and (upd / "meter" / "old.py").read_text() == "a pack's")
+with contextlib.redirect_stdout(io.StringIO()):
+    check('... the next update: nothing left to remove', P._pc_remove_retired(P.STUMP_APP_DIR, upd) == [])
+# On a board: the same, in one call (the code run here as the board would).
+sent = []
+real_run = P.run
+board = Path(tempfile.mkdtemp(prefix="board-"))
+for rel in ("flasher_ui.mpy", "meter/install.mpy", "meter/old.py", "fservbot/install.mpy", "fservbot/gone.py", "config.py"):
+    (board / rel).parent.mkdir(parents=True, exist_ok=True)
+    (board / rel).write_text("x")
+def _on_board(cmd, timeout=None):
+    sent.append(cmd)
+    here = os.getcwd(); os.chdir(board)
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            exec(cmd[-1], {})
+    finally:
+        os.chdir(here)
+    return True, buf.getvalue()
+P.run = _on_board
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    n = P._remove_retired_on_board("/dev/ttyUSB0", P.STUMP_APP_DIR)
+P.run = real_run
+check('a board update: the same files go, in one call', n == 2 and len(sent) == 1 and not (board / "flasher_ui.mpy").exists()
+      and not (board / "fservbot" / "gone.py").exists(), (n, sent[-1][:4], sorted(str(p.relative_to(board)) for p in board.rglob("*"))))
+check('... a pack\'s own file and its settings stay', (board / "meter" / "old.py").exists() and (board / "config.py").exists())
+P.RETIRED_FILES = saved_ret
+shutil.rmtree(board, ignore_errors=True)
+# scripts/update_manifest.py: a file that leaves the firmware is listed
+# as retired; one that comes back isn't.
+mt = Path(tempfile.mkdtemp(prefix="manifest-"))
+shutil.copy(W / "provisioner.py", mt / "provisioner.py")
+shutil.copytree(W / "final_firmware", mt / "final_firmware", ignore=shutil.ignore_patterns("__pycache__"))
+(mt / "scripts").mkdir(); shutil.copy(W / "scripts" / "update_manifest.py", mt / "scripts" / "update_manifest.py")
+(mt / "final_firmware" / "qr.py").unlink()
+r = subprocess.run([sys.executable, str(mt / "scripts" / "update_manifest.py")], capture_output=True, text=True)
+src = (mt / "provisioner.py").read_text()
+blk = re.search(r"RETIRED_FILES = \((.*?)\n\)", src, re.S).group(1)
+check('update_manifest: a file that left the firmware becomes retired, and is said',
+      '"qr.py"' in blk and '"flasher_ui.py"' in blk and '"qr.py":' not in src and "retired: qr.py" in r.stdout, r.stdout + r.stderr)
+shutil.copy(W / "final_firmware" / "qr.py", mt / "final_firmware" / "qr.py")
+r = subprocess.run([sys.executable, str(mt / "scripts" / "update_manifest.py")], capture_output=True, text=True)
+blk = re.search(r"RETIRED_FILES = \((.*?)\n\)", (mt / "provisioner.py").read_text(), re.S).group(1)
+check('... and back in the firmware: not retired any more', '"qr.py"' not in blk and '"flasher_ui.py"' in blk, r.stdout + r.stderr)
+shutil.rmtree(mt, ignore_errors=True)
 shutil.rmtree(upd, ignore_errors=True)
+# Packs, on their own (1.0.0-beta.75): --packs lists a Stump's packs and
+# installs, updates or removes one; removing asks whether what it keeps
+# goes too. Nothing else about the Stump is asked.
+ps = P.Path(tempfile.mkdtemp(prefix="stump-packs-"))
+with contextlib.redirect_stdout(io.StringIO()):
+    P._pc_copy_firmware(P.STUMP_APP_DIR, ps)
+shutil.copy(P.Path(P.__file__).resolve().parent / "tests" / "config.py", ps / "config.py")
+(ps / "meter").mkdir(); (ps / "meter" / "install.py").write_text("def setup(s):\n    pass\n")   # copied in by hand
+here = [P.load_pack(W / "packs" / n) for n in ("tavern-pack", "simple-pack")]
+said = []
+real_ask, real_yn = P.ask, P.ask_yes_no
+def script(*a):
+    it = iter(a)
+    P.ask = lambda q, d=None: (said.append(P._plain(q)), next(it))[1]
+    P.ask_yes_no = lambda q, d=True: (said.append(P._plain(q)), next(it) == "y")[1]
+script("2", "i", "1", "i", "")
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    P.packs_screen(str(ps), packs=here)
+rec = json.loads((ps / "tavern" / P.PACK_MARK).read_text())
+check('--packs on a computer Stump: each pack listed, the one copied in by hand too',
+      all(n in out.getvalue() for n in ("simple", "tavern", "meter")) and "not among the packs here" in out.getvalue(), out.getvalue()[-600:])
+check('... install: its plugin there, its pack recorded (version, theme), its theme added',
+      (ps / "tavern" / "install.py").is_file() and rec["pack"] == "tavern" and rec["version"] == here[0]["spec"]["version"]
+      and rec["theme"] == "tavern" and "tavern" in json.loads((ps / "themes.json").read_text())
+      and (ps / "simple" / P.PACK_MARK).is_file(), rec)
+check('... nothing else asked (no setup question)', all(q.startswith(("A pack's number", "tavern:", "simple:")) for q in said), said)
+rows = P.pack_rows(here, P.pc_installed_packs(ps))
+check('... then: up to date, and the hand-copied one as not among the packs here',
+      [(r["name"], r["state"]) for r in rows] == [("simple", "same"), ("tavern", "same"), ("meter", "yours")], rows)
+r0 = json.loads((ps / "simple" / P.PACK_MARK).read_text()); r0["version"] = "0.9"
+(ps / "simple" / P.PACK_MARK).write_text(json.dumps(r0))
+check('... an older version installed: offered as an update', P.pack_rows(here, P.pc_installed_packs(ps))[0]["state"] == "update")
+for d in ("tavern", "meter"):
+    (ps / "sd" / "plugins" / d).mkdir(parents=True, exist_ok=True); (ps / "sd" / "plugins" / d / "data.json").write_text("{}")
+said.clear()
+script("1", "u", "2", "r", "y", "y", "3", "r", "y", "n", "")
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    P.packs_screen(str(ps), packs=here)
+check('... update: the newer one, recorded', json.loads((ps / "simple" / P.PACK_MARK).read_text())["version"] == here[1]["spec"]["version"])
+check('... remove, its data too (said yes): plugin, saved data and theme gone',
+      not (ps / "tavern").exists() and not (ps / "sd" / "plugins" / "tavern").exists()
+      and "tavern" not in json.loads((ps / "themes.json").read_text()), out.getvalue()[-500:])
+check('... the question names what it keeps', any(q.startswith("Delete what it keeps too: its saved data (sd/plugins/tavern)")
+      and "its theme (tavern)" in q for q in said), said)
+check('... remove, its data kept (said no): the plugin gone, its data stays',
+      not (ps / "meter").exists() and (ps / "sd" / "plugins" / "meter" / "data.json").is_file())
+check('... a running Stump restarts on the change', (ps / ".updated").is_file())
+P.ask, P.ask_yes_no = real_ask, real_yn
+shutil.rmtree(ps, ignore_errors=True)
+# On a board: what it has, read in one call (run here as the board would).
+brd = Path(tempfile.mkdtemp(prefix="board-"))
+for rel, data in (("tavern/install.mpy", "x"), ("tavern/" + P.PACK_MARK, json.dumps({"pack": "tavern", "version": "1.2"})),
+                  ("simple/install.py", "x"), ("stumpid/install.mpy", "x"), ("urns/__init__.mpy", "x"), ("config.py", "x")):
+    (brd / rel).parent.mkdir(parents=True, exist_ok=True); (brd / rel).write_text(data)
+real_run = P.run
+def _brd(cmd, timeout=None):
+    here_ = os.getcwd(); os.chdir(brd)
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            exec(cmd[-1], {})
+    finally:
+        os.chdir(here_)
+    return True, buf.getvalue()
+P.run = _brd
+got = P.board_installed_packs("/dev/ttyUSB0")
+P.run = real_run
+check('a board\'s packs: its plugins that aren\'t built in, with their record (none before beta.75)',
+      got == {"tavern": {"pack": "tavern", "version": "1.2"}, "simple": None}, got)
+shutil.rmtree(brd, ignore_errors=True)
+# The identity keepsake (1.0.0-beta.76): a Stump's identity in one file,
+# to bring the same Stump back on a fresh install or another board.
+home = Path(tempfile.mkdtemp(prefix="home-")); old_home = os.environ.get("HOME"); os.environ["HOME"] = str(home)
+kf = P.Path(tempfile.mkdtemp(prefix="stump-id-"))
+with contextlib.redirect_stdout(io.StringIO()):
+    P._pc_copy_firmware(P.STUMP_APP_DIR, kf)
+(kf / "config.py").write_text("NODE_NAME = \"Bob's Glitch\"\n")
+first = P.pc_new_identity(kf)
+check('a new computer Stump: its identity made before it starts (64 bytes), kept the next time',
+      len(first["rns/identity"]) == 64 and P.pc_new_identity(kf) == first)
+(kf / "pn_mailbox_identity").write_bytes(b"m" * 64)
+files = P.pc_identity(kf)
+p1 = P.save_keepsake(files, P._folder_name(kf))
+d1 = json.loads(p1.read_text())
+check('saved: one file named after the Stump, in the home folder, readable by its owner only',
+      p1 == home / "Bob's Glitch.stump-identity" and (os.name == "nt" or (p1.stat().st_mode & 0o077) == 0)
+      and d1["name"] == "Bob's Glitch" and "keep it safe" in d1["note"].lower(), (p1, oct(p1.stat().st_mode)))
+check('... the identity only: its two keys and its mailbox, no setting nor password',
+      sorted(d1["files"]) == ["pn_mailbox_identity", "rns/identity"] and "config" not in p1.read_text().lower().replace("config.py", ""))
+got, nm = P.read_identity_source(p1)
+check('... read back whole', got == files and nm == "Bob's Glitch")
+got2, nm2 = P.read_identity_source(kf)
+check('... and an old Stump folder reads the same way', got2 == files and nm2 == "Bob's Glitch")
+for bad, why in (('{"a":1}', "isn't a saved"), (json.dumps(dict(d1, files={"rns/identity": "AAAA"})), "isn't whole"), ("not json", "isn't a saved")):
+    (home / "bad.stump-identity").write_text(bad)
+    try:
+        P.read_identity_source(home / "bad.stump-identity"); err = ""
+    except ValueError as e:
+        err = str(e)
+    check('... a file that isn\'t one, or damaged: said (%s)' % why, why in err, err)
+# Brought back onto another computer Stump (a fresh install): its own
+# identity saved first, the mailbox with it, the Stump restarted.
+fresh = P.Path(tempfile.mkdtemp(prefix="stump-fresh-"))
+with contextlib.redirect_stdout(io.StringIO()):
+    P._pc_copy_firmware(P.STUMP_APP_DIR, fresh)
+(fresh / "config.py").write_text("NODE_NAME = 'New one'\n")
+P.pc_new_identity(fresh)
+yn = P.ask_yes_no
+P.ask_yes_no = lambda q, d=True: True
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    ok = P.restore_identity(str(fresh), str(p1))
+P.ask_yes_no = yn
+saved_first = [x for x in home.glob("New one (replaced*")]
+check('--restore-identity onto a computer Stump: it is that Stump again, its mailbox too',
+      ok and P.pc_identity(fresh) == files and (fresh / ".updated").is_file(), out.getvalue())
+check('... the identity it had is saved first, and said', len(saved_first) == 1 and "saved first" in out.getvalue(),
+      (list(home.iterdir()), out.getvalue()))
+check('... it says the old one must not run any more', "must not run any more" in out.getvalue())
+only = home / "only.stump-identity"; only.write_bytes(P.keepsake_bytes({"rns/identity": files["rns/identity"]}, "x"))
+with contextlib.redirect_stdout(io.StringIO()):
+    P.ask_yes_no = lambda q, d=True: True
+    P.restore_identity(str(fresh), str(only))
+    P.ask_yes_no = yn
+check('... a keepsake without a mailbox: the mailbox left from before goes (it was another Stump\'s)',
+      not (fresh / "pn_mailbox_identity").exists())
+# Asked in a first setup: a path that's wrong is said and asked again; Enter: a new Stump.
+said = []
+real_ask = P.ask
+it = iter([str(home / "nope"), str(p1)])
+P.ask = lambda q, d=None: (said.append(q), next(it))[1]
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    back = P.ask_restore_identity()
+check('setup: a saved identity to bring back, asked; a wrong path said, then the file taken',
+      back and back[0] == files and "No file or folder" in out.getvalue() and len(said) == 2, out.getvalue())
+P.ask = lambda q, d=None: ""
+with contextlib.redirect_stdout(io.StringIO()):
+    check('... Enter: none, a new Stump', P.ask_restore_identity() is None)
+answers_ = []
+P.ask_yes_no = lambda q, d=True: (answers_.append((q, d)), True)[1]
+P.ask = lambda q, d=None: d
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    kept = P.offer_save_identity(files, "Bob's Glitch 2")
+check('setup: saving it offered (yes by default at the keyboard), where asked, said with its fingerprint',
+      kept == home / "Bob's Glitch 2.stump-identity" and answers_ and answers_[0][1] is True
+      and P.identity_fingerprint(files) in out.getvalue(), out.getvalue())
+P.ask, P.ask_yes_no = real_ask, yn
+# On a board: read and written over mpremote (a pretend board here).
+bd = Path(tempfile.mkdtemp(prefix="board-id-"))
+(bd / "rns").mkdir(); (bd / "rns" / "identity").write_bytes(b"b" * 64); (bd / "config.py").write_text("NODE_NAME = 'Gearn'\n")
+def _mp(cmd, timeout=None):
+    a = cmd[3:]
+    if a[:2] == ["fs", "cp"]:
+        src, dst = a[2], a[3]
+        rd = lambda x: (bd / x[1:]) if x.startswith(":") else Path(x)
+        try:
+            data = rd(src).read_bytes()
+        except OSError:
+            return False, "no such file"
+        rd(dst).parent.mkdir(parents=True, exist_ok=True); rd(dst).write_bytes(data)
+        return True, ""
+    if a[:2] == ["fs", "cat"]:
+        try:
+            return True, (bd / a[2][1:]).read_text()
+        except OSError:
+            return False, ""
+    if a[:2] == ["fs", "rm"]:
+        try:
+            (bd / a[2][1:]).unlink(); return True, ""
+        except OSError:
+            return False, ""
+    return True, ""
+real_run = P.run
+P.run = _mp
+bid = P.board_identity("/dev/ttyUSB0")
+check('a board\'s identity read (its mailbox only if it has one), and its name', bid == {"rns/identity": b"b" * 64}
+      and P.board_name("/dev/ttyUSB0") == "Gearn", bid)
+P.ask_yes_no = lambda q, d=True: True
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    ok = P.restore_identity("/dev/ttyUSB0", str(p1))
+P.ask_yes_no = yn
+P.run = real_run
+check('--restore-identity onto a board: its identity and mailbox there, the one it had saved first',
+      ok and (bd / "rns" / "identity").read_bytes() == files["rns/identity"] and (bd / "pn_mailbox_identity").read_bytes() == b"m" * 64
+      and list(home.glob("Gearn (replaced*")), out.getvalue())
+if old_home is None:
+    os.environ.pop("HOME", None)
+else:
+    os.environ["HOME"] = old_home
+for d_ in (home, kf, fresh, bd):
+    shutil.rmtree(d_, ignore_errors=True)
+# Choices in prompts, bold (1.0.0-beta.77): the key and what it does, on a
+# terminal; plain text elsewhere; an answers file keys a question by its
+# words, marks or not.
+q = "Change something? %s: %s · %s: %s" % (P._k("s"), P._k("the storage"), P._k("Enter"), P._k("nothing"))
+check('a choice in a prompt: marked, the words the same', P._plain(q) == "Change something? s: the storage · Enter: nothing")
+check('... an answers file keys it as before', P._qkey(q) == "change something" and P._qkey(P._k("Keep these defaults") + "?") == "keep these defaults")
+real_tty = P._tty
+P._tty = lambda: True
+check('... on a terminal: the key and its meaning bold', P._shown(q) == "Change something? \033[1ms\033[0m: \033[1mthe storage\033[0m · \033[1mEnter\033[0m: \033[1mnothing\033[0m")
+P._tty = lambda: False
+check('... piped or in a log: plain', P._shown(q) == P._plain(q))
+P._tty = real_tty
+check('... a numbered option: its number and its name', P._plain(P._option(2, "Amber -- warm dark")) == "2) Amber -- warm dark"
+      and P._option(2, "Amber -- warm dark").startswith(P._k("2)") + " " + P._k("Amber")))
+typed = []
+builtins.input = lambda pr="": (typed.append(pr), "")[1]
+with contextlib.redirect_stdout(io.StringIO()):
+    P.ask_yes_no("Go on?", True)
+check('... yes or no: [Y/n] bold, and no mark left in what the terminal gets', typed and P._B0 not in typed[0] and "Y/n" in typed[0], typed)
+builtins.input = lambda *a: (_ for _ in ()).throw(AssertionError("asked the keyboard"))
+src_ = P.Path(P.__file__).read_text()
+check('... every "Enter to/Enter:" a prompt offers is marked', not re.search(r'(ask|_in|input)\((f?)"[^"\n]*\bEnter( to|:) ', src_),
+      re.findall(r'(?:ask|_in|input)\(f?"[^"\n]*\bEnter(?: to|:) [^"\n]*"', src_)[:5])
+# The setup: packs are a step of their own, before "Everything else"
+# (which no longer has them); a pack's bot and look are offered there.
+src = P.Path(P.__file__).read_text()
+check('setup: Packs is its own step, before Everything else',
+      '("Packs", sec_packs), ("Everything else"' in src and "Answer n to go through them now: the bot" in src)
 shutil.rmtree(tmp, ignore_errors=True)
 # The board step, a Stump board on a USB bridge (the WROVER: one USB port,
 # a CH340): the chip is asked, not the USB ids, and a WROVER goes through

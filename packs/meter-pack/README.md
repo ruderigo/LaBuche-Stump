@@ -4,7 +4,7 @@ A tester's counter. It tells you how much the Stump sends people's
 apps over LXMF, and how many of those messages fit **one LoRa packet**,
 so you can measure a kit on one firmware, update it, and measure again.
 It's the same pack on any firmware since 1.0.0-beta.53: before
-1.0.0-beta.74 text goes as it is; from 1.0.0-beta.74 it goes packed to
+1.0.0-beta.78 text goes as it is; from 1.0.0-beta.78 it goes packed to
 the apps that read it (CLIENT_QUICKSTART, *Packed text*).
 
 | You write | You get |
@@ -63,7 +63,7 @@ Then use the Stump normally for a while, and ask for the totals (the
 figures here are only an example):
 
 ```
-meter · 1.0.0-beta.74 · packed text: on, 2 address(es) read it
+meter · 1.0.0-beta.78 · packed text: on, 2 address(es) read it
 to apps in 42 min: 57 messages, 9120 B of text → 5630 B sent (62%), 49 packed
 one packet: 55 of 57 (as plain text: 46)
 ```

@@ -2,7 +2,7 @@
 # apps over LXMF, how many bytes that takes as sent, and how many of
 # those messages fit one LoRa packet. The same pack on any firmware
 # since 1.0.0-beta.53, so a kit can be measured before and after an
-# update: before 1.0.0-beta.74 text goes as it is; from then on it goes
+# update: before 1.0.0-beta.78 text goes as it is; from then on it goes
 # packed to the apps that read it (urns/ztext.py), and the numbers say
 # by how much.
 #
@@ -78,7 +78,7 @@ def _router():
 
 
 def _packing():
-    """None on a firmware without packed text (before 1.0.0-beta.74);
+    """None on a firmware without packed text (before 1.0.0-beta.78);
     else (on?, how many addresses here read it)."""
     r = _router()
     if r is None or not hasattr(r, "packs_for"):

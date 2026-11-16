@@ -520,7 +520,7 @@ to cost 20, a second at 8, minutes at 16), a board can't and sends the
 message without one. The Stump itself never requires stamps: send it
 messages as usual. Its announce says cost `None`.
 
-## Packed text: more in each packet (since 1.0.0-beta.74)
+## Packed text: more in each packet (since 1.0.0-beta.78)
 
 One LoRa packet holds 295 bytes of LXMF content, and the rest of its
 500 is spent before the first letter (addresses, the signature, the

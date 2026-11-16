@@ -27,6 +27,9 @@ Usage:
     python3 provisioner.py --get-ip PORT   # look up the Stump's live AP IP
     python3 provisioner.py --version [PORT] # this folder's release, GitHub's, a CAM's
     python3 provisioner.py --list-packs    # show the packs in packs/ (and their hashes)
+    python3 provisioner.py --packs [PORT|FOLDER]      # a Stump's packs: install, update, remove
+    python3 provisioner.py --save-identity [PORT|FOLDER] [FILE]   # a Stump's identity in a file to keep
+    python3 provisioner.py --restore-identity PORT|FOLDER FILE|OLD_FOLDER   # bring that Stump back
     python3 provisioner.py --install-pack PORT PACK   # add a pack (folder or .zip) to a node
     python3 provisioner.py --remove-plugin PORT NAME  # take a plugin off a node
     python3 provisioner.py --hash-pack FOLDER         # pack authors: hash before publishing
@@ -364,19 +367,19 @@ EXPECTED_FILE_HASHES = {
     "config.py": "e7eaea890e2b39ee",
     "conn.py": "b17cf4fb4f80fbbf",
     "discovery.py": "dabf766fa6524a71",
-    "docs/ARBORIST.md": "96ab05645318b667",
+    "docs/ARBORIST.md": "6974376de39c17e5",
     "docs/CHAIN.md": "ef67046589363f45",
-    "docs/CLIENT_QUICKSTART.md": "c87d9cd86569119d",
+    "docs/CLIENT_QUICKSTART.md": "4985af8d1f2c9346",
     "docs/COMMANDS.md": "6e7a758629ad38f8",
     "docs/ENGINEERING_NOTES.md": "72f7d19d7c5f03a4",
     "docs/FIELD_TEST.md": "e7f7b3878fda4de3",
     "docs/HIDDEN_FEATURES.md": "568bc132ab83a91b",
     "docs/HOME_BRANDING.md": "e1a1a9cf854dcdce",
     "docs/HTTPS_SETUP.md": "12cbbf2de7c38810",
-    "docs/PACKS.md": "b7a5d51fa9fe622a",
-    "docs/PC.md": "e90244ab4b47d68e",
+    "docs/PACKS.md": "9d5f2fe8dc5237bd",
+    "docs/PC.md": "0f9263279ac36d79",
     "docs/PLUGINS.md": "8085ca56b773b64a",
-    "example_node.py": "9c60bf616e901816",
+    "example_node.py": "02c52a971c3b2bba",
     "features.py": "81e8af361c64a911",
     "fserv.py": "06b87b1d6fb95eb4",
     "fservbot/plugin.json": "12b3c544160411e3",
@@ -630,6 +633,19 @@ def _belongs_on_board(relpath):
 
 STUMP_APP_FILES = [f for f in EXPECTED_FILE_HASHES.keys() if _belongs_on_board(f)]
 
+# Files an earlier Stump release put on a board or a computer Stump and
+# this one no longer has (1.0.0-beta.74). An update copies the new files
+# and removes these: before, they stayed forever (flasher_ui.py, retired
+# in beta.41, was still on a computer Stump updated through beta.73).
+# Only ever this list: a Stump's own files (settings, identity, data,
+# packs) are never touched. scripts/update_manifest.py adds a file here
+# when it leaves the manifest; a file dropped from a built-in plugin is
+# added by hand.
+RETIRED_FILES = (
+    "flasher_ui.py",
+    "lib/ed25519_fast_xtensawin.mpy",
+)
+
 # Derived from STUMP_APP_FILES itself (not hand-written) so this can't
 # drift out of sync -- the old flat-file build's equivalent string did
 # exactly that once. Many files across nested subdirectories makes a
@@ -824,7 +840,7 @@ def discover_plugins(fw_dir):
     return found
 
 
-def configure_plugins(fw_dir, show_advanced=False, extra=(), preset=None, quiet=False):
+def configure_plugins(fw_dir, show_advanced=False, extra=(), preset=None, quiet=False, builtins=True):
     """Runs the wizard prompts each discovered plugin declares.
 
     Returns {CONFIG_KEY: value} to be written into config.py.
@@ -835,7 +851,7 @@ def configure_plugins(fw_dir, show_advanced=False, extra=(), preset=None, quiet=
     those stay changeable later, either by editing config.py or from
     whatever in-app surface the plugin provides.
     """
-    plugins = discover_plugins(fw_dir) + list(extra)
+    plugins = (discover_plugins(fw_dir) if builtins else []) + list(extra)
     if not plugins:
         return {}
     preset = dict(preset or {})
@@ -1351,16 +1367,16 @@ def _pick_packs(packs, fw_api):
     HELP[0] = "Packs add plugins (chat commands, pages), and sometimes a theme or a bot persona. A " \
               "pack is code with full access to the node: install only packs from people you trust.\n" + \
               "\n".join(u[3].rstrip() for u in usable)
-    print("\n  Packs (? for what each one does):")
+    print("\n  Packs (%s for %s):" % (bold("?"), bold("what each one does")))
     pad = max(len(u[0]["spec"]["name"]) for u in usable)
     room = max(30, _width() - pad - 10)
     for i, (pack, refusal, warnings, _) in enumerate(usable, 1):
         spec = pack["spec"]
-        about = "can't install here (? for why)" if refusal else _clip(_first_sentence(spec.get("description", "")), room)
+        about = "can't install here (%s for %s)" % (bold("?"), bold("why")) if refusal else _clip(_first_sentence(spec.get("description", "")), room)
         line = "%d  %-*s  %s" % (i, pad, spec["name"], about)
         print("    " + (dim(line) if refusal else line))
     while True:
-        raw = ask("  Packs to install (numbers, e.g. 1 3; Enter for none)", "")
+        raw = ask("  Packs to install (%s, e.g. 1 3; %s for %s)" % (_k("numbers"), _k("Enter"), _k("none")), "")
         nums = (raw or "").replace(",", " ").split()
         try:
             picked = sorted(set(int(n) for n in nums))
@@ -1372,7 +1388,7 @@ def _pick_packs(packs, fw_api):
             continue
         chosen = [usable[n - 1][0] for n in picked]
         notes = [usable[n - 1][0]["spec"]["name"] for n in picked if usable[n - 1][2]]
-        if notes and not ask_yes_no("  %s %s notes (? to read them). Install anyway?"
+        if notes and not ask_yes_no("  %s %s notes (" + _k("?") + " to " + _k("read them") + "). Install anyway?"
                                     % (", ".join(notes), "has" if len(notes) == 1 else "have"), False):
             continue
         return chosen
@@ -1528,6 +1544,596 @@ def remove_plugin(port, name):
     return False
 
 
+# ---------------------------------------------------------------------------
+# Packs, on their own (1.0.0-beta.75): install, update and remove a Stump's
+# packs without going through its whole setup. `--packs [PORT|FOLDER]`.
+# ---------------------------------------------------------------------------
+
+# Written into each plugin folder a pack installs: which pack, which
+# version, and what else it put where, so it can be updated and removed
+# whole (its Tools section, home files, theme). Packs installed before
+# beta.75 have none: shown as installed, version not recorded.
+PACK_MARK = ".from_pack"
+
+
+def _pack_tool_sections(d, spec, board):
+    """The Tools page sections a pack fills: on a board a file in a folder
+    of tools/ goes to that folder's section (install_packs); on a computer
+    all to tools/<pack name>/ (_pc_install_packs)."""
+    secs = set()
+    for rel in _pack_files(d, spec):
+        sub, fname = rel.split("/", 1)
+        if sub != "tools":
+            continue
+        secs.add("tools/" + (fname.split("/", 1)[0] if board and "/" in fname else spec["name"]))
+    return sorted(secs)
+
+
+def pack_record(pack, board):
+    spec, d = pack["spec"], pack["dir"]
+    return {"pack": spec["name"], "version": str(spec.get("version", "")),
+            "plugins": list(spec.get("plugins", [])),
+            "theme": (spec.get("theme") or {}).get("name") or None,
+            "tools": _pack_tool_sections(d, spec, board),
+            "home": sorted(rel.split("/", 1)[1] for rel in _pack_files(d, spec) if rel.startswith("home/"))}
+
+
+def _group_installed(found):
+    """{plugin: record or None} -> [{name, plugins, record}], one per pack
+    (a plugin with no record is its own)."""
+    out, by_pack = [], {}
+    for plugin in sorted(found):
+        rec = found[plugin]
+        if rec and rec.get("pack"):
+            g = by_pack.get(rec["pack"])
+            if g is None:
+                g = by_pack[rec["pack"]] = {"name": rec["pack"], "plugins": [], "record": rec}
+                out.append(g)
+            g["plugins"].append(plugin)
+        else:
+            out.append({"name": plugin, "plugins": [plugin], "record": None})
+    return out
+
+
+def pc_installed_packs(folder, fw=None):
+    """The plugins in a computer Stump's folder that aren't its own (the
+    built-in ones): {plugin: its record, or None}."""
+    folder = Path(folder)
+    builtins = _builtin_plugins(fw or STUMP_APP_DIR)
+    found = {}
+    for d in sorted(folder.iterdir()) if folder.is_dir() else []:
+        if not d.is_dir() or d.name in builtins or d.name in RUNTIME_STATE_DIRS:
+            continue
+        if (d / "install.py").is_file() or (d / "install.mpy").is_file():
+            rec = None
+            try:
+                rec = json.loads((d / PACK_MARK).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+            found[d.name] = rec if isinstance(rec, dict) else None
+    return found
+
+
+def board_installed_packs(port, fw=None):
+    """The same on a board, in one call. None if the board can't be read."""
+    code = ("import os,json\n"
+            "out={}\n"
+            "for n in os.listdir():\n"
+            "    if n in %r:\n"
+            "        continue\n"
+            "    ok=False\n"
+            "    for f in ('/install.py','/install.mpy'):\n"
+            "        try:\n"
+            "            os.stat(n+f)\n"
+            "            ok=True\n"
+            "        except OSError:\n"
+            "            pass\n"
+            "    if not ok:\n"
+            "        continue\n"
+            "    r=None\n"
+            "    try:\n"
+            "        with open(n+'/%s') as f:\n"
+            "            r=json.loads(f.read())\n"
+            "    except Exception:\n"
+            "        pass\n"
+            "    out[n]=r\n"
+            "print('PACKS:'+json.dumps(out))\n") % (sorted(_builtin_plugins(fw or STUMP_APP_DIR)) + list(RUNTIME_STATE_DIRS), PACK_MARK)
+    ok, out = run(["mpremote", "connect", port, "exec", code], timeout=40)
+    m = re.search(r"PACKS:(\{.*\})", out or "") if ok else None
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(1))
+    except ValueError:
+        return None
+
+
+def pack_rows(available, installed):
+    """One row per pack, the available ones and the installed ones:
+    {name, pack (available, or None), plugins, here (installed version,
+    "" if not recorded, None if not installed), record, state}. state:
+    "new" (not installed), "same", "update", "yours" (installed, not
+    among the packs here)."""
+    groups = _group_installed(installed)
+    rows, used = [], set()
+    for p in sorted(available, key=lambda p: p["spec"]["name"]):
+        spec = p["spec"]
+        g = next((g for g in groups if g["name"] == spec["name"]
+                  or (g["record"] is None and set(g["plugins"]) <= set(spec.get("plugins", [])))), None)
+        if g is None:
+            rows.append({"name": spec["name"], "pack": p, "plugins": list(spec.get("plugins", [])),
+                         "here": None, "record": None, "state": "new"})
+            continue
+        used.add(id(g))
+        here = (g["record"] or {}).get("version", "")
+        rows.append({"name": spec["name"], "pack": p, "plugins": sorted(set(g["plugins"]) | set(spec.get("plugins", []))),
+                     "here": here, "record": g["record"],
+                     "state": "same" if here and here == str(spec.get("version", "")) else "update"})
+    for g in groups:
+        if id(g) not in used:
+            rows.append({"name": g["name"], "pack": None, "plugins": g["plugins"],
+                         "here": (g["record"] or {}).get("version", ""), "record": g["record"], "state": "yours"})
+    return rows
+
+
+def _row_text(r):
+    here = {None: "-"}.get(r["here"], r["here"] or "installed")
+    avail = r["pack"]["spec"].get("version", "") if r["pack"] else "-"
+    note = {"new": "", "same": "up to date", "update": "update", "yours": "not among the packs here"}[r["state"]]
+    return "%-12s %-10s %-10s %s" % (r["name"], here, avail, note)
+
+
+def _themes_without(themes, name):
+    themes = dict(themes or {})
+    themes.pop(name, None)
+    return themes
+
+
+def pc_install_pack(folder, pack):
+    """A pack into a computer Stump (new or an update), its record in each
+    of its plugin folders."""
+    folder = Path(folder)
+    _pc_install_packs(folder, [pack])
+    rec = pack_record(pack, board=False)
+    for name in rec["plugins"]:
+        (folder / name).mkdir(parents=True, exist_ok=True)
+        (folder / name / PACK_MARK).write_text(json.dumps(rec), encoding="utf-8")
+    _pc_mark_updated(folder)
+    return True
+
+
+def board_install_pack(port, pack):
+    if not install_packs(port, [pack]):
+        return False
+    rec = pack_record(pack, board=True)
+    tmp = Path(tempfile.mkdtemp()) / PACK_MARK
+    tmp.write_text(json.dumps(rec), encoding="utf-8")
+    ok = True
+    for name in rec["plugins"]:
+        good, _ = run(["mpremote", "connect", port, "fs", "cp", str(tmp), ":%s/%s" % (name, PACK_MARK)], timeout=30)
+        ok = ok and good
+    return ok
+
+
+def _pack_leftovers(row, board):
+    """What a pack keeps besides its plugins, for the "delete those too?"
+    question: its saved data, its Tools sections, its home files, its
+    theme (paths on the card, relative to it)."""
+    rec = row["record"] or (pack_record(row["pack"], board) if row["pack"] else {})
+    data = ["plugins/" + p for p in row["plugins"]]
+    return data, list(rec.get("tools") or []), ["home/" + h for h in rec.get("home") or []], rec.get("theme")
+
+
+def pc_remove_pack(folder, row, also):
+    """Removes a pack's plugins from a computer Stump; with also, what it
+    keeps too (its data, Tools sections, home files and theme)."""
+    import shutil
+    folder = Path(folder)
+    for p in row["plugins"]:
+        shutil.rmtree(folder / p, ignore_errors=True)
+    if also:
+        data, tools, home, theme = _pack_leftovers(row, board=False)
+        for rel in data + tools:
+            shutil.rmtree(folder / "sd" / rel, ignore_errors=True)
+        for rel in home:
+            try:
+                (folder / "sd" / rel).unlink()
+            except OSError:
+                pass
+        if theme:
+            tf = folder / "themes.json"
+            try:
+                tf.write_text(json.dumps(_themes_without(json.loads(tf.read_text(encoding="utf-8")), theme),
+                                         ensure_ascii=False), encoding="utf-8")
+            except (OSError, ValueError):
+                pass
+    _pc_mark_updated(folder)
+    return True
+
+
+def board_remove_pack(port, row, also):
+    ok = all(remove_plugin(port, p) for p in row["plugins"])
+    if also:
+        data, tools, home, theme = _pack_leftovers(row, board=True)
+        code = ("import os,fserv\n"
+                "fserv.mount_sd()\n"
+                "def rm(p):\n"
+                " try:\n"
+                "  for n in os.listdir(p):\n"
+                "   rm(p+'/'+n)\n"
+                "  os.rmdir(p)\n"
+                " except OSError:\n"
+                "  try:\n"
+                "   os.remove(p)\n"
+                "  except OSError:\n"
+                "   pass\n"
+                "for p in %r:\n"
+                " rm('/sd/'+p)\n"
+                "print('LEFT-GONE')\n") % (data + tools + home)
+        good, out = run(["mpremote", "connect", port, "exec", code], timeout=120)
+        ok = ok and good and "LEFT-GONE" in (out or "")
+        if theme:
+            good, out = run(["mpremote", "connect", port, "fs", "cat", ":themes.json"], timeout=20)
+            try:
+                cur = json.loads(out[out.index("{"):out.rindex("}") + 1]) if good else {}
+            except ValueError:
+                cur = {}
+            if theme in cur:
+                tmp = Path(tempfile.mkdtemp()) / "themes.json"
+                tmp.write_text(json.dumps(_themes_without(cur, theme), ensure_ascii=False))
+                good, _ = run(["mpremote", "connect", port, "fs", "cp", str(tmp), ":themes.json"], timeout=30)
+                ok = ok and good
+    return ok
+
+
+def ask_stump_target(question="Which Stump's packs?"):
+    """Which Stump: this computer's, a board on USB, or a computer Stump in
+    another folder. A port or a folder, or None."""
+    pc = pc_default_folder()
+    opts = (["This computer's Stump (%s)" % pc] if (pc / "stump_pc.py").is_file() else []) + \
+        ["A board on USB", "A computer Stump in another folder"]
+    c = ask_choice(question, opts)
+    if c.startswith("This computer"):
+        return str(pc)
+    if c.startswith("A board"):
+        return choose_board()
+    return ask("Its folder", str(pc))
+
+
+def packs_screen(target, packs=None):
+    """The packs of one Stump, a board (its port) or a computer Stump (its
+    folder): each pack here and each one it has, with install, update and
+    remove. Nothing else about the Stump is asked or changed."""
+    is_pc = (Path(str(target)).expanduser() / "stump_pc.py").is_file()
+    if not is_pc and Path(str(target)).expanduser().is_dir():
+        print(yellow("%s isn't a Stump's folder (no stump_pc.py in it)." % target))
+        return False
+    where = Path(str(target)).expanduser().resolve() if is_pc else target
+    fw = _remembered_path("stump_app_dir") or STUMP_APP_DIR
+    fw_api = firmware_plugin_api(fw)
+    available = discover_packs() if packs is None else packs
+    changed = False
+    while True:
+        installed = pc_installed_packs(where, fw) if is_pc else board_installed_packs(where, fw)
+        if installed is None:
+            print(yellow("Couldn't read the packs on the board at %s: is it plugged in, and free?" % where))
+            return False
+        rows = pack_rows(available, installed)
+        banner("PACKS")
+        print("%s  %s\n" % ("A computer Stump:" if is_pc else "The board on", where))
+        if not rows:
+            print("No packs here, and none on this Stump. Packs go in the packs/ folder next to the Provisioner.")
+            return True
+        print("     %-12s %-10s %-10s" % ("pack", "on it", "here"))
+        for i, r in enumerate(rows, 1):
+            print("  %2d %s" % (i, _row_text(r)))
+        print()
+        a = (ask("%s · %s: %s" % (_k("A pack's number"), _k("Enter"), _k("done"))) or "").strip()
+        if not a:
+            break
+        if not a.isdigit() or not 1 <= int(a) <= len(rows):
+            print("  " + yellow("A number from 1 to %d, or Enter." % len(rows)))
+            continue
+        r = rows[int(a) - 1]
+        acts = {"new": [("i", "install")], "same": [("u", "update"), ("r", "remove")],
+                "update": [("u", "update"), ("r", "remove")], "yours": [("r", "remove")]}[r["state"]]
+        if r["state"] == "same":
+            acts = [("u", "install again"), ("r", "remove")]
+        if r["pack"]:
+            refusal, warnings = describe_pack(r["pack"], fw_api, files_listed=False)
+            if refusal and r["state"] != "yours":
+                acts = [x for x in acts if x[0] == "r"]
+        what = (ask("%s: %s · %s: %s" % (r["name"], " · ".join("%s: %s" % (_k(a), _k(m)) for a, m in acts), _k("Enter"), _k("back")))
+                or "").strip().lower()
+        if what == "i" and r["state"] == "new" or what == "u" and r["state"] in ("same", "update") and any(x[0] == "u" for x in acts):
+            print()
+            ok = pc_install_pack(where, r["pack"]) if is_pc else board_install_pack(where, r["pack"])
+            print("  " + (green("%s %s installed" % (r["name"], r["pack"]["spec"].get("version", ""))) if ok
+                          else yellow("%s: something didn't arrive (above). Try again." % r["name"])))
+            changed = changed or ok
+        elif what == "r":
+            if not ask_yes_no("Remove %s (%s) from this Stump?" % (r["name"], ", ".join(r["plugins"])), False):
+                continue
+            data, tools, home, theme = _pack_leftovers(r, board=not is_pc)
+            keeps = ["its saved data (%s)" % ", ".join("sd/" + d if is_pc else "/sd/" + d for d in data)]
+            if tools:
+                keeps.append("its Tools page section%s" % ("s" if len(tools) > 1 else ""))
+            if home:
+                keeps.append("%d home file%s" % (len(home), "s" if len(home) > 1 else ""))
+            if theme:
+                keeps.append("its theme (%s)" % theme)
+            also = ask_yes_no("Delete what it keeps too: %s?" % ", ".join(keeps), False)
+            ok = pc_remove_pack(where, r, also) if is_pc else board_remove_pack(where, r, also)
+            print("  " + (green("%s removed%s" % (r["name"], "" if also else ": what it keeps stays")) if ok
+                          else yellow("%s: not all of it could be removed (above)." % r["name"])))
+            changed = changed or ok
+    if changed:
+        print("\n" + ("The Stump restarts on its own if it's running." if is_pc
+                      else "Restart the Stump to start them (power-cycle, or Ctrl+D in mpremote)."))
+        print("A new pack starts with its own settings: change them in /admin.")
+    return True
+
+
+# ---------------------------------------------------------------------------
+# The identity keepsake (1.0.0-beta.76): one file with a Stump's identity,
+# so a Stump installed fresh, or moved to another board or computer, can
+# be the same Stump on the mesh, the chain and LoRa. The identity only:
+# its settings are typed again. No passphrase: the file says to keep it
+# safe, as it's what makes a Stump itself.
+# ---------------------------------------------------------------------------
+IDENTITY_FILES = ("rns/identity", "pn_mailbox_identity")   # its address; its mailbox's (propagation)
+KEEPSAKE_EXT = ".stump-identity"
+KEEPSAKE_NOTE = ("A Stump's identity: whoever has this file can be that Stump on the mesh. "
+                 "Keep it safe, and don't share it.")
+
+
+def _identity_ok(files):
+    return len(files.get("rns/identity") or b"") == 64
+
+
+def identity_fingerprint(files):
+    import hashlib
+    h = hashlib.sha256(files["rns/identity"]).hexdigest()[:16]
+    return " ".join(h[i:i + 4] for i in range(0, 16, 4))
+
+
+def keepsake_bytes(files, name):
+    import base64
+    return (json.dumps({"stump_identity": 1, "name": name or "", "saved": time.strftime("%Y-%m-%d"),
+                        "release": EXPECTED_STUMP_VERSION, "fingerprint": identity_fingerprint(files),
+                        "note": KEEPSAKE_NOTE,
+                        "files": {k: base64.b64encode(v).decode() for k, v in sorted(files.items())}},
+                       indent=1, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def _keepsake_name(name):
+    return (re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name or "Stump").strip(" .") or "Stump") + KEEPSAKE_EXT
+
+
+def save_keepsake(files, name, path=None):
+    """Writes the keepsake (only its owner can read it, where that's up to
+    the system). Returns its path."""
+    path = Path(path or Path.home() / _keepsake_name(name)).expanduser()
+    if path.is_dir():
+        path = path / _keepsake_name(name)
+    path.write_bytes(keepsake_bytes(files, name))
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
+
+
+def _folder_name(folder):
+    try:
+        m = re.search(r'^NODE_NAME\s*=\s*([\'"])(.*?)\1', (Path(folder) / "config.py").read_text(encoding="utf-8", errors="replace"), re.M)
+        return m.group(2) if m else None
+    except OSError:
+        return None
+
+
+def read_identity_source(src):
+    """A keepsake file, or an old Stump's folder: ({path: bytes}, its name).
+    ValueError, with why, for anything else."""
+    import base64
+    src = Path(str(src).strip().strip("'\"")).expanduser()
+    if src.is_dir():
+        files = {}
+        for rel in IDENTITY_FILES:
+            try:
+                files[rel] = (src / rel).read_bytes()
+            except OSError:
+                pass
+        if not _identity_ok(files):
+            raise ValueError("%s has no Stump identity in it (rns/identity)." % src)
+        return files, _folder_name(src)
+    try:
+        d = json.loads(src.read_text(encoding="utf-8"))
+    except OSError:
+        raise ValueError("No file or folder at %s." % src)
+    except ValueError:
+        raise ValueError("%s isn't a saved Stump identity." % src)
+    if not isinstance(d, dict) or d.get("stump_identity") != 1 or not isinstance(d.get("files"), dict):
+        raise ValueError("%s isn't a saved Stump identity." % src)
+    try:
+        files = {k: base64.b64decode(v) for k, v in d["files"].items() if k in IDENTITY_FILES}
+    except (ValueError, TypeError):
+        raise ValueError("%s is damaged: its identity won't read." % src)
+    if not _identity_ok(files):
+        raise ValueError("%s is damaged: its identity isn't whole." % src)
+    return files, d.get("name") or None
+
+
+def pc_identity(folder):
+    files = {}
+    for rel in IDENTITY_FILES:
+        try:
+            files[rel] = (Path(folder) / rel).read_bytes()
+        except OSError:
+            pass
+    return files if _identity_ok(files) else None
+
+
+def pc_new_identity(folder):
+    """A computer Stump's identity, made here before it first starts (as the
+    Stump would make it: 64 random bytes, its two private keys), so it can
+    be saved at once. Kept if it has one."""
+    cur = pc_identity(folder)
+    if cur:
+        return cur
+    p = Path(folder) / "rns" / "identity"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(os.urandom(64))
+    return pc_identity(folder)
+
+
+def pc_put_identity(folder, files):
+    folder = Path(folder)
+    for rel, data in files.items():
+        p = folder / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+    if "pn_mailbox_identity" not in files:
+        try:
+            (folder / "pn_mailbox_identity").unlink()   # the old one's would go with another Stump's address
+        except OSError:
+            pass
+    _pc_mark_updated(folder)
+
+
+def board_identity(port):
+    tmp = Path(tempfile.mkdtemp())
+    files = {}
+    for rel in IDENTITY_FILES:
+        ok, _ = run(["mpremote", "connect", port, "fs", "cp", ":" + rel, str(tmp / rel.replace("/", "_"))], timeout=30)
+        if ok and (tmp / rel.replace("/", "_")).is_file():
+            files[rel] = (tmp / rel.replace("/", "_")).read_bytes()
+    return files if _identity_ok(files) else None
+
+
+def board_name(port):
+    ok, out = run(["mpremote", "connect", port, "fs", "cat", ":config.py"], timeout=20)
+    m = re.search(r'^NODE_NAME\s*=\s*([\'"])(.*?)\1', out or "", re.M) if ok else None
+    return m.group(2) if m else None
+
+
+def board_put_identity(port, files):
+    tmp = Path(tempfile.mkdtemp())
+    run(["mpremote", "connect", port, "fs", "mkdir", ":rns"], timeout=15)
+    ok = True
+    for rel, data in files.items():
+        f = tmp / rel.replace("/", "_")
+        f.write_bytes(data)
+        good, _ = run(["mpremote", "connect", port, "fs", "cp", str(f), ":" + rel], timeout=30)
+        ok = ok and good
+    if "pn_mailbox_identity" not in files:
+        run(["mpremote", "connect", port, "fs", "rm", ":pn_mailbox_identity"], timeout=15)
+    return ok
+
+
+def offer_save_identity(files, name):
+    """Asks to save the keepsake (yes at the keyboard; no with an answers
+    file, nobody being there to keep it). Its path, or None."""
+    if not files:
+        print("  It has no identity yet (it makes one as it first starts): save it later with"
+              " python3 provisioner.py --save-identity.")
+        return None
+    print()
+    hint("Its identity is what makes it this Stump on the mesh, the chain and LoRa. Saved in a file, a fresh "
+         "install or another board can be this same Stump again. Whoever has the file can be this Stump: keep it safe.")
+    if not ask_yes_no("Save this Stump's identity in a file?", ANSWERS["map"] is None):
+        return None
+    where = ask("Where", str(Path.home() / _keepsake_name(name)))
+    try:
+        p = save_keepsake(files, name, where)
+    except OSError as e:
+        print("  " + yellow("Couldn't write it there: %s" % e))
+        return None
+    print("  " + green("Saved: %s" % p) + "  (fingerprint %s)" % identity_fingerprint(files))
+    print("  Keep it somewhere safe (a USB key, a password manager). Don't share it.")
+    return p
+
+
+def ask_restore_identity():
+    """For a new Stump: a saved identity to bring back, if any.
+    ({path: bytes}, its name), or None for a new identity."""
+    print()
+    hint("Bringing back a Stump? Its saved identity (a %s file) or its old folder makes this one that "
+         "same Stump. The old one must not run any more: two Stumps with one identity confuse the mesh." % KEEPSAKE_EXT)
+    while True:
+        a = (ask("A saved identity to bring back: its file or old folder (%s: %s)" % (_k("Enter"), _k("none, a new Stump")), "")
+             or "").strip()
+        if not a:
+            return None
+        try:
+            files, name = read_identity_source(a)
+        except ValueError as e:
+            print("  " + yellow(str(e)))
+            continue
+        print("  " + green("%s, fingerprint %s" % (name or "A Stump", identity_fingerprint(files))))
+        return files, name
+
+
+def _replacing(cur, files, name):
+    """Before an identity replaces another: the one there is saved first.
+    Its path, or None when there's nothing to keep (none, or the same)."""
+    if not cur or cur.get("rns/identity") == files.get("rns/identity"):
+        return None
+    p = save_keepsake(cur, (name or "Stump") + " (replaced " + time.strftime("%Y-%m-%d %H%M") + ")")
+    print("  The identity it had is saved first: %s" % p)
+    return p
+
+
+def restore_identity(target, src):
+    """--restore-identity: a keepsake or an old folder onto a Stump (a
+    computer Stump's folder, or a board's port)."""
+    try:
+        files, name = read_identity_source(src)
+    except ValueError as e:
+        print(yellow(str(e)))
+        return False
+    is_pc = (Path(str(target)).expanduser() / "stump_pc.py").is_file()
+    here = _folder_name(Path(str(target)).expanduser()) if is_pc else board_name(target)
+    print("Bringing back %s (fingerprint %s) onto %s." % (name or "a Stump", identity_fingerprint(files), here or target))
+    print("The Stump it came from must not run any more: two Stumps with one identity confuse the mesh.")
+    if not ask_yes_no("Go on?", True):
+        return False
+    if is_pc:
+        folder = Path(str(target)).expanduser()
+        _replacing(pc_identity(folder), files, here)
+        pc_put_identity(folder, files)
+        print(green("Done.") + " A running Stump restarts by itself in a few seconds, as %s." % (name or "that Stump"))
+        return True
+    _replacing(board_identity(target), files, here)
+    if not board_put_identity(target, files):
+        print(yellow("Not all of it arrived: try again."))
+        return False
+    run(["mpremote", "connect", target, "reset"], timeout=15)
+    print(green("Done.") + " The board restarts as %s." % (name or "that Stump"))
+    return True
+
+
+def save_identity(target, path=None):
+    """--save-identity: a Stump's identity into a keepsake."""
+    is_pc = (Path(str(target)).expanduser() / "stump_pc.py").is_file()
+    folder = Path(str(target)).expanduser()
+    files = pc_identity(folder) if is_pc else board_identity(target)
+    name = _folder_name(folder) if is_pc else board_name(target)
+    if not files:
+        print(yellow("No identity on that Stump yet: it makes one the first time it starts."))
+        return False
+    if not path:
+        hint("Whoever has this file can be this Stump on the mesh: keep it safe (a USB key, a password manager).")
+        path = ask("Where", str(Path.home() / _keepsake_name(name)))
+    try:
+        p = save_keepsake(files, name, path)
+    except OSError as e:
+        print(yellow("Couldn't write it there: %s" % e))
+        return False
+    print(green("Saved: %s" % p) + "  (fingerprint %s). Keep it safe; don't share it." % identity_fingerprint(files))
+    return True
+
+
 def _wrap(text, width):
     """Minimal word wrap for help text -- no textwrap dependency."""
     words, line, out = text.split(), "", []
@@ -1659,7 +2265,7 @@ def _in(prompt):
             direct = False
         if direct:
             prompt = "  " + prompt
-    return input(prompt)
+    return input(_shown(prompt))
 
 
 TIMINGS_FILE = Path.home() / ".provisioner" / "timings.json"
@@ -1961,6 +2567,29 @@ def _tty():
     return sys.stdout.isatty()
 
 
+# A choice in a prompt is shown bold, its key and what it does: "Press
+# **e** to **change** a section" (1.0.0-beta.77: they read as part of the
+# sentence before). Marked in the text, so an answers file still keys a
+# question by its words; drawn bold only on a terminal that shows it.
+_B0, _B1 = "\x01", "\x02"
+
+
+def _k(text):
+    """A key, or what it does, in a prompt: bold where it's shown."""
+    return _B0 + str(text) + _B1
+
+
+def _plain(text):
+    return str(text).replace(_B0, "").replace(_B1, "")
+
+
+def _shown(text):
+    t = str(text)
+    if _B0 not in t:
+        return t
+    return t.replace(_B0, "\033[1m").replace(_B1, "\033[0m") if _tty() else _plain(t)
+
+
 def _ansi(text, code):
     return f"\033[{code}m{text}\033[0m" if _tty() else text
 
@@ -2002,7 +2631,7 @@ ASK_LIMIT = 5             # the same question this often: the answers can't sett
 
 
 def _qkey(text):
-    t = str(text)
+    t = _plain(text)
     if "?" in t:
         t = t.split("?", 1)[0]
     out, depth = [], 0
@@ -2049,7 +2678,7 @@ def _from_answers(prompt):
         sys.exit(3)
     if k in ANSWERS["map"]:
         ANSWERS["used"].add(k)
-        print("%s: (answered from %s)" % (prompt, Path(ANSWERS["file"]).name))
+        print("%s: (answered from %s)" % (_plain(prompt), Path(ANSWERS["file"]).name))
         return ANSWERS["map"][k]
     return _NOT_GIVEN
 
@@ -2080,7 +2709,7 @@ def ask(prompt, default=None):
             return default if default is not None else ""
         if default is None:
             _no_answer(prompt)
-        print("%s: %s (the default)" % (prompt, default))
+        print("%s: %s (the default)" % (_plain(prompt), default))
         return default
     if a is not _NO_FILE:
         return "" if a is None else str(a)
@@ -2112,7 +2741,7 @@ def ask_yes_no(prompt, default=True):
         if ANSWERS["record"] is not None:
             _record(prompt, bool(default))
         else:
-            print("%s: %s (the default)" % (prompt, "yes" if default else "no"))
+            print("%s: %s (the default)" % (_plain(prompt), "yes" if default else "no"))
         return default
     if a is not _NO_FILE:
         if isinstance(a, bool):
@@ -2123,7 +2752,7 @@ def ask_yes_no(prompt, default=True):
             return False
         print(red("\"%s\": %r isn't a yes or a no in the answers file." % (_qkey(prompt), a)))
         sys.exit(3)
-    yn = "Y/n" if default else "y/N"
+    yn = _k("Y/n" if default else "y/N")
     while True:
         raw = _in(f"{prompt} [{yn}]: ").strip().lower()
         if raw == "?" and _show_help():
@@ -2135,6 +2764,17 @@ def ask_yes_no(prompt, default=True):
         if raw in _NO:
             return False
         print(f"  '{raw}' isn't a yes or a no -- please answer y or n.")
+
+
+def _option(i, opt):
+    """A numbered option, its number and its name bold (the name: what's
+    before " -- " or " — ", or all of it)."""
+    t = str(opt)
+    for sep in (" -- ", " — ", " - "):
+        if sep in t:
+            name, rest = t.split(sep, 1)
+            return "%s %s%s%s" % (_k("%d)" % i), _k(name), sep, rest)
+    return "%s %s" % (_k("%d)" % i), _k(t))
 
 
 def ask_choice(prompt, options):
@@ -2158,12 +2798,12 @@ def ask_choice(prompt, options):
         for i, o in enumerate(options, 1):
             print("  %d) %s" % (i, o))
         sys.exit(3)
-    print(prompt)
+    print(_shown(prompt))
     for i, opt in enumerate(options, 1):
-        print(f"  {i}) {opt}")
+        print("  " + _shown(_option(i, opt)))
     while True:
         # Enter takes the first option: the recommended one comes first.
-        raw = _in(f"Choose 1-{len(options)} [1]: ").strip() or "1"
+        raw = _in("Choose %s [%s]: " % (_k("1-%d" % len(options)), _k("1"))).strip() or "1"
         if raw == "?" and _show_help():
             continue
         if raw.isdigit() and 1 <= int(raw) <= len(options):
@@ -2362,8 +3002,8 @@ def ask_wifi(prompt, default="", scan=None):
                 print("  %2d) %s" % (i, n["ssid"]))
                 continue
             print("  %2d) %s %s%s" % (i, _bars(n["signal"]), n["ssid"], "" if n["open"] else ("  🔒" if _fancy() else "  (password)")))
-        print("   r) look again     or type a name that isn't listed")
-        raw = _in("Choose 1-%d%s: " % (len(nets), " [%s]" % default if default else "")).strip()
+        print("   " + bold("r)") + " " + bold("look again") + "     or type a name that isn't listed")
+        raw = _in("Choose %s%s: " % (_k("1-%d" % len(nets)), " [%s]" % default if default else "")).strip()
         if raw.lower() == "r":
             continue
         if not raw:
@@ -2838,8 +3478,8 @@ def resolve_path(default_path, description, remember_key=None, is_dir=True,
         if len(hints) == 1:
             # One match: Enter takes it ("blank to skip" here was a trap:
             # the file was right there and Enter skipped it).
-            more = ", or 'd' to download automatically" if download_fn else ""
-            raw = ask(f"  Enter to use 1, or type another path{more}, or 's' to skip")
+            more = ", or %s to %s" % (_k("d"), _k("download automatically")) if download_fn else ""
+            raw = ask("  %s to %s, or type another path%s, or %s to %s" % (_k("Enter"), _k("use 1"), more, _k("s"), _k("skip")))
             if not raw:
                 raw = "1"
             elif raw.strip().lower() in ("s", "skip"):
@@ -3392,7 +4032,7 @@ def _free_the_port(port):
         if not who:
             return True
         explain_port_busy(port)
-        ask("  Press Enter once it's closed")
+        ask("  Press %s once it's closed" % _k("Enter"))
     return not port_holder(port)
 
 
@@ -3730,6 +4370,7 @@ def upload_stump_app(port, app_dir=None):
         present = [f for f in present if f not in frozen]
         print("  A Stump image (%s): %d modules are frozen in, not uploaded." % (image.get("release"), len(frozen)))
         _remove_stale_frozen(port, frozen)
+    _remove_retired_on_board(port, resolved)
     to_sd = []
     if board_is_wrover(port):
         to_sd = [f for f in present if f.startswith("web/") and f.endswith(".wasm")]
@@ -4735,9 +5376,13 @@ def config_wizard(board_type):
             profile["heltec_port"] = 7633
 
 
-    def sec_rest_custom():
-        # ---- Packs ----
-        # Asked before the persona and the theme: a pack can bring both.
+    def sec_packs():
+        # Packs, a step of their own (1.0.0-beta.75): before, they were the
+        # first of "Everything else", so changing them meant every other
+        # question again. Asked before the bot and the look: a pack can
+        # bring both. --packs installs, updates and removes them later.
+        subhead("Packs", "A pack adds plugins (chat commands, pages), and sometimes a bot, a look and "
+                         "files for the SD card. None is needed; --packs adds, updates or removes them later.")
         try:
             fw = _remembered_path("stump_app_dir") or STUMP_APP_DIR
             packs = choose_packs(fw, one_list=True)
@@ -4745,10 +5390,38 @@ def config_wizard(board_type):
             print(f"  (pack scan skipped: {e})")
             packs = []
         profile["packs"] = [str(p["source"]) for p in packs]
-        persona = {}
+        # Their own settings (the plugins' questions), asked here, with them.
+        try:
+            profile["pack_config"] = configure_plugins(None, extra=_pack_plugin_specs(packs), builtins=False,
+                                                       preset=_password_keys(profile)) if packs else {}
+        except Exception as e:
+            print(f"  (pack settings skipped: {e})")
+            profile["pack_config"] = {}
+        persona, theme = {}, None
         for p in packs:
             persona = p["spec"].get("persona") or persona
-        pack_themes = [p["spec"]["theme"] for p in packs if p["spec"].get("theme", {}).get("name")]
+            theme = p["spec"]["theme"] if (p["spec"].get("theme") or {}).get("name") else theme
+        profile["pack_look"] = False
+        if persona or theme:
+            what = " and ".join(x for x in ("its bot (%s)" % persona.get("bot_name") if persona.get("bot_name") else
+                                            ("its bot" if persona else ""),
+                                            "its look (%s)" % theme["name"] if theme else "") if x)
+            if ask_yes_no("Use %s?" % what, True):
+                if persona:
+                    profile["bot_name"] = persona.get("bot_name") or profile.get("bot_name") or "BarKeep"
+                    profile["mesh_greeting"] = persona.get("mesh_greeting") or ""
+                if theme:
+                    profile["theme"] = theme["name"]
+                profile["pack_look"] = True
+
+    def _chosen_packs():
+        return [p for p in (load_pack(x) for x in profile.get("packs") or []) if p]
+
+    def sec_rest_custom():
+        packs = _chosen_packs()
+        persona = {"bot_name": profile.get("bot_name"), "mesh_greeting": profile.get("mesh_greeting")} \
+            if profile.get("pack_look") else {}
+        pack_themes = [p["spec"]["theme"] for p in packs if (p["spec"].get("theme") or {}).get("name")]
 
         # ---- Local greeter name ----
         print()
@@ -4773,10 +5446,10 @@ def config_wizard(board_type):
         # the wizard starts.
         try:
             fw = _remembered_path("stump_app_dir") or STUMP_APP_DIR
-            profile["plugin_config"] = configure_plugins(fw, extra=_pack_plugin_specs(packs), preset=_password_keys(profile))
+            profile["builtin_config"] = configure_plugins(fw, preset=_password_keys(profile))
         except Exception as e:
             print(f"  (plugin scan skipped: {e})")
-            profile["plugin_config"] = {}
+            profile["builtin_config"] = {}
 
         # ---- Credit economy ----
         print()
@@ -4874,12 +5547,12 @@ def config_wizard(board_type):
 
     def sec_rest(custom):
         subhead("Everything else", "These all have working defaults, and most can be changed later in "
-                                   "/admin. Answer n to go through them now: packs, the bot, the plugins' "
+                                   "/admin. Answer n to go through them now: the bot, the plugins' "
                                    "settings, file sharing, features, the propagation node, the look.")
         for line in rest_defaults_text(profile):
             print("  " + dim(line))
         # With an answers file every old question is consulted, as before.
-        if ask_yes_no("Keep these defaults? (n: go through them)", ANSWERS["map"] is None):
+        if ask_yes_no("Keep these defaults? (%s: %s)" % (_k("n"), _k("go through them")), ANSWERS["map"] is None):
             apply_rest_defaults(profile)
         else:
             custom()
@@ -4888,7 +5561,7 @@ def config_wizard(board_type):
         sections = [("Name", sec_name)] + \
             ([("Wi-Fi", sec_wifi)] if board_type == "cam" else []) + \
             [("Chain", sec_chain), ("The Heltec", sec_heltec), ("Passwords", sec_passwords),
-             ("Everything else", lambda: sec_rest(sec_rest_custom))]
+             ("Packs", sec_packs), ("Everything else", lambda: sec_rest(sec_rest_custom))]
         STEP["of"] = len(sections)
         for i, (title, fn) in enumerate(sections):
             STEP["n"] = i + 1
@@ -4896,6 +5569,11 @@ def config_wizard(board_type):
                 fn()
         STEP["n"] = STEP["of"] = 0
         review_answers(profile, sections)
+        # The packs' settings and the built-in plugins', whichever step
+        # was asked again in the review.
+        if "builtin_config" in profile or "pack_config" in profile:
+            profile["plugin_config"] = dict(profile.pop("pack_config", None) or {},
+                                            **(profile.pop("builtin_config", None) or {}))
         profile.setdefault("plugin_config", {}).update(_password_keys(profile))
     node_name = profile["node_name"]
 
@@ -4996,7 +5674,7 @@ def ask_features():
         return [k for k, label in FEATURES if ask_yes_no("  Offer " + label + "?", True)]
     print("  Features: " + "  ".join("%d %s" % (i, label) for i, (k, label) in enumerate(FEATURES, 1)))
     while True:
-        raw = ask("  Features to offer (Enter: all four, or the numbers to keep)", "")
+        raw = ask("  Features to offer (%s: %s, or %s)" % (_k("Enter"), _k("all four"), _k("the numbers to keep")), "")
         if not raw:
             return [k for k, _ in FEATURES]
         try:
@@ -5020,26 +5698,31 @@ def _password_keys(profile):
 
 
 def rest_defaults_text(profile):
-    return ["Packs: none   Look: Amber   Features: chat, billboard, files, about",
-            "File sharing: free   Propagation node: off   Bot: BarKeep, no auto-reply"]
+    look = (profile.get("theme") or "amber").capitalize() if profile.get("pack_look") else "Amber"
+    bot = "%s%s" % (profile.get("bot_name"), ", its auto-reply" if profile.get("mesh_greeting") else ", no auto-reply") \
+        if profile.get("pack_look") else "BarKeep, no auto-reply"
+    return ["Look: %s   Features: chat, billboard, files, about" % look,
+            "File sharing: free   Propagation node: off   Bot: %s" % bot]
 
 
 def apply_rest_defaults(profile):
     """The setup's "keep these defaults": what answering every remaining
     question with Enter gives, without the questions."""
-    profile["packs"] = []
-    profile["bot_name"] = "BarKeep"
-    profile["mesh_greeting"] = ""
+    profile.setdefault("packs", [])          # their own step (1.0.0-beta.75)
+    if not profile.get("pack_look"):
+        profile["bot_name"] = "BarKeep"
+        profile["mesh_greeting"] = ""
     try:
         fw = _remembered_path("stump_app_dir") or STUMP_APP_DIR
-        profile["plugin_config"] = configure_plugins(fw, preset=_password_keys(profile), quiet=True)
+        profile["builtin_config"] = configure_plugins(fw, preset=_password_keys(profile), quiet=True)
     except Exception:
-        profile["plugin_config"] = _password_keys(profile)
+        profile["builtin_config"] = _password_keys(profile)
     profile["credits_enabled"] = False
     profile["credit_weights"] = DEFAULT_CREDIT_WEIGHTS.copy()
     profile["features"] = [k for k, _ in FEATURES]
     profile["propagation_node"] = False
-    profile["theme"] = "amber"
+    if not (profile.get("pack_look") and profile.get("theme")):
+        profile["theme"] = "amber"
 
 
 def review_lines(profile):
@@ -5088,7 +5771,8 @@ def review_answers(profile, sections):
         return
     while True:
         box("Your answers", review_lines(profile))
-        raw = _in("Enter to go on %s e to change a section: " % ("·" if _fancy() else "-")).strip().lower()
+        raw = _in("%s to %s %s %s to %s: " % (_k("Enter"), _k("go on"), "·" if _fancy() else "-",
+                                              _k("e"), _k("change a section"))).strip().lower()
         if raw != "e":
             return
         title = ask_choice("Which section?", [t for t, _ in sections])
@@ -5997,7 +6681,7 @@ def _cam_after_board(r, port, app_dir):
     else:
         ok = push_config_to_board(port, "cam", profile)
         if profile.get("packs"):
-            ok = install_packs(port, [p for p in (load_pack(x) for x in profile["packs"]) if p]) and ok
+            ok = all([board_install_pack(port, p) for p in (load_pack(x) for x in profile["packs"]) if p]) and ok
         banner("Finding the node's addresses")
         print("Restarting the board so it boots with the new settings...")
         run(["mpremote", "connect", port, "reset"], timeout=15)
@@ -6125,10 +6809,10 @@ def start_menu(version=None):
              "before anything touches a board.", "", "What are you setting up?", ""]
     width = max(len(t) for _, t, _ in ROLES)
     for i, (_, title, what) in enumerate(ROLES, 1):
-        lines.append("%d) %s  %s" % (i, bold(title.ljust(width)), what))
+        lines.append("%s %s  %s" % (bold("%d)" % i), bold(title.ljust(width)), what))
     box("The Provisioner", lines)
     while True:
-        raw = input("Choose 1-%d (blank to quit): " % len(ROLES)).strip()
+        raw = input(_shown("Choose %s (%s to %s): " % (_k("1-%d" % len(ROLES)), _k("blank"), _k("quit")))).strip()
         if not raw:
             return None
         if raw.isdigit() and 1 <= int(raw) <= len(ROLES):
@@ -6144,14 +6828,14 @@ def fix_menu():
         ("Find a CAM's addresses", "ip"),
         ("Update a board to this release's Stump image (keeps its settings)", "image"),
         ("Re-upload the Stump files to a CAM (keeps its settings)", "upload"),
-        ("Add a pack to a CAM", "pack"),
+        ("A CAM's packs: install, update, remove", "pack"),
         ("Update the Tools page on a CAM's card", "tools"),
         ("Erase a CAM's SD card", "wipe"),
         ("Erase a board's flash (a CAM or a Heltec): start it over", "erase"),
         ("Check the tools on this computer", "toolcheck"),
     ]
-    box("Check or fix something", ["%d) %s" % (i, a) for i, (a, _) in enumerate(actions, 1)])
-    raw = input("Choose 1-%d (blank to go back): " % len(actions)).strip()
+    box("Check or fix something", ["%s %s" % (bold("%d)" % i), a) for i, (a, _) in enumerate(actions, 1)])
+    raw = input(_shown("Choose %s (%s to %s): " % (_k("1-%d" % len(actions)), _k("blank"), _k("go back")))).strip()
     if not raw.isdigit() or not 1 <= int(raw) <= len(actions):
         return
     what = actions[int(raw) - 1][1]
@@ -6179,12 +6863,7 @@ def fix_menu():
     elif what == "image":
         update_image(port)
     elif what == "pack":
-        packs = discover_packs()
-        chosen = choose_packs(_remembered_path("stump_app_dir") or STUMP_APP_DIR, packs) if packs else []
-        if chosen:
-            install_packs(port, chosen)
-        elif not packs:
-            print("  No packs found. Put pack folders or .zip files in %s" % PACKS_DIR)
+        packs_screen(port)
     elif what == "tools":
         install_tools_on_node(port)
     elif what == "wipe":
@@ -6380,7 +7059,13 @@ def interactive_wizard():
         else:
             ok = push_config_to_board(port, role, profile)
             if role == "cam" and profile.get("packs"):
-                ok = install_packs(port, [p for p in (load_pack(x) for x in profile["packs"]) if p]) and ok
+                ok = all([board_install_pack(port, p) for p in (load_pack(x) for x in profile["packs"]) if p]) and ok
+            if role == "cam" and flashed:
+                # A Stump brought back (1.0.0-beta.76): its identity on the
+                # board before it first starts.
+                back = ask_restore_identity()
+                if back and board_put_identity(port, back[0]):
+                    r.note("Identity", "%s, brought back" % (back[1] or identity_fingerprint(back[0])))
             if role == "cam":
                 banner("Finding the node's addresses")
                 print("Restarting the board so it boots with the new settings...")
@@ -6398,6 +7083,10 @@ def interactive_wizard():
                 else:
                     print("No address yet: that's normal right after an upload. Power-cycle the")
                     print("board, wait a few seconds, then: python3 provisioner.py --get-ip %s" % port)
+                if flashed:
+                    kept = offer_save_identity(board_identity(port), profile.get("node_name"))
+                    if kept:
+                        r.note("Identity", "saved in %s: keep it safe" % kept)
                 chain = profile.get("chain") or {}
                 if chain.get("enabled"):
                     r.note("Chain", "first Stump" if not chain.get("uplink_ssid") else
@@ -6501,6 +7190,94 @@ def _board_files(fw):
     for name, spec in discover_plugins(fw):
         files += [f for f in plugin_files(fw / name, spec) if _belongs_on_board(f)]
     return files
+
+
+def retired_files(fw):
+    """The RETIRED_FILES this firmware doesn't ship again, as they'd be on a
+    Stump: a module as its .py and its compiled .mpy."""
+    shipped = set(_board_files(fw))
+    out = []
+    for rel in RETIRED_FILES:
+        if rel in shipped or not _belongs_on_board(rel):
+            continue
+        out.append(rel)
+        if rel.endswith(".py"):
+            out.append(rel[:-3] + ".mpy")
+        elif rel.endswith(".mpy") and rel[:-4] + ".py" not in shipped:
+            out.append(rel[:-4] + ".py")
+    return sorted(set(out))
+
+
+def _retired_kept(rel, has_install, builtins):
+    """A retired path inside a folder that is a plugin the firmware doesn't
+    ship (a pack's, say) is left alone: it's that plugin's file now."""
+    top = rel.split("/")[0] if "/" in rel else None
+    return bool(top) and top not in builtins and has_install(top)
+
+
+def _builtin_plugins(fw):
+    return {name for name, _ in discover_plugins(fw)}
+
+
+def _pc_remove_retired(fw, folder):
+    """Removes from a computer Stump the files an earlier release put there
+    and this one no longer has. Returns their paths."""
+    folder = Path(folder)
+    builtins = _builtin_plugins(fw)
+    has = lambda top: (folder / top / "install.py").is_file() or (folder / top / "install.mpy").is_file()
+    gone = []
+    for rel in retired_files(fw):
+        p = folder / rel
+        if not p.is_file() or _retired_kept(rel, has, builtins):
+            continue
+        try:
+            p.unlink()
+            gone.append(rel)
+        except OSError:
+            pass
+        for d in p.parents:                      # its folder too, once empty (not the Stump's own)
+            if d == folder or folder not in d.parents:
+                break
+            try:
+                d.rmdir()
+            except OSError:
+                break
+    if gone:
+        print("  Removed %d file(s) this release no longer has: %s" % (len(gone), ", ".join(gone)))
+    return gone
+
+
+def _remove_retired_on_board(port, fw):
+    """The same on a board, in one call. Returns how many were removed."""
+    paths = retired_files(fw)
+    if not paths:
+        return 0
+    code = ("import os\n"
+            "def has(t):\n"
+            "    for f in ('/install.py','/install.mpy'):\n"
+            "        try:\n"
+            "            os.stat(t+f)\n"
+            "            return True\n"
+            "        except OSError:\n"
+            "            pass\n"
+            "    return False\n"
+            "gone=[]\n"
+            "for p in %r:\n"
+            "    t=p.split('/')[0] if '/' in p else None\n"
+            "    if t and t not in %r and has(t):\n"
+            "        continue\n"
+            "    try:\n"
+            "        os.remove(p)\n"
+            "        gone.append(p)\n"
+            "    except OSError:\n"
+            "        pass\n"
+            "print('RETIRED:'+','.join(gone))\n") % (paths, sorted(_builtin_plugins(fw)))
+    ok, out = run(["mpremote", "connect", port, "exec", code], timeout=60)
+    m = re.search(r"RETIRED:(.*)", out or "") if ok else None
+    gone = [g for g in (m.group(1).strip().split(",") if m else []) if g]
+    if gone:
+        print("  Removed %d file(s) this release no longer has: %s" % (len(gone), ", ".join(gone)))
+    return len(gone)
 
 
 def _copy_if_changed(src, dst):
@@ -6771,8 +7548,9 @@ def _pc_change_settings(r, folder, cfg):
     """An update keeps every setting. What to change, if anything: just
     the storage, or all the questions again. True for all the questions."""
     while True:
-        a = (ask("Change something? s: the storage (now %d MB) · a: all the questions again · Enter: nothing"
-                 % int(cfg.get("PC_STORAGE_MB") or PC_STORAGE_DEFAULT_MB)) or "").strip().lower()
+        a = (ask("Change something? %s: %s (now %d MB) · %s: %s · %s: %s"
+                 % (_k("s"), _k("the storage"), int(cfg.get("PC_STORAGE_MB") or PC_STORAGE_DEFAULT_MB),
+                    _k("a"), _k("all the questions again"), _k("Enter"), _k("nothing"))) or "").strip().lower()
         if a in ("", "n", "no", "nothing"):
             return False
         if a in ("a", "all", "y", "yes"):
@@ -7531,10 +8309,19 @@ def setup_pc(folder=None, reconfigure=False):
 
     r.start("Firmware")
     n = _pc_copy_firmware(fw, folder)
+    gone = [] if first else _pc_remove_retired(fw, folder)
     rel = _folder_release(folder) or _folder_release(folder / "final_firmware")
     if rel:
         r.note("Release", rel)
-    r.end("done", "%d file(s) updated, Stump %s" % (n, rel or "?"))
+    r.end("done", "%d file(s) updated%s, Stump %s" % (n, ", %d old one(s) removed" % len(gone) if gone else "", rel or "?"))
+    if first:
+        # A Stump brought back (1.0.0-beta.76): its saved identity, or its
+        # old folder. Otherwise its own, made now so it can be saved.
+        back = ask_restore_identity()
+        if back:
+            pc_put_identity(folder, back[0])
+            r.note("Identity", "%s, brought back" % (back[1] or identity_fingerprint(back[0])))
+        pc_new_identity(folder)
 
     r.start("Configure")
     profile = None
@@ -7550,7 +8337,7 @@ def setup_pc(folder=None, reconfigure=False):
         _pc_ensure_bleak(folder)
 
     r.start("Packs")
-    packs = []
+    packs, manage = [], False
     if profile and profile.get("packs"):
         packs = [p for p in (load_pack(x) for x in profile["packs"]) if p]
     elif not first:
@@ -7567,9 +8354,15 @@ def setup_pc(folder=None, reconfigure=False):
         new = [p for p in found if p["spec"]["name"] not in have]
         if new:
             print("Packs this Stump doesn't have: " + ", ".join(p["spec"]["name"] for p in new))
-            packs += choose_packs(fw, new)
-    if packs:
-        _pc_install_packs(folder, packs)
+            if ANSWERS["map"] is not None or ANSWERS["record"] is not None:
+                packs += choose_packs(fw, new)      # as before: an answers file says which
+        # Changing them is a step of its own, not the whole setup again.
+        manage = ANSWERS["map"] is None and ANSWERS["record"] is None
+    for p in packs:
+        pc_install_pack(folder, p)
+    if manage and (ask("%s: %s (install, update, remove) · %s: %s" % (_k("p"), _k("its packs"), _k("Enter"), _k("go on")))
+                   or "").strip().lower() == "p":
+        packs_screen(folder)
     _pc_install_tools(fw, folder)
     print("Tools page: ready")
     r.end()
@@ -7632,6 +8425,10 @@ def setup_pc(folder=None, reconfigure=False):
         else:
             r.state[[n for n, _ in r.steps].index("Chain")] = "fail"
             r.note("Chain", red("not linked yet: python3 provisioner.py --check-chain"))
+    if first:
+        kept = offer_save_identity(pc_identity(folder), _folder_name(folder))
+        if kept:
+            r.note("Identity", "saved in %s: keep it safe" % kept)
     r.note("Open", "http://localhost/ on this computer (8080 if 80 was taken)")
     r.end("done", "running, and at every login" if started else "start it with the command below")
     r.summary("More: docs/PC.md (the hotspot, the Heltec, chaining with CAM Stumps).")
@@ -7735,8 +8532,9 @@ def main():
                 fw = _remembered_path("stump_app_dir") or STUMP_APP_DIR
                 chosen = choose_packs(fw, packs)
                 if chosen:
-                    print("  (Their settings keep their defaults: run the full wizard to set them.)")
-                    install_packs(port, chosen)
+                    print("  (Their settings keep their defaults: change them in /admin.)")
+                    for p in chosen:
+                        board_install_pack(port, p)
     elif "--list-packs" in args:
         fw = _remembered_path("stump_app_dir") or STUMP_APP_DIR
         packs = discover_packs(args[args.index("--list-packs") + 1:])
@@ -7745,6 +8543,23 @@ def main():
         for pack in packs:
             describe_pack(pack, firmware_plugin_api(fw))
             print()
+    elif "--packs" in args:
+        idx = args.index("--packs")
+        target = args[idx + 1] if len(args) > idx + 1 and not args[idx + 1].startswith("--") else None
+        target = target or ask_stump_target()
+        sys.exit(0 if target and packs_screen(target) else 1)
+    elif "--save-identity" in args:
+        idx = args.index("--save-identity")
+        rest = [a for a in args[idx + 1:idx + 3] if not a.startswith("--")]
+        target = rest[0] if rest else ask_stump_target("Whose identity?")
+        sys.exit(0 if target and save_identity(target, rest[1] if len(rest) > 1 else None) else 1)
+    elif "--restore-identity" in args:
+        idx = args.index("--restore-identity")
+        rest = [a for a in args[idx + 1:idx + 3] if not a.startswith("--")]
+        if len(rest) < 2:
+            print("Usage: provisioner.py --restore-identity PORT|STUMP_FOLDER FILE|OLD_STUMP_FOLDER")
+            sys.exit(1)
+        sys.exit(0 if restore_identity(rest[0], rest[1]) else 1)
     elif "--install-pack" in args:
         idx = args.index("--install-pack")
         if len(args) < idx + 3:
@@ -7759,11 +8574,11 @@ def main():
         chosen = choose_packs(fw, packs)
         if chosen and (Path(port).expanduser() / "stump_pc.py").is_file():
             # A computer Stump's folder rather than a board's port.
-            _pc_install_packs(Path(port).expanduser(), chosen)
-            _pc_mark_updated(Path(port).expanduser())
+            for p in chosen:
+                pc_install_pack(Path(port).expanduser(), p)
             print("Done: a running Stump restarts by itself in a few seconds, with the pack.")
             sys.exit(0)
-        sys.exit(0 if (chosen and install_packs(port, chosen)) else 1)
+        sys.exit(0 if (chosen and all(board_install_pack(port, p) for p in chosen)) else 1)
     elif "--remove-plugin" in args:
         idx = args.index("--remove-plugin")
         if len(args) < idx + 3:

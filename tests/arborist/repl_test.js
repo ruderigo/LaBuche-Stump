@@ -429,6 +429,30 @@ with zipfile.ZipFile(out / "climb.zip", "w") as zf:
       check("... its tools in their section, its home files, its theme",
             fs.readFileSync(path.join(card, "tools/demo/thing.bin")).length === 5120 && fs.existsSync(path.join(card, "home/banner.txt"))
             && th.demo && th.demo.colors["--bg"] === "#000");
+      // Its pack recorded, listed, removed (1.0.0-beta.75).
+      const rec = JSON.parse(fs.readFileSync(path.join(root, "demo/" + R.PACK_MARK), "utf8"));
+      check("installed: its pack recorded in its folder (version, Tools section, home files, theme)",
+            rec.pack === "demo" && rec.version === "1.0" && rec.plugins.join() === "demo" && rec.tools.join() === "tools/demo"
+            && rec.home.join() === "banner.txt" && rec.theme === "demo", JSON.stringify(rec));
+      let have = await R.listPacks(repl, ["fservbot", "stumpid"]);
+      check("its packs read: the pack, with its record; nothing of the Stump's own", have.length === 1 && have[0].name === "demo"
+            && have[0].record.version === "1.0" && have[0].plugins.join() === "demo", JSON.stringify(have));
+      fs.mkdirSync(path.join(card, "plugins/demo"), { recursive: true });
+      fs.writeFileSync(path.join(card, "plugins/demo/data.json"), "{}");
+      await R.removePack(repl, have[0], false);
+      check("removed, what it keeps kept: the plugin gone; its data, Tools section, home file and theme stay",
+            !fs.existsSync(path.join(root, "demo")) && fs.existsSync(path.join(card, "plugins/demo/data.json"))
+            && fs.existsSync(path.join(card, "tools/demo/thing.bin")) && fs.existsSync(path.join(card, "home/banner.txt"))
+            && JSON.parse(fs.readFileSync(path.join(root, "themes.json"), "utf8")).demo);
+      check("... and not listed any more", (await R.listPacks(repl, ["fservbot", "stumpid"])).length === 0);
+      await R.installPack(repl, demo.plan);
+      have = await R.listPacks(repl, ["fservbot", "stumpid"]);
+      await R.removePack(repl, have[0], true);
+      check("removed with what it keeps: its data, Tools section, home file and theme gone too",
+            !fs.existsSync(path.join(root, "demo")) && !fs.existsSync(path.join(card, "plugins/demo"))
+            && !fs.existsSync(path.join(card, "tools/demo")) && !fs.existsSync(path.join(card, "home/banner.txt"))
+            && !JSON.parse(fs.readFileSync(path.join(root, "themes.json"), "utf8")).demo);
+      await R.installPack(repl, demo.plan);
       // The Tools page.
       const tools = [["tools/provisioner/provisioner.py", "print('p')\n"], ["tools/provisioner/Stump-1.0.0-beta.9.zip", "new zip"],
                      ["tools/firefly/README.md", "# FireFly\n"]].map(([p, d]) => ({ path: p, data: new Uint8Array(Buffer.from(d)), sha256: sha(Buffer.from(d)) }));
@@ -450,6 +474,74 @@ with zipfile.ZipFile(out / "climb.zip", "w") as zf:
     } catch (e) {
       check("the card on a board: ran through", false, e.stack + (e.traceback ? "\n" + e.traceback : ""));
     } finally { repl.stop(); R.CARD.root = "/sd"; }
+  }
+
+  // -- an update removes the files the release no longer has (1.0.0-beta.74) ---
+  {
+    const root = path.join(SCRATCH, "retired");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(path.join(root, "lib"), { recursive: true });
+    fs.mkdirSync(path.join(root, "meter"), { recursive: true });
+    fs.mkdirSync(path.join(root, "fservbot"), { recursive: true });
+    for (const [p, d] of [["flasher_ui.mpy", "old"], ["lib/ed25519_fast_xtensawin.mpy", "old"], ["config.py", "NODE_NAME = 'Kept'\n"],
+                          ["rooms.json", "{}"], ["meter/install.py", "def setup(s):\n pass\n"], ["meter/old.py", "a pack's"],
+                          ["fservbot/install.mpy", "x"], ["fservbot/gone.mpy", "old"]])
+      fs.writeFileSync(path.join(root, p), d);
+    const repl = board(root);
+    try {
+      await R.prepare(repl, 8000);
+      const gone = await R.removeRetired(repl, ["flasher_ui.py", "flasher_ui.mpy", "lib/ed25519_fast_xtensawin.mpy",
+                                                "meter/old.py", "fservbot/gone.mpy"], ["fservbot", "stumpid"]);
+      check("an update: the files the release no longer has go (a .mpy, one in a folder, one in a built-in plugin)",
+            !fs.existsSync(path.join(root, "flasher_ui.mpy")) && !fs.existsSync(path.join(root, "lib/ed25519_fast_xtensawin.mpy"))
+            && !fs.existsSync(path.join(root, "fservbot/gone.mpy")) && gone.length === 3, JSON.stringify(gone));
+      check("... its settings, its data and a pack's own file stay",
+            fs.existsSync(path.join(root, "config.py")) && fs.existsSync(path.join(root, "rooms.json"))
+            && fs.readFileSync(path.join(root, "meter/old.py"), "utf8") === "a pack's" && fs.existsSync(path.join(root, "fservbot/install.mpy")));
+      check("... nothing to remove: nothing asked of the board", (await R.removeRetired(repl, [], [])).length === 0);
+    } catch (e) {
+      check("retired files on a board: ran through", false, e.stack + (e.traceback ? "\n" + e.traceback : ""));
+    } finally { repl.stop(); }
+  }
+
+  // -- the identity keepsake (1.0.0-beta.76) --------------------------------------
+  {
+    const root = path.join(SCRATCH, "identity");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(path.join(root, "rns"), { recursive: true });
+    const mine = crypto.randomBytes(64), mail = crypto.randomBytes(64);
+    fs.writeFileSync(path.join(root, "rns/identity"), mine);
+    fs.writeFileSync(path.join(root, "pn_mailbox_identity"), mail);
+    const repl = board(root);
+    try {
+      await R.prepare(repl, 8000);
+      const files = await R.readIdentity(repl);
+      check("a board's identity read: its keys and its mailbox", files && Buffer.from(files["rns/identity"]).equals(mine)
+            && Buffer.from(files["pn_mailbox_identity"]).equals(mail));
+      const text = await R.keepsake(files, "Bob's Glitch", "1.0.0-beta.76");
+      const kp = path.join(SCRATCH, "Bob.stump-identity");
+      fs.writeFileSync(kp, text);
+      const py = require("child_process").spawnSync("python3", ["-c",
+        "import sys; sys.path.insert(0, sys.argv[2]); import provisioner as P; f, n = P.read_identity_source(sys.argv[1]);" +
+        " print(n, f['rns/identity'].hex(), P.identity_fingerprint(f))", kp, path.join(__dirname, "../..")], { encoding: "utf8" });
+      check("... saved as the Provisioner saves it: it reads the file, the same identity and fingerprint",
+            py.status === 0 && py.stdout.trim() === "Bob's Glitch " + mine.toString("hex") + " " + (await R.identityFingerprint(files)), py.stdout + py.stderr);
+      const other = crypto.randomBytes(64);
+      const pk = require("child_process").spawnSync("python3", ["-c",
+        "import sys; sys.path.insert(0, sys.argv[2]); import provisioner as P; sys.stdout.buffer.write(P.keepsake_bytes({'rns/identity': bytes.fromhex(sys.argv[1])}, 'Gearn'))",
+        other.toString("hex"), path.join(__dirname, "../..")]);
+      const back = R.readKeepsake(pk.stdout.toString("utf8"));
+      check("... and the Provisioner's keepsake reads here", back.files && Buffer.from(back.files["rns/identity"]).equals(other) && back.name === "Gearn",
+            JSON.stringify(back.error || back.name));
+      await R.putIdentity(repl, back.files);
+      check("brought back onto the board: its identity there, the mailbox left from the other Stump gone",
+            fs.readFileSync(path.join(root, "rns/identity")).equals(other) && !fs.existsSync(path.join(root, "pn_mailbox_identity")));
+      check("a file that isn't one, or damaged: said", /isn't a saved/.test(R.readKeepsake("{}").error)
+            && /isn't whole/.test(R.readKeepsake(JSON.stringify({ stump_identity: 1, files: { "rns/identity": "AAAA" } })).error));
+      check("its file name, from the Stump's name (no characters a disk refuses)", R.keepsakeName('Bob/s "Glitch"') === "Bob_s _Glitch_.stump-identity");
+    } catch (e) {
+      check("the identity on a board: ran through", false, e.stack + (e.traceback ? "\n" + e.traceback : ""));
+    } finally { repl.stop(); }
   }
 
   // -- the Heltec's Wi-Fi: RNode serial commands, to a fake RNode ---------------
