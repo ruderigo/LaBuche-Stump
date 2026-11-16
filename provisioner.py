@@ -374,9 +374,9 @@ EXPECTED_FILE_HASHES = {
     "docs/HOME_BRANDING.md": "e1a1a9cf854dcdce",
     "docs/HTTPS_SETUP.md": "12cbbf2de7c38810",
     "docs/PACKS.md": "acb8642931a96b42",
-    "docs/PC.md": "e90244ab4b47d68e",
+    "docs/PC.md": "3c1f4e434e4f4dc2",
     "docs/PLUGINS.md": "8085ca56b773b64a",
-    "example_node.py": "4207d043875899fa",
+    "example_node.py": "9c60bf616e901816",
     "features.py": "81e8af361c64a911",
     "fserv.py": "06b87b1d6fb95eb4",
     "fservbot/plugin.json": "12b3c544160411e3",
@@ -628,6 +628,19 @@ def _belongs_on_board(relpath):
 
 
 STUMP_APP_FILES = [f for f in EXPECTED_FILE_HASHES.keys() if _belongs_on_board(f)]
+
+# Files an earlier Stump release put on a board or a computer Stump and
+# this one no longer has (1.0.0-beta.74). An update copies the new files
+# and removes these: before, they stayed forever (flasher_ui.py, retired
+# in beta.41, was still on a computer Stump updated through beta.73).
+# Only ever this list: a Stump's own files (settings, identity, data,
+# packs) are never touched. scripts/update_manifest.py adds a file here
+# when it leaves the manifest; a file dropped from a built-in plugin is
+# added by hand.
+RETIRED_FILES = (
+    "flasher_ui.py",
+    "lib/ed25519_fast_xtensawin.mpy",
+)
 
 # Derived from STUMP_APP_FILES itself (not hand-written) so this can't
 # drift out of sync -- the old flat-file build's equivalent string did
@@ -3727,6 +3740,7 @@ def upload_stump_app(port, app_dir=None):
         present = [f for f in present if f not in frozen]
         print("  A Stump image (%s): %d modules are frozen in, not uploaded." % (image.get("release"), len(frozen)))
         _remove_stale_frozen(port, frozen)
+    _remove_retired_on_board(port, resolved)
     to_sd = []
     if board_is_wrover(port):
         to_sd = [f for f in present if f.startswith("web/") and f.endswith(".wasm")]
@@ -6500,6 +6514,94 @@ def _board_files(fw):
     return files
 
 
+def retired_files(fw):
+    """The RETIRED_FILES this firmware doesn't ship again, as they'd be on a
+    Stump: a module as its .py and its compiled .mpy."""
+    shipped = set(_board_files(fw))
+    out = []
+    for rel in RETIRED_FILES:
+        if rel in shipped or not _belongs_on_board(rel):
+            continue
+        out.append(rel)
+        if rel.endswith(".py"):
+            out.append(rel[:-3] + ".mpy")
+        elif rel.endswith(".mpy") and rel[:-4] + ".py" not in shipped:
+            out.append(rel[:-4] + ".py")
+    return sorted(set(out))
+
+
+def _retired_kept(rel, has_install, builtins):
+    """A retired path inside a folder that is a plugin the firmware doesn't
+    ship (a pack's, say) is left alone: it's that plugin's file now."""
+    top = rel.split("/")[0] if "/" in rel else None
+    return bool(top) and top not in builtins and has_install(top)
+
+
+def _builtin_plugins(fw):
+    return {name for name, _ in discover_plugins(fw)}
+
+
+def _pc_remove_retired(fw, folder):
+    """Removes from a computer Stump the files an earlier release put there
+    and this one no longer has. Returns their paths."""
+    folder = Path(folder)
+    builtins = _builtin_plugins(fw)
+    has = lambda top: (folder / top / "install.py").is_file() or (folder / top / "install.mpy").is_file()
+    gone = []
+    for rel in retired_files(fw):
+        p = folder / rel
+        if not p.is_file() or _retired_kept(rel, has, builtins):
+            continue
+        try:
+            p.unlink()
+            gone.append(rel)
+        except OSError:
+            pass
+        for d in p.parents:                      # its folder too, once empty (not the Stump's own)
+            if d == folder or folder not in d.parents:
+                break
+            try:
+                d.rmdir()
+            except OSError:
+                break
+    if gone:
+        print("  Removed %d file(s) this release no longer has: %s" % (len(gone), ", ".join(gone)))
+    return gone
+
+
+def _remove_retired_on_board(port, fw):
+    """The same on a board, in one call. Returns how many were removed."""
+    paths = retired_files(fw)
+    if not paths:
+        return 0
+    code = ("import os\n"
+            "def has(t):\n"
+            "    for f in ('/install.py','/install.mpy'):\n"
+            "        try:\n"
+            "            os.stat(t+f)\n"
+            "            return True\n"
+            "        except OSError:\n"
+            "            pass\n"
+            "    return False\n"
+            "gone=[]\n"
+            "for p in %r:\n"
+            "    t=p.split('/')[0] if '/' in p else None\n"
+            "    if t and t not in %r and has(t):\n"
+            "        continue\n"
+            "    try:\n"
+            "        os.remove(p)\n"
+            "        gone.append(p)\n"
+            "    except OSError:\n"
+            "        pass\n"
+            "print('RETIRED:'+','.join(gone))\n") % (paths, sorted(_builtin_plugins(fw)))
+    ok, out = run(["mpremote", "connect", port, "exec", code], timeout=60)
+    m = re.search(r"RETIRED:(.*)", out or "") if ok else None
+    gone = [g for g in (m.group(1).strip().split(",") if m else []) if g]
+    if gone:
+        print("  Removed %d file(s) this release no longer has: %s" % (len(gone), ", ".join(gone)))
+    return len(gone)
+
+
 def _copy_if_changed(src, dst):
     """Copies src to dst unless dst is already identical. True if copied."""
     import shutil
@@ -7528,10 +7630,11 @@ def setup_pc(folder=None, reconfigure=False):
 
     r.start("Firmware")
     n = _pc_copy_firmware(fw, folder)
+    gone = [] if first else _pc_remove_retired(fw, folder)
     rel = _folder_release(folder) or _folder_release(folder / "final_firmware")
     if rel:
         r.note("Release", rel)
-    r.end("done", "%d file(s) updated, Stump %s" % (n, rel or "?"))
+    r.end("done", "%d file(s) updated%s, Stump %s" % (n, ", %d old one(s) removed" % len(gone) if gone else "", rel or "?"))
 
     r.start("Configure")
     profile = None

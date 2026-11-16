@@ -1039,6 +1039,21 @@
     return m ? +m[1] : 0;
   }
 
+  // The files an earlier release put on the board and this one no longer
+  // has (1.0.0-beta.74), left behind by every update before. Not inside a
+  // folder that is a plugin the Stump doesn't ship (a pack's). Returns the
+  // paths removed.
+  async function removeRetired(repl, paths, builtins) {
+    if (!paths || !paths.length) return [];
+    var out = await repl.run(
+      "import os\ndef has(t):\n for f in ('/install.py','/install.mpy'):\n  try:\n   os.stat(t+f)\n   return True\n  except OSError:\n   pass\n return False\n" +
+      "gone=[]\nfor p in " + JSON.stringify(paths) + ":\n t=p.split('/')[0] if '/' in p else None\n" +
+      " if t and t not in " + JSON.stringify(builtins || []) + " and has(t):\n  continue\n" +
+      " try:\n  os.remove(p)\n  gone.append(p)\n except OSError:\n  pass\nprint('RETIRED:'+','.join(gone))\n", 60000);
+    var m = /RETIRED:(.*)/.exec(out);
+    return m ? m[1].trim().split(",").filter(function (g) { return g; }) : [];
+  }
+
   // Free memory at the prompt (bytes), or null: a WROVER's or a CAM's
   // PSRAM gives megabytes; a board without it (an ESP32-WROOM) a few
   // hundred KB, too little for a Stump.
@@ -1124,7 +1139,7 @@
               clearLeftovers: clearLeftovers, flashUse: flashUse, boardInfo: boardInfo, memory: memory,
               scanWifi: scanWifi, lookAround: lookAround, offers: offers, chainIdOf: chainIdOf, wifiPass: wifiPass,
               IMAGE_FOR: IMAGE_FOR, imageForChip: imageForChip, imageInfo: imageInfo, notFrozen: notFrozen,
-              removeFrozenCopies: removeFrozenCopies, HELTEC_ON_HOTSPOT: HELTEC_ON_HOTSPOT, HELTEC_FIRST: HELTEC_FIRST,
+              removeFrozenCopies: removeFrozenCopies, removeRetired: removeRetired, HELTEC_ON_HOTSPOT: HELTEC_ON_HOTSPOT, HELTEC_FIRST: HELTEC_FIRST,
               CARD: CARD, USB_MAX: USB_MAX, cardStatus: cardStatus, wipeCard: wipeCard, toCard: toCard,
               readZip: readZip, packFrom: packFrom, installPack: installPack, fillTools: fillTools, shaHex: shaHex,
               readSettings: readSettings, writeSettings: writeSettings,

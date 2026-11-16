@@ -1,5 +1,5 @@
 import os
-import sys, json, re, hashlib, shutil, zipfile, builtins
+import sys, json, re, hashlib, shutil, zipfile, builtins, subprocess
 from pathlib import Path
 import tempfile
 W = Path(__file__).resolve().parent.parent
@@ -669,6 +669,78 @@ with contextlib.redirect_stdout(io.StringIO()):
 check('... and next time, nomadnet is kept up to date, not offered again',
       not any("Install nomadnet?" in q for q in asked) and any("Install simple?" in q for q in asked), asked)
 P._pc_ensure_venv, P._pc_configure_existing, P._pc_install_tools, P.ask_yes_no = saved
+# An update removes the files an earlier release put there and this one
+# no longer has (1.0.0-beta.74): flasher_ui.py, retired in beta.41, was
+# still on a computer Stump updated through beta.73. Never its settings,
+# data, identity, nor a pack's files.
+shipped = set(P._board_files(P.STUMP_APP_DIR))
+check('retired files: none of them shipped by this release', not (set(P.RETIRED_FILES) & shipped),
+      set(P.RETIRED_FILES) & shipped)
+ret = P.retired_files(P.STUMP_APP_DIR)
+check('... a retired module, as its source and its compiled copy', "flasher_ui.py" in ret and "flasher_ui.mpy" in ret, ret)
+for rel, data in (("flasher_ui.py", "old"), ("lib/ed25519_fast_xtensawin.mpy", "old"), ("rooms.json", "{}"),
+                  ("rns/identity", "its identity"), ("meter/install.py", "def setup(s):\n    pass\n"), ("meter/old.py", "a pack's"),
+                  ("fservbot/gone.py", "old")):
+    (upd / rel).parent.mkdir(parents=True, exist_ok=True)
+    (upd / rel).write_text(data)
+cfg_before = (upd / "config.py").read_text()
+saved_ret = P.RETIRED_FILES
+P.RETIRED_FILES = saved_ret + ("meter/old.py", "fservbot/gone.py", "olddir/gone.py")
+(upd / "olddir").mkdir(); (upd / "olddir" / "gone.py").write_text("old")
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    gone = P._pc_remove_retired(P.STUMP_APP_DIR, upd)
+check('a --pc update: the files the release no longer has go, and are named',
+      sorted(gone) == ["flasher_ui.py", "fservbot/gone.py", "lib/ed25519_fast_xtensawin.mpy", "olddir/gone.py"]
+      and "flasher_ui.py" in out.getvalue(), (gone, out.getvalue()))
+check('... a folder left empty goes too; one with anything else in it stays', not (upd / "olddir").exists() and (upd / "fservbot").is_dir())
+check('... its settings, data, identity and a pack\'s own file stay',
+      (upd / "config.py").read_text() == cfg_before and (upd / "rooms.json").is_file()
+      and (upd / "rns" / "identity").read_text() == "its identity" and (upd / "meter" / "old.py").read_text() == "a pack's")
+with contextlib.redirect_stdout(io.StringIO()):
+    check('... the next update: nothing left to remove', P._pc_remove_retired(P.STUMP_APP_DIR, upd) == [])
+# On a board: the same, in one call (the code run here as the board would).
+sent = []
+real_run = P.run
+board = Path(tempfile.mkdtemp(prefix="board-"))
+for rel in ("flasher_ui.mpy", "meter/install.mpy", "meter/old.py", "fservbot/install.mpy", "fservbot/gone.py", "config.py"):
+    (board / rel).parent.mkdir(parents=True, exist_ok=True)
+    (board / rel).write_text("x")
+def _on_board(cmd, timeout=None):
+    sent.append(cmd)
+    here = os.getcwd(); os.chdir(board)
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            exec(cmd[-1], {})
+    finally:
+        os.chdir(here)
+    return True, buf.getvalue()
+P.run = _on_board
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    n = P._remove_retired_on_board("/dev/ttyUSB0", P.STUMP_APP_DIR)
+P.run = real_run
+check('a board update: the same files go, in one call', n == 2 and len(sent) == 1 and not (board / "flasher_ui.mpy").exists()
+      and not (board / "fservbot" / "gone.py").exists(), (n, sent[-1][:4], sorted(str(p.relative_to(board)) for p in board.rglob("*"))))
+check('... a pack\'s own file and its settings stay', (board / "meter" / "old.py").exists() and (board / "config.py").exists())
+P.RETIRED_FILES = saved_ret
+shutil.rmtree(board, ignore_errors=True)
+# scripts/update_manifest.py: a file that leaves the firmware is listed
+# as retired; one that comes back isn't.
+mt = Path(tempfile.mkdtemp(prefix="manifest-"))
+shutil.copy(W / "provisioner.py", mt / "provisioner.py")
+shutil.copytree(W / "final_firmware", mt / "final_firmware", ignore=shutil.ignore_patterns("__pycache__"))
+(mt / "scripts").mkdir(); shutil.copy(W / "scripts" / "update_manifest.py", mt / "scripts" / "update_manifest.py")
+(mt / "final_firmware" / "qr.py").unlink()
+r = subprocess.run([sys.executable, str(mt / "scripts" / "update_manifest.py")], capture_output=True, text=True)
+src = (mt / "provisioner.py").read_text()
+blk = re.search(r"RETIRED_FILES = \((.*?)\n\)", src, re.S).group(1)
+check('update_manifest: a file that left the firmware becomes retired, and is said',
+      '"qr.py"' in blk and '"flasher_ui.py"' in blk and '"qr.py":' not in src and "retired: qr.py" in r.stdout, r.stdout + r.stderr)
+shutil.copy(W / "final_firmware" / "qr.py", mt / "final_firmware" / "qr.py")
+r = subprocess.run([sys.executable, str(mt / "scripts" / "update_manifest.py")], capture_output=True, text=True)
+blk = re.search(r"RETIRED_FILES = \((.*?)\n\)", (mt / "provisioner.py").read_text(), re.S).group(1)
+check('... and back in the firmware: not retired any more', '"qr.py"' not in blk and '"flasher_ui.py"' in blk, r.stdout + r.stderr)
+shutil.rmtree(mt, ignore_errors=True)
 shutil.rmtree(upd, ignore_errors=True)
 shutil.rmtree(tmp, ignore_errors=True)
 # The board step, a Stump board on a USB bridge (the WROVER: one USB port,

@@ -70,7 +70,7 @@ the LoRa mesh through one that has one
    it's offered to whoever has the Stump.
 
 **Update a Stump** puts a new release on a Stump and keeps its settings,
-identity and chat. The **Settings** tab reads and changes a Stump's settings
+identity and chat; the files the new release no longer has are removed. The **Settings** tab reads and changes a Stump's settings
 over USB. All of it: [final_firmware/docs/ARBORIST.md](final_firmware/docs/ARBORIST.md).
 
 **With the Provisioner (the terminal):** `python3 provisioner.py`, from a

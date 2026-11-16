@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-beta.74
+- **Updates clean up after themselves.** An update copied the new files and never removed the ones a release had dropped: a computer Stump updated through beta.73 still had `flasher_ui.py`, retired in beta.41. Now every update (`--pc`, `--upload-app` and the wizard's on a board, Arborist's **Update a Stump**) removes the files an earlier release put there and this one no longer has, and names them. Only those: a Stump's settings, identity, data and packs are never touched, nor a file inside a pack's folder.
+- The list is `RETIRED_FILES` in `provisioner.py` (for now `flasher_ui.py` and the native `lib/ed25519_fast_xtensawin.mpy`, 49 KB on a WROVER). `scripts/update_manifest.py` adds a file there when it leaves the firmware, and takes it off if it comes back; Arborist carries the list.
+- Tests: `provisioner` (a computer Stump and a board: the retired files go, settings, data, identity and a pack's file stay; the list never names a file this release ships; `update_manifest` adds and drops); `arborist` (on the pretend board, and an update from the page).
+
 ## 1.0.0-beta.73
 - **stumpid could be left switched off, and /admin with it** (the kit's WROVERs). If the board was reset while stumpid was starting, safe mode switched it off until someone turned it back on in /admin; but stumpid checks /admin's password, so every password was refused there, and `/auth`, `/whoami` answered "unknown command". Arborist and the Provisioner reset the board, or stop it for a prompt, each time they connect, so it happened in normal use. Now:
   - safe mode never switches stumpid off (it's the access control); one an older firmware switched off is back on at the next start;

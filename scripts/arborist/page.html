@@ -1226,6 +1226,10 @@ async function make() {
         (left !== null ? " · about " + (left > 90 ? Math.round(left / 60) + " min" : left + " s") + " left" : "") + (path ? " · " + path : ""));
   });
   if (up && up.skipped) log(up.skipped + " files already the same on the board: not written again");
+  if (upd) {
+    var old = await R.removeRetired(repl, P.head.retired || [], P.head.builtins || []);
+    if (old.length) log(old.length + " file(s) this release no longer has removed: " + old.join(", "));
+  }
   if (!upd) {
     step(5);
     var tpl = new TextEncoder().encode(P.head.config_template);
