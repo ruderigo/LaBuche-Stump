@@ -235,8 +235,11 @@ check('one duet: the two smallest (aa+bb)', mode(A) == 'duet' and mode(B) == 'du
       [(mode(m), m._peer.get('hex', '')[:4]) for m in BOTS])
 check('... the other two stay out of it (no second duet)', mode(C) == 'solo' and mode(D) == 'solo' and TWO[0] == 0, TWO)
 check('... and they know a duet is going', C._duet_elsewhere() and D._duet_elsewhere())
-nums = [p for p in POSTS if p[1] in ('bavardc', 'bavardd') and '#' in p[2] and p[3]]
-check('... no numbers from them in the shared room', not nums, nums[:3])
+heard_at = 60000                           # the first announces (run() sends them every minute)
+nums = [p for p in POSTS if p[1] in ('bavardc', 'bavardd') and '#' in p[2] and p[3] and p[0] > heard_at + 2000]
+check('... no numbers from them in the shared room, once they hear the others', not nums, nums[:3])
+early = [p for p in POSTS if p[1] in ('bavardc', 'bavardd') and '#' in p[2] and p[3] and p[0] < heard_at]
+check('... before that, alone as far as each knows: their numbers (1.3)', early, len(early))
 t1 = CLOCK.t
 asyncio.run(run(300))
 gaps = [b[0] - a[0] for a, b in zip([p for p in POSTS if p[0] > t1 and ' · ' in p[2]], [p for p in POSTS if p[0] > t1 and ' · ' in p[2]][1:])]
@@ -285,6 +288,20 @@ check('another duet with a smaller pair heard: ours stops', mode(A) == 'solo' an
 check('... and nobody starts one while it goes on', all(mode(m) == 'solo' for m in BOTS))
 asyncio.run(run(A._seen_s() + 200))
 check('... once it\'s gone quiet, a duet again (one)', len(set(duets())) == 1 and TWO[0] == 0, duets())
+
+# ── 4b. the others go quiet for good: a lone Bavard says its numbers, shared room or not (1.3) ──
+for m in (A, B, C):
+    m._panel_post({'do': 'pause'}, 'en')
+pump()
+t4 = CLOCK.t
+asyncio.run(run(D._seen_s() + 120, announce=False))
+alone = [p for p in POSTS if p[1] == 'bavardd' and '#' in p[2] and p[3] and p[0] > t4 + D._seen_s() * 1000]
+check('the others gone quiet: the last Bavard, alone in the shared room, says its numbers', mode(D) == 'solo' and alone, len(alone))
+check('... and not while the others were still heard', not [p for p in POSTS if p[1] == 'bavardd' and '#' in p[2] and p[3]
+                                                        and t4 + 5000 < p[0] < t4 + D._seen_s() * 1000 - 60000])
+for m in (A, B, C):
+    m._panel_post({'do': 'resume'}, 'en')
+pump()
 
 # ── 5. a call under way isn't dropped for another one ──
 D._peer.clear(); D._st['mode'] = 'solo'

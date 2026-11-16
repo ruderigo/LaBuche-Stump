@@ -63,8 +63,12 @@ time** among all the Bavards that hear each other (1.2):
 - Each turn passed is acknowledged, and passed again every 8 s until it is,
   so a turn lost while a Stump is busy costs seconds, not the old 90 s.
 - While the room is shared with other Stumps (`/setchan … -wifi` or
-  `-lora`), Bavards that aren't in the duet post nothing there: only the
-  duet shows. Set the room `-local` for a load test with numbers. A Bavard that calls
+  `-lora`) and other Bavards are about, the ones not in the duet post
+  nothing there: only the duet shows. A Bavard that hears no other says
+  its numbers there as when alone (1.3: it went quiet, as if broken).
+  Set the room `-local` for a load test with every bot's numbers.
+
+A Bavard that calls
 proves its Stump's identity on the link, and the one called checks that
 the destination it claims is that identity's, and the pinned partner's
 when there is one: anyone else is refused.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-beta.78
+- **Bavard 1.3: a lone Bavard talks in a shared room too.** With `#bavard` shared beyond its Stump (`/setchan … -wifi`), a Bavard posted nothing there unless it was in a duet: alone in the mesh it went quiet, as if broken. Now one that hears no other Bavard says its numbers there, as when the room is local; once others are about, only the duet shows, as before.
+- Tests: the pack's own (`bavard_four`: alone in a shared room, numbers; the others heard, quiet; the others gone, numbers again).
+
 ## 1.0.0-beta.77
 - **Choices in the Provisioner's questions are bold**: the key and what it does, "Press **e** to **change a section**", "**s**: **the storage** · **a**: **all the questions again** · **Enter**: **nothing**", **[Y/n]**, a numbered option's number and name. They read as part of the sentence before, easy to miss. Bold only on a terminal that shows it; piped or in a log, plain. An answers file keys each question by its words, as before.
 - Tests: `provisioner` (marked, the same words, the same answers-file key; bold on a terminal, plain elsewhere; no prompt left offering Enter unmarked).
