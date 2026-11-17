@@ -636,12 +636,51 @@ def _still_here(h):
 
 def _watch_proof(h, msg):
     """Its proof, when it comes, keeps a room peer here (an opportunistic
-    message: one packet, its receipt)."""
+    message: one packet, its receipt). None, twice running, over a route
+    while it's heard over another: that route is set aside (beta.80)."""
     if h not in _peers:
         return
     rc = getattr(getattr(msg, "packet", None), "receipt", None)
     if rc is not None:
-        rc.set_delivery_callback(lambda r, h=h: _still_here(h))
+        rc.set_timeout(PROOF_WAIT_S)
+        rc.set_delivery_callback(lambda r, h=h: _proof_back(h))
+        rc.set_timeout_callback(lambda r, h=h: _no_proof(h))
+
+
+# A route that doesn't deliver (1.0.0-beta.80): a computer Stump kept a
+# 1-hop path to a FireFly over the home Wi-Fi (its Local network) that the
+# phone didn't take messages on, while the FireFly's own announces came
+# over the chain (2 hops, turned down as worse): every answer lost, /auth
+# never answered. Two messages running without a proof, over a route while
+# the client's announces come in over another: that route is set aside for
+# AVOID_S and another asked for (urns/transport.py: avoid_path).
+PROOF_WAIT_S = 45
+NO_PROOF_MAX = 2
+AVOID_S = 3600
+_misses = {}
+
+
+def _proof_back(h):
+    _misses.pop(h, None)
+    _still_here(h)
+
+
+def _no_proof(h):
+    n = _misses.get(h, 0) + 1
+    if n < NO_PROOF_MAX:
+        _misses[h] = n
+        return
+    _misses.pop(h, None)
+    try:
+        from urns.transport import Transport
+        dest = bytes.fromhex(h)
+        via = Transport.path_interface(dest)
+        if via and Transport.heard_elsewhere(dest, via, 2 * AVOID_S):
+            print("[rrc_mesh] %s: no proof for %d messages over %s, while it's heard over another way: "
+                  "that route set aside" % (h[:8], NO_PROOF_MAX, via))
+            Transport.avoid_path(dest, via, AVOID_S)
+    except Exception as e:
+        print("[rrc_mesh] route check:", e)
 
 
 def _back_room(h, landing, lang):

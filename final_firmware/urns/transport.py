@@ -56,6 +56,14 @@ class Transport:
     packet_hashlist = set()       # current dedup window (reference RNS shape)
     packet_hashlist_prev = set()  # previous window, rotated in when current fills
     receipts = []
+    # Routes that don't deliver (1.0.0-beta.80): a computer Stump kept a
+    # 1-hop path to a FireFly over the home Wi-Fi (Local network) that the
+    # phone didn't answer on, while the FireFly's LoRa announces (2 hops,
+    # through the chain) were turned down as worse: every reply lost.
+    # avoid: dest -> {interface name: until}; heard_on: dest -> {interface
+    # name: when an announce of it last came in on it}.
+    avoid = {}
+    heard_on = {}
     announce_table = {}
     destination_table = {}
     path_table = {}          # dest_hash -> transport_id (Phase 0); rich entry in Phase 1
@@ -1529,6 +1537,49 @@ class Transport:
             log("Un-blackholed " + dest_hash.hex()[:8], LOG_NOTICE)
 
     @staticmethod
+    def avoided(dest, iname, now=None):
+        a = Transport.avoid.get(dest)
+        if not a:
+            return False
+        until = a.get(iname)
+        if until is None:
+            return False
+        if (now or time.time()) >= until:
+            a.pop(iname, None)
+            if not a:
+                Transport.avoid.pop(dest, None)
+            return False
+        return True
+
+    @staticmethod
+    def heard_elsewhere(dest, iname, within):
+        """An announce of dest came in lately on another interface than iname."""
+        now = time.time()
+        return any(k != iname and now - t <= within for k, t in (Transport.heard_on.get(dest) or {}).items())
+
+    @staticmethod
+    def path_interface(dest):
+        e = Transport.path_table.get(dest)
+        if e is None:
+            return None
+        i = e[const.IDX_PT_RECV_IF]
+        return getattr(i, "name", None) or str(i)
+
+    @staticmethod
+    def avoid_path(dest, iname, secs):
+        """The path to dest over iname doesn't deliver: forget it, don't take
+        one over iname again for secs, and ask for another."""
+        Transport.avoid.setdefault(dest, {})[iname] = time.time() + secs
+        if Transport.path_interface(dest) == iname:
+            Transport.expire_path(dest)
+        log("Path " + dest.hex()[:8] + " over " + iname + " doesn't deliver: set aside for "
+            + str(int(secs // 60)) + " min, asking for another", LOG_NOTICE)
+        try:
+            Transport.request_path(dest)
+        except Exception:
+            pass
+
+    @staticmethod
     def expire_path(dest_hash):
         """Forget the path to a destination (e.g. after it proved unresponsive),
         so the next send triggers a fresh path request."""
@@ -1643,6 +1694,13 @@ class Transport:
             return
         now = time.time()
         emitted = Transport._announce_emitted(packet)
+        iname = getattr(packet.receiving_interface, "name", None) or str(packet.receiving_interface)
+        h_on = Transport.heard_on.get(dest)
+        if h_on is None:
+            if len(Transport.heard_on) >= const.MAX_PATH_TABLE:
+                Transport.heard_on.pop(min(Transport.heard_on, key=lambda k: max(Transport.heard_on[k].values())), None)
+            h_on = Transport.heard_on[dest] = {}
+        h_on[iname] = now
 
         # Next hop toward dest: the relay we heard it from (HDR_2 transport_id),
         # else dest itself (directly reachable).
@@ -1708,6 +1766,10 @@ class Transport:
                             LOG_VERBOSE)
             else:
                 should_add = now >= entry[const.IDX_PT_EXPIRES]
+            if should_add and Transport.avoided(dest, iname, now):
+                should_add = False
+                if sl(LOG_VERBOSE):
+                    log("Path " + dest.hex()[:8] + " not taken over " + iname + ": it didn't deliver", LOG_VERBOSE)
 
         if not should_add:
             # Keep-alive: a re-confirming announce for the SAME next hop at no-worse
