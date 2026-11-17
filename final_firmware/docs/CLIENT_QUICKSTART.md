@@ -412,7 +412,7 @@ same link) holds a link, so an app knows at once it's a Stump, with no
 beacon to wait for:
 
 ```
-lxmf://<address>?stump=<name>&key=<public key>
+lxmf://<address>?stump=<name>&key=<public key>&r=<release>
 ```
 
 - `<address>`: the 32 lowercase hex characters of its `lxmf.delivery`
@@ -423,6 +423,13 @@ lxmf://<address>?stump=<name>&key=<public key>
 - `key=`: its identity's public key, 64 bytes (the X25519 key, then the
   Ed25519 key, as in a Reticulum announce), base64url with no padding:
   86 characters.
+- `r=` (since 1.0.0-beta.79): its release, percent-encoded, the same
+  string its beacon carries in `r` (`1.0.0-beta.79`). An app knows on
+  the first visit, before any beacon, whether the Stump takes a LoRa
+  message's signature as its proof (beta.71+: no `/auth`). A hint only:
+  anyone can print a code, and the key proves the address, not the
+  release; the signed beacon has the last word. Absent on older Stumps;
+  apps that don't know it ignore it.
 
 **Check the key before trusting the link** (anyone can print a QR code):
 `identity_hash = SHA-256(key)[:16]`, then `SHA-256(SHA-256("lxmf.delivery")[:10]
@@ -430,9 +437,9 @@ lxmf://<address>?stump=<name>&key=<public key>
 reach the Stump with that key at once, before any announce arrives. If
 it doesn't, drop the link. A link without `stump=` is someone else's to
 define; one without `key=` is just an address to wait for. The link is
-about 145 characters (a version 8 QR code at error correction M for a
-name of up to 15 plain letters; longer or accented names, version 9 to
-12). A Stump that hasn't got its key yet shows the plain address.
+about 165 characters with its release (a version 9 QR code at error
+correction M for a name of up to 20 plain letters; longer or accented
+names, version 10 to 12). A Stump that hasn't got its key yet shows the plain address.
 
 Since 1.0.0-beta.53 the page has a second code, behind a *FireFly* /
 *Columba* switch, for apps that don't know Stumps: Columba's contact
@@ -909,9 +916,18 @@ are fixed encryption and LXMF overhead.
   (or `#main` if a tiered `#lora-mesh` redirects you), and room traffic is
   pushed to you as well.
 
-Participation lasts `MESH_PEER_TIMEOUT` (default 300 s) after your last
-message; DM reachability lasts `MESH_ANNOUNCE_TIMEOUT` (default 3600 s)
-after your last announce, so announce more often than that. Moving
+Participation lasts `MESH_PEER_TIMEOUT` (default 300 s) after you were
+last heard; DM reachability lasts `MESH_ANNOUNCE_TIMEOUT` (default 3600 s)
+after your last announce, so announce more often than that. Since
+1.0.0-beta.79, "heard" for participation is any of: a message of yours,
+**the delivery proof your LXMF sends back for a line the Stump pushed
+you** (it does anyway), or an announce of yours. So an app that's
+listening stays in its room while the room talks, without sending
+anything for it: **no keepalive needed** (it would only spend airtime).
+In a room gone quiet, you're kept by your announces, if they come more
+often than every 5 minutes; otherwise you leave after 5 minutes, and if
+you come back within an hour (any message), you're put back in the room
+you were in (if you may still be there), not in `#lora-mesh`. Moving
 between the two never duplicates or drops a DM. Only LXMF delivery
 announces count — node, propagation and other announces are ignored.
 

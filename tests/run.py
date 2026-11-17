@@ -58,6 +58,7 @@ TESTS = [
     ("lora_proof", "assert", []),
     ("lb_hold", "assert", []),
     ("stumpid_safe", "assert", []),
+    ("mesh_still_here", "assert", []),
     ("radio_status", "assert", []),
     ("profiles_store", "assert", []),
     ("conn_limits", "assert", []),

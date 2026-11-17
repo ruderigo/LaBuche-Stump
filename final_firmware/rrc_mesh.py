@@ -615,6 +615,51 @@ def _dm_to_me(dest_hash_hex, nick, body):
 
 # ── Peer state ────────────────────────────────────────────────────────
 
+# A LoRa client stays in its room while it's still here, at no airtime of
+# its own (1.0.0-beta.79, asked by the FireFly team: a quiet one was
+# dropped after PEER_TIMEOUT unless it sent something every 4 minutes):
+# - the proof its app sends back for each line this Stump pushes it (it
+#   sends them anyway) counts: while the room talks, a client that's
+#   listening stays, one that's gone stops proving and leaves as before;
+# - so does an announce of its own (signed), for a room gone quiet;
+# - one that went quiet anyway and comes back within BACK_S returns to the
+#   room it was in, not to #lora-mesh.
+BACK_S = 3600
+_was = {}                 # dest hash hex -> (the room it was in, when it went quiet)
+
+
+def _still_here(h):
+    p = _peers.get(h)
+    if p is not None and not p.get("stump"):
+        p["last_seen"] = time.time()
+
+
+def _watch_proof(h, msg):
+    """Its proof, when it comes, keeps a room peer here (an opportunistic
+    message: one packet, its receipt)."""
+    if h not in _peers:
+        return
+    rc = getattr(getattr(msg, "packet", None), "receipt", None)
+    if rc is not None:
+        rc.set_delivery_callback(lambda r, h=h: _still_here(h))
+
+
+def _back_room(h, landing, lang):
+    """The room a client that went quiet was in, if it comes back within
+    BACK_S and may still be there (tiers, bans: as a /join); else None."""
+    w = _was.pop(h, None)
+    if w is None or time.time() - w[1] > BACK_S or w[0] == landing or not rrc.room_exists(w[0]):
+        return None
+    try:
+        if _tier_refusal(h, w[0], lang):
+            return None
+        import mods
+        if mods.join_refusal(h, w[0], lang):
+            return None
+    except Exception:
+        return None
+    return w[0]
+
 def _prune_peers(now):
     # While the radio is down nobody on LoRa can be heard: they aren't
     # gone, and what waits for them stays (up to LORA_KEEP_S).
@@ -623,6 +668,10 @@ def _prune_peers(now):
              and not (keep and not p.get("stump"))]
     for h in stale:
         p = _peers.pop(h)
+        if not p.get("stump") and p["room"] != p.get("home_room"):
+            _was[h] = (p["room"], now)          # back there if it comes back (_back_room)
+            if len(_was) > MAX_MESH_PEERS:
+                _was.pop(min(_was, key=lambda k: _was[k][1]))
         rrc.system(p["room"], rrc.ev_leave("~" + p["nick"]))
         rrc.drop_user(h)
         if h in _reach:
@@ -688,6 +737,10 @@ def _get_peer(dest_hash_hex, display_name, message=None):
             redirected = not allowed
         else:
             room = rrc.MESH_ROOM
+        landing = room
+        if not stump and not redirected and dest_hash_hex in _was:
+            import i18n
+            room = _back_room(dest_hash_hex, landing, i18n.get_lang(dest_hash_hex)) or room
         _peers[dest_hash_hex] = {
             "nick": nick,
             "room": room,
@@ -700,7 +753,7 @@ def _get_peer(dest_hash_hex, display_name, message=None):
             # in one of the two cases; this is correct in both, since
             # it's just "wherever mesh_landing_room() actually decided,"
             # not an assumption about what that should have been.
-            "home_room": room,
+            "home_room": landing,
             "stump": stump,
             "last_seen": now,
             "last_sent_id": 0,
@@ -1034,6 +1087,7 @@ def on_announce(router, dest, app_data, packet):
                 rrc.touch_user(web, nick=new)
                 rrc.note_rename(old, new)
     r["last_seen"] = now
+    _still_here(h)                      # in a room: an announce of its own keeps it there (1.0.0-beta.79)
     if len(_reach) > MAX_REACHABLE:
         idle = sorted((k for k in _reach if k not in _peers), key=lambda k: _reach[k]["last_seen"])
         for k in idle[:len(_reach) - MAX_REACHABLE]:
@@ -2537,13 +2591,14 @@ def _send_item(item):
             print("[rrc_mesh] mesh_out:", e)
     try:
         if via is not None:
-            rtr.send_message(dest_hash_bytes, text, title=title, via=via)
+            msg = rtr.send_message(dest_hash_bytes, text, title=title, via=via)
         elif fields:
-            rtr.send_message(dest_hash_bytes, text, title=title, fields=fields)
+            msg = rtr.send_message(dest_hash_bytes, text, title=title, fields=fields)
         elif title:
-            rtr.send_message(dest_hash_bytes, text, title=title)
+            msg = rtr.send_message(dest_hash_bytes, text, title=title)
         else:
-            rtr.send_message(dest_hash_bytes, text)
+            msg = rtr.send_message(dest_hash_bytes, text)
+        _watch_proof(dest_hash_bytes.hex(), msg)
     except Exception as e:
         print("[rrc_mesh] send error:", e)
 
