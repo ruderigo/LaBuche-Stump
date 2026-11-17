@@ -4,7 +4,7 @@
 # once they hear each other they play the corpus turn by turn, losing and
 # repeating nothing; a silent link sends them back to numbers, and they
 # pick the play up where it was when they find each other again.
-import sys, os, time, re
+import sys, os, time
 class _M: pass
 _m = _M(); _m.aes = lambda *a, **k: None
 sys.modules['ucryptolib'] = _m; sys.modules['cryptolib'] = _m

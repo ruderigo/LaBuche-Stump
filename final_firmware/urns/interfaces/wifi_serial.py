@@ -71,7 +71,7 @@ except ImportError:
 import time
 import socket
 from . import Interface
-from ..log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_NOTICE
+from ..log import log, LOG_VERBOSE, LOG_ERROR, LOG_NOTICE
 
 # Real KISS constants, confirmed from RNS.Interfaces.RNodeInterface (KISS class)
 FEND  = 0xC0

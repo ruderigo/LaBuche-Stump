@@ -5,8 +5,8 @@ import os
 from ..hashes import sha512
 from .basic import (bytes_to_clamped_scalar,
                     bytes_to_scalar, scalar_to_bytes,
-                    bytes_to_element, bytes_to_element_unchecked,
-                    Base, scalarmult_base_comb)
+                    bytes_to_element_unchecked,
+                    scalarmult_base_comb)
 
 def H(m):
     return sha512(m)

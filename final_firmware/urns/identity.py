@@ -5,11 +5,11 @@ from urns.mem import collect as _gc_collect
 import os
 import time
 from . import const
-from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_EXTREME, LOG_NOTICE, sl
+from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, sl
 from .crypto import (
     X25519PrivateKey, X25519PublicKey,
     Ed25519PrivateKey, Ed25519PublicKey,
-    Token, sha256, sha512, hkdf,
+    Token, sha256, hkdf,
 )
 from .crypto import ed25519 as _ed25519_backend
 
@@ -20,7 +20,6 @@ def _gc_after_crypto():
     With the native module there is no such garbage and each collect costs
     ~10ms+ of heap scan per call on a populated heap — skip it."""
     if not _ed25519_backend.have_native():
-        import gc
         _gc_collect()
 
 

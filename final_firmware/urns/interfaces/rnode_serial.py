@@ -19,7 +19,7 @@
 
 import os
 import time
-from .wifi_serial import (WiFiSerialInterface, FEND, CMD_DETECT, DETECT_REQ, CMD_FW_VERSION,
+from .wifi_serial import (WiFiSerialInterface, CMD_DETECT, DETECT_REQ, CMD_FW_VERSION,
                           CMD_PLATFORM, CMD_RADIO_STATE, RADIO_STATE_OFF, CMD_LEAVE)
 from ..log import log, LOG_NOTICE, LOG_ERROR, LOG_VERBOSE
 

@@ -2,10 +2,9 @@
 # Endpoint addressing and announce management
 
 from urns.mem import collect as _gc_collect
-import os
 import time
 from . import const
-from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_EXTREME, LOG_NOTICE
+from .log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR
 from .identity import Identity
 from .crypto import Token
 
@@ -150,7 +149,7 @@ class Destination:
             signed_data += app_data
 
         try:
-            import gc; _gc_collect()
+            _gc_collect()
         except:
             pass
         signature = self.identity.sign(signed_data)
@@ -272,7 +271,7 @@ class Destination:
             if self.accept_link_requests:
                 try:
                     from .link import Link
-                    import gc; _gc_collect()
+                    _gc_collect()
                     link = Link(self, packet)
                     _gc_collect()
                 except Exception as e:

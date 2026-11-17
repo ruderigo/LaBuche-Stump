@@ -182,7 +182,7 @@ class Link:
         Link._recent_creations = recent
 
         # Generate ephemeral X25519 keypair for ECDH
-        import gc; _gc_collect()
+        _gc_collect()
         import time as _t; _t0 = _t.ticks_ms()
         ephemeral_prv = X25519PrivateKey.generate()
         _gc_collect()
@@ -216,7 +216,7 @@ class Link:
 
     def _send_proof(self):
         """Send link proof: signature(64) + ephemeral_pub(32) [+ signalling(3)]"""
-        import gc; _gc_collect()
+        _gc_collect()
 
         # Reference RNS prove(): signed_data = link_id + pub_bytes + sig_pub_bytes + signalling
         # Where pub_bytes = server's ephemeral X25519 pub
@@ -508,7 +508,6 @@ class Link:
         # Max plaintext for a single link data packet:
         # MTU(500) - HDR_1(19) - IV(16) - max_PKCS7(16) - HMAC(32) = 417
         if len(response_packed) > 417:
-            import gc
             _gc_collect()
             from .resource import Resource
             if sl(LOG_VERBOSE):
@@ -522,7 +521,7 @@ class Link:
 
     def _handle_resource_adv(self, plaintext):
         """Handle incoming resource advertisement (receiver mode)."""
-        from .resource import Resource, MAX_RESOURCE_SIZE
+        from .resource import Resource
         if len(self.incoming_resources) >= const.MAX_INCOMING_RESOURCES:
             if sl(LOG_DEBUG):
                 log("Link " + self.link_id.hex()[:8] + " too many incoming resources", LOG_DEBUG)
@@ -769,7 +768,7 @@ class OutgoingLink:
                  sign_proofs=False):
         from .identity import Identity
         from .crypto import X25519PrivateKey
-        import gc, os
+        import os
 
         self.destination = destination
         self.status = OutgoingLink.PENDING
@@ -882,8 +881,6 @@ class OutgoingLink:
     def validate_proof(self, packet):
         """Validate server's link proof, complete ECDH handshake, send RTT."""
         from .crypto import X25519PublicKey, Token, hkdf
-        from .identity import Identity
-        import gc
 
         proof_data = packet.data
         sig_len = 64
@@ -1251,7 +1248,7 @@ class OutgoingLink:
                 log("OutLink " + self.link_id.hex()[:8] + " ctx=0x" + ("%02x" % packet.context), LOG_DEBUG)
 
     def _handle_resource_adv(self, plaintext):
-        from .resource import Resource, MAX_RESOURCE_SIZE
+        from .resource import Resource
         if len(self.incoming_resources) >= const.MAX_INCOMING_RESOURCES:
             return
         try:

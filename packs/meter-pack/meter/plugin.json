@@ -1,0 +1,36 @@
+{
+  "plugin": "meter",
+  "title": "Meter (a tester's counter: bytes and packets sent to apps)",
+  "version": "1.3",
+  "plugin_api": 2,
+  "summary": "Counts what the Stump sends people's apps over LXMF: bytes of text, bytes as sent, and how many messages fit one LoRa packet. /meter shows the numbers, /meter 1|2|3 sends a fixed test text. The same on any firmware since 1.0.0-beta.53, to compare a kit before and after packed text (1.0.0-beta.82). It changes nothing that is sent.",
+  "modifies_core_files": false,
+  "binds_ports": false,
+  "starts_tasks": false,
+  "hooks": [
+    "/meter (slash only, up to 3 lines over the mesh)",
+    "mesh_out, priority 95: counts each message to a person's app, never changes it",
+    "on_message, priority 95: counts each room line written from a person's app, never answers",
+    "every 60 s: counts the minutes (a board's clock jumps when it learns the time)",
+    "a counter in front of rrc_mesh._send_item (in memory, no file changed): counts what goes to other Stumps, then calls the real function with the same item"
+  ],
+  "runtime_storage": {
+    "path": "",
+    "note": "Nothing is stored: the counters start again with the Stump."
+  },
+  "wizard": {
+    "note": "Nothing to set.",
+    "prompts": []
+  },
+  "files": [
+    "meter/__init__.py",
+    "meter/install.py",
+    "meter/strings.py",
+    "meter/plugin.json"
+  ],
+  "hashes": {
+    "meter/__init__.py": "d1e66786f37bb7d6",
+    "meter/install.py": "352d1755a6c71bb1",
+    "meter/strings.py": "e4a073cb9a6efdd1"
+  }
+}

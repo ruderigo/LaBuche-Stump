@@ -15,7 +15,7 @@
 import struct
 import time
 from . import const
-from .log import log, LOG_ERROR, LOG_DEBUG, LOG_EXTREME
+from .log import log, LOG_ERROR, LOG_EXTREME
 
 # Message delivery states (mirror reference MessageState)
 MSGSTATE_NEW       = 0

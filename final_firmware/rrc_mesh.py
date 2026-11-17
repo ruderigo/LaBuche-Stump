@@ -1968,8 +1968,24 @@ def _chain_iface(dest_hash_bytes):
     return None
 
 
-def _radio_pieces(lines, limit=RADIO_CHUNK, parts=False):
-    """Lines grouped into texts of at most `limit` bytes; a longer line is
+def _packed_size(router, dests):
+    """For _radio_pieces: how many bytes a text takes on the radio when
+    every one of `dests` (LXMF hashes, bytes) reads packed text
+    (urns/ztext.py), else None: a piece then holds more lines in the same
+    bytes on the air."""
+    try:
+        if dests and all(router.packs_for(d) for d in dests):
+            from urns import ztext
+            return lambda data: len(ztext.pack(data))
+    except Exception:
+        pass
+    return None
+
+
+def _radio_pieces(lines, limit=RADIO_CHUNK, parts=False, size=None):
+    """Lines grouped into texts of at most `limit` bytes -- as sent: with
+    `size` (_packed_size), a text longer than that which packs into it
+    fits. A longer line is
     cut, each piece keeping its "<nick> " so the other side files it. A
     long names list is split between whole names: "[NAMES 1/2] ...",
     "[NAMES 2/2] ..." to a Stump that takes parts (`parts`), else as many
@@ -1977,12 +1993,19 @@ def _radio_pieces(lines, limit=RADIO_CHUNK, parts=False):
     mid-name, the rest without its "[NAMES]": the other Stump kept the
     first piece, and showed the rest as a line in #lora-mesh -- the S3's
     /names on the kit, once a LoRa Stump had about 10 people.)"""
+    def fits(text):
+        data = text.encode()
+        # (Packed only when it has to be: each try is a pass over the text.)
+        return len(data) <= limit or (size is not None and size(data) <= limit)
+
     out, cur = [], ""
     for line in lines:
         pieces = [line]
-        if line.startswith("[NAMES] ") and len(line.encode()) > limit:
+        if fits(line):
+            pass
+        elif line.startswith("[NAMES] "):
             pieces = _names_parts(line[8:].split(), limit, parts)
-        elif len(line.encode()) > limit:
+        else:
             head = line[:line.index("> ") + 2] if line.startswith("<") and "> " in line else ""
             body, pieces = line[len(head):], []
             step = max(20, (limit - len(head.encode())) // 2)    # utf-8: up to 2+ bytes a char
@@ -1990,7 +2013,7 @@ def _radio_pieces(lines, limit=RADIO_CHUNK, parts=False):
                 pieces.append(head + body[:step])
                 body = body[step:]
         for p in pieces:
-            if cur and len((cur + "\n" + p).encode()) > limit:
+            if cur and not fits(cur + "\n" + p):
                 out.append(cur)
                 cur = p
             else:
@@ -2066,7 +2089,7 @@ def _queue_lora(router, dest_hash_hex, lines, title=None):
         else:
             _send_queue.append((router, dest, text, title))
         return
-    for text in _radio_pieces(lines, parts=_parts_capable(dest_hash_hex)):
+    for text in _radio_pieces(lines, parts=_parts_capable(dest_hash_hex), size=_packed_size(router, [dest])):
         _send_queue.append((router, dest, text, title, None, r))
 
 
@@ -2408,6 +2431,9 @@ def _room_roster(room):
 # rises with each packet and boot changes when the Stump restarts, so a
 # recorded packet played again is ignored. A Stump that hears a line two
 # ways (Wi-Fi and the radio) shows it once (_seen_line).
+# When every Stump it is for reads packed text (urns/ztext.py), the same
+# with b"lb2" and the text as packed bytes (signed as sent): more lines in
+# a packet. (An older Stump ignores what isn't b"lb1".)
 LB_APP = ("stump", "lora", "mesh")
 _lb = {"in": None, "out": None, "router": None, "sent": None, "seq": 0, "boot": None,
        "roster": None, "roster_at": 0, "last": {}}
@@ -2423,8 +2449,10 @@ def _lb_install(router):
     _lb["out"] = Destination(None, Destination.OUT, Destination.PLAIN, *LB_APP)
 
 
-def _lb_signed(src, boot, seq, text):
-    return b"lb1" + bytes(src) + bytes(boot) + seq.to_bytes(4, "big") + text.encode()
+def _lb_signed(src, boot, seq, text, tag=b"lb1"):
+    """What a broadcast's signature covers; `text` a str (lb1) or the
+    packed bytes (lb2)."""
+    return tag + bytes(src) + bytes(boot) + seq.to_bytes(4, "big") + (text.encode() if isinstance(text, str) else bytes(text))
 
 
 def _lb_capable(h):
@@ -2487,12 +2515,13 @@ def _flush_lora_broadcast(router):
     if not lines:
         return
     r = _radio()
-    for text in _radio_pieces(lines, RADIO_CHUNK - 30, all(_parts_capable(h) for h in hs)):
-        _send_queue.append(("lb", text, r))
+    size = _packed_size(router, [bytes.fromhex(h) for h in hs])
+    for text in _radio_pieces(lines, RADIO_CHUNK - 30, all(_parts_capable(h) for h in hs), size):
+        _send_queue.append(("lb", text, r, size is not None))
 
 
 def _lb_send(item):
-    _, text, iface = item
+    text, iface = item[1], item[2]
     router = _lb["router"]
     if router is None or _lb["out"] is None:
         return
@@ -2501,8 +2530,12 @@ def _lb_send(item):
     src = bytes(router.delivery_destination.hash)
     _lb["seq"] += 1
     seq = _lb["seq"]
-    sig = router.identity.sign(_lb_signed(src, _lb["boot"], seq, text))
-    data = umsgpack.packb([b"lb1", src, _lb["boot"], seq, text, sig])
+    tag = b"lb1"
+    if len(item) > 3 and item[3]:
+        from urns import ztext
+        tag, text = b"lb2", ztext.pack(text.encode())
+    sig = router.identity.sign(_lb_signed(src, _lb["boot"], seq, text, tag))
+    data = umsgpack.packb([tag, src, _lb["boot"], seq, text, sig])
     Packet(_lb["out"], data, attached_interface=iface, create_receipt=False).send()
 
 
@@ -2545,9 +2578,11 @@ def _lb_in(data, packet):
         from urns import umsgpack
         from urns.identity import Identity
         f = umsgpack.unpackb(bytes(data))
-        if not isinstance(f, (list, tuple)) or len(f) != 6 or f[0] != b"lb1":
+        if not isinstance(f, (list, tuple)) or len(f) != 6 or f[0] not in (b"lb1", b"lb2"):
             return
-        src, boot, seq, text, sig = bytes(f[1]), bytes(f[2]), int(f[3]), str(f[4]), bytes(f[5])
+        tag = bytes(f[0])
+        src, boot, seq, sig = bytes(f[1]), bytes(f[2]), int(f[3]), bytes(f[5])
+        text = str(f[4]) if tag == b"lb1" else bytes(f[4])
         router = _lb["router"]
         if router is None or src == bytes(router.delivery_destination.hash):
             return
@@ -2561,8 +2596,14 @@ def _lb_in(data, packet):
             _lb_hold(h, data)
             return
         ident = Identity.recall(src)
-        if ident is None or not ident.validate(sig, _lb_signed(src, boot, seq, text)):
+        if ident is None or not ident.validate(sig, _lb_signed(src, boot, seq, text, tag)):
             return
+        if tag == b"lb2":
+            from urns import ztext, lxmf
+            text = ztext.unpack(text) if lxmf.PACKED_TEXT[0] else None
+            if text is None:
+                return
+            text = text.decode()
         last = _lb["last"].get(h)
         if last is not None and last[0] == boot and seq <= last[1]:
             return                    # played again
