@@ -342,6 +342,7 @@ class LXMessage:
             data = self.packed[self.DESTINATION_LENGTH:]
             pkt = Packet(self._destination, data, attached_interface=attached_interface)
             pkt.send()
+            self.packet = pkt              # its receipt: the recipient's proof (rrc_mesh: still here)
             self.state = LXMessage.SENT
             self.transport_encrypted = True
             self.transport_encryption = "Curve25519"

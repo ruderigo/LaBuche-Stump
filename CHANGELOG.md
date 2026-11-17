@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-beta.79
+Asked by the FireFly team:
+- **The release in the QR code.** `/address`'s link (its QR code, and *Open in FireFly*) ends with `&r=<release>`, the string the beacon carries in `r`. An app adding a Stump from its code knows at once whether it can skip `/auth` over LoRa (beta.71+), before any beacon. A hint only; the signed beacon has the last word. Apps that don't know `r` ignore it.
+- **A LoRa client stays in its room without a keepalive.** A quiet one was dropped after 5 minutes (`MESH_PEER_TIMEOUT`) unless it sent something. Now, at no airtime of its own:
+  - the delivery proof its LXMF sends back for each line the Stump pushes it counts as "still here": while the room talks, a client that's listening stays; one that's gone stops proving and leaves after 5 minutes, as before;
+  - so does an announce of its own (signed), for a room gone quiet;
+  - one that left anyway and comes back within an hour returns to the room it was in (if it may still be there: tiers, bans), not to `#lora-mesh`.
+- docs/CLIENT_QUICKSTART.md says so (the link's `r=`; presence: no keepalive needed).
+- Tests: `mesh_still_here` (new), `address_announce`, `pc_power`.
+
 ## 1.0.0-beta.78
 - **Bavard 1.3: a lone Bavard talks in a shared room too.** With `#bavard` shared beyond its Stump (`/setchan … -wifi`), a Bavard posted nothing there unless it was in a duet: alone in the mesh it went quiet, as if broken. Now one that hears no other Bavard says its numbers there, as when the room is local; once others are about, only the duet shows, as before.
 - Tests: the pack's own (`bavard_four`: alone in a shared room, numbers; the others heard, quiet; the others gone, numbers again).

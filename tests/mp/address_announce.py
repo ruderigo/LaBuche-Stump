@@ -54,9 +54,13 @@ key = webtext.b64url(ident.get_public_key())
 check("the key, base64url: 86 characters, no padding, URL-safe", len(key) == 86 and "=" not in key and "+" not in key
       and "/" not in key, key)
 rrc.NODE = {"name": "B\u00fbche 3", "lxmf": real_hex, "key": key}
+rrc.NODE_INFO = {"release": "1.0.0-beta.79"}
 link = barkeep.address_link(rrc.NODE)
-check("the link: lxmf://<address>?stump=<name, encoded>&key=<key>",
-      link == "lxmf://" + real_hex + "?stump=B%C3%BBche%203&key=" + key, link)
+check("the link: lxmf://<address>?stump=<name, encoded>&key=<key>&r=<release>",
+      link == "lxmf://" + real_hex + "?stump=B%C3%BBche%203&key=" + key + "&r=1.0.0-beta.79", link)
+rrc.NODE_INFO = {}
+check("... a Stump that doesn't know its release: no r", barkeep.address_link(rrc.NODE).endswith("&key=" + key))
+rrc.NODE_INFO = {"release": "1.0.0-beta.79"}
 pad = key + "=" * (-len(key) % 4)
 pub = binascii.a2b_base64(pad.replace("-", "+").replace("_", "/"))
 nh = hashlib.sha256(b"lxmf.delivery").digest()[:10]
@@ -67,7 +71,7 @@ s, ct, b = req('/address')
 check("the page's QR code is the link's; the plain address still there to copy",
       barkeep._QR.get(link) is not None and barkeep._QR[link] in b and "value='" + real_hex + "'" in b)
 n20 = len(qr.matrix(barkeep.address_link({"name": "N" * 20, "lxmf": real_hex, "key": key})))
-check("... a 20-character name still fits (version 9 for plain letters)", n20 == 17 + 4 * 9, n20)
+check("... a 20-character name still fits (version 9 for plain letters, its release too)", n20 == 17 + 4 * 9, n20)
 check("no key: the plain address", barkeep.address_link({"lxmf": real_hex}) == real_hex)
 
 # The second code, for LXMF apps that don't know Stumps: Columba's

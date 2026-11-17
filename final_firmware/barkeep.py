@@ -2189,7 +2189,13 @@ def address_link(node):
     addr, key = node.get("lxmf") or "", node.get("key") or ""
     if not key:
         return addr
-    return "lxmf://" + addr + "?stump=" + _url_encode(node.get("name") or "") + "&key=" + key
+    # "r": its release, as its beacon's "r" (1.0.0-beta.79, asked by the
+    # FireFly team): an app knows before any beacon whether it can skip
+    # /auth over LoRa (beta.71+). A hint only: the signed beacon has the
+    # last word.
+    rel = node.get("release") or (rrc.NODE_INFO or {}).get("release") or ""
+    return ("lxmf://" + addr + "?stump=" + _url_encode(node.get("name") or "") + "&key=" + key
+            + ("&r=" + _url_encode(rel) if rel else ""))
 
 
 def _render_address_page(lang):
