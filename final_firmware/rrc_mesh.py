@@ -708,7 +708,7 @@ def _prune_peers(now):
     for h in stale:
         p = _peers.pop(h)
         if not p.get("stump") and p["room"] != p.get("home_room"):
-            _was[h] = (p["room"], now)          # back there if it comes back (_back_room)
+            _was[h] = (p["room"], now, p["nick"])   # back there if it comes back (_back_room)
             if len(_was) > MAX_MESH_PEERS:
                 _was.pop(min(_was, key=lambda k: _was[k][1]))
         rrc.system(p["room"], rrc.ev_leave("~" + p["nick"]))
@@ -732,6 +732,12 @@ def _get_peer(dest_hash_hex, display_name, message=None):
         # Someone already reachable by DM keeps the exact nick people have
         # been using for them, instead of re-deriving it.
         nick = _reach[dest_hash_hex]["nick"] if dest_hash_hex in _reach else _make_nick(display_name, dest_hash_hex)
+        # Coming back before its name is heard again: the name it had, so
+        # its app knows the "✓ ~nick" put back in its room is its own
+        # (1.0.0-beta.81: FireFly switches rooms on its own join line).
+        was = _was.get(dest_hash_hex)
+        if dest_hash_hex not in _reach and was and len(was) > 2 and was[2]:
+            nick = was[2]
         # Lands in rrc.MESH_ROOM ("#lora-mesh", once "#lxmf") unconditionally
         # (a Stump of this node's chain lands in rrc.CHAIN_ROOM instead) -- that room
         # is always present (seeded in rrc.py exactly like #main), so

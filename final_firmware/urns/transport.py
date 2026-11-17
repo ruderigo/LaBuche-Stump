@@ -73,6 +73,7 @@ class Transport:
     reverse_table = {}          # truncated_pkt_hash -> [recv_if, outbound_if, ts]
     link_table = {}             # link_id -> [ts, next_hop, nh_if, rem_hops, recv_if, hops, dest, validated, proof_tmo]
     packet_cache = {}           # announce_hash -> raw announce bytes (for path-request answers)
+    _cache_order = []           # its hashes, oldest first (a MicroPython dict keeps no order)
     path_states = {}            # dest_hash -> reachability state
     control_destinations = []   # IN PLAIN control dests (e.g. rnstransport.path.request)
     control_hashes = []         # their hashes (special-cased in admission/forwarding)
@@ -313,8 +314,23 @@ class Transport:
         if announce_hash in Transport.packet_cache:
             return
         if len(Transport.packet_cache) >= const.MAX_PACKET_CACHE:
-            Transport.packet_cache.pop(next(iter(Transport.packet_cache)), None)
+            # The oldest one no path uses, else the oldest (1.0.0-beta.81).
+            # next(iter(dict)) took any one on a board -- MicroPython dicts
+            # keep no order --, often the one a live path answers with: a
+            # chained Stump's path request for a LoRa client went unanswered
+            # (the kit's Mac and the S3).
+            Transport._cache_order[:] = [h for h in Transport._cache_order if h in Transport.packet_cache]
+            used = set(e[const.IDX_PT_ANNOUNCE] for e in Transport.path_table.values())
+            victim = next((h for h in Transport._cache_order if h not in used), None)
+            if victim is None and Transport._cache_order:
+                victim = Transport._cache_order[0]
+            if victim is None:
+                victim = next(iter(Transport.packet_cache))
+            Transport.packet_cache.pop(victim, None)
+            if victim in Transport._cache_order:
+                Transport._cache_order.remove(victim)
         Transport.packet_cache[announce_hash] = bytes(raw)
+        Transport._cache_order.append(announce_hash)
 
     @staticmethod
     def get_cached(announce_hash):
@@ -1641,6 +1657,7 @@ class Transport:
                         ifmap.get(v[3]), announce_hash, v[5],
                     ]
                     Transport.packet_cache[announce_hash] = bytes.fromhex(v[6])
+                    Transport._cache_order.append(announce_hash)
                     Transport.reachable_destinations[dest] = now
                     count += 1
                 except Exception:
@@ -1781,6 +1798,12 @@ class Transport:
                     and packet.hops <= entry[const.IDX_PT_HOPS]):
                 entry[const.IDX_PT_TIMESTAMP] = now
                 entry[const.IDX_PT_EXPIRES] = now + const.PATH_EXPIRY
+                # Its announce kept fresh for path answers (1.0.0-beta.81): the
+                # one stored when the path was taken aged out of the cache
+                # while the destination kept announcing the same way.
+                if Transport.get_cached(entry[const.IDX_PT_ANNOUNCE]) is None:
+                    Transport.cache_announce(packet.packet_hash, packet.raw)
+                    entry[const.IDX_PT_ANNOUNCE] = packet.packet_hash
             if sl(LOG_DEBUG):
                 log("Announce " + dest.hex()[:8] + " ignored (dup/worse/older)", LOG_DEBUG)
             return
