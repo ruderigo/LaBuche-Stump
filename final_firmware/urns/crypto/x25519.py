@@ -3,9 +3,7 @@
 # Constant time exchange added by Mark Qvist
 # Adapted for MicroPython timing
 
-from urns.mem import collect as _gc_collect
 import os
-import sys
 
 try:
     from micropython import native

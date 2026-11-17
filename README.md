@@ -125,7 +125,7 @@ final_firmware/     the Stump's firmware: every board and the computer run it
 scripts/arborist/   Arborist, the browser page; built by scripts/build_arborist.py
 image/              the Stump image: MicroPython with the Stump frozen in, per board
 provisioner.py      the terminal tool: boards, Heltecs, computer Stumps, packs
-packs/              packs: bavard, tavern, nomadnet, rnfs, simple
+packs/              packs: bavard, tavern, nomadnet, rnfs, simple, meter, marcopolo
 pc/                 the Stump on a computer (stump_pc.py)
 tests/              the test suite (tests/README.md)
 bench/              measurements on real boards

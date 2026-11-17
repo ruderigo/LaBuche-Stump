@@ -15,7 +15,6 @@
 
 from urns.mem import collect as _gc_collect
 import os
-import gc
 import time
 from micropython import const
 from . import Interface

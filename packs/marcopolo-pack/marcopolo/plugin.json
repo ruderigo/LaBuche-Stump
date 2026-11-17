@@ -1,0 +1,34 @@
+{
+  "plugin": "marcopolo",
+  "title": "Marco Polo (a tester's call and answer between Stumps, timed)",
+  "version": "1.0",
+  "plugin_api": 2,
+  "summary": "One Stump says marco in a shared room, every other Stump with the pack answers polo, and the caller times each round trip and counts the lost ones. /marco start [calls] [size 0-3] [gap s], /marco, /marco stop. The same on any firmware since 1.0.0-beta.53, to time a setup before and after an update. Nothing is on the air until a run is started.",
+  "modifies_core_files": false,
+  "binds_ports": false,
+  "starts_tasks": false,
+  "hooks": [
+    "/marco (slash only, up to 3 lines over the mesh)",
+    "every 1 s: reads the room's new lines (calls to answer, answers to time) and sends the next call when due",
+    "writes its lines with rrc.post() as a person's, so they reach the other Stumps (a plugin's own lines don't); it paces itself: 15 s between calls at least, 30 calls a run, 20 answers a minute"
+  ],
+  "runtime_storage": {
+    "path": "",
+    "note": "Nothing is stored: a run and its times are gone when the Stump restarts."
+  },
+  "wizard": {
+    "note": "Nothing to set. MARCOPOLO_ROOM (lora-mesh) and MARCOPOLO_NICK (Marco) in config.py change the room and the name.",
+    "prompts": []
+  },
+  "files": [
+    "marcopolo/__init__.py",
+    "marcopolo/install.py",
+    "marcopolo/strings.py",
+    "marcopolo/plugin.json"
+  ],
+  "hashes": {
+    "marcopolo/__init__.py": "b7b8d446b78f0810",
+    "marcopolo/install.py": "2192c03fb68dff98",
+    "marcopolo/strings.py": "0a2575e9fab8ea07"
+  }
+}

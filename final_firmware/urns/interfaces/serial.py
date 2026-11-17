@@ -3,7 +3,7 @@
 
 import time
 from . import Interface
-from ..log import log, LOG_VERBOSE, LOG_DEBUG, LOG_ERROR, LOG_NOTICE, LOG_EXTREME
+from ..log import log, LOG_VERBOSE, LOG_ERROR, LOG_NOTICE
 
 
 # Simplified HDLC framing (same as reference RNS)

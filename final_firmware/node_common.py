@@ -65,7 +65,14 @@ def setup_node(rns, node_name, on_message=None, on_announce=None):
     existing callers don't need to change how they unpack the result,
     only how they call it.
     """
+    from urns import lxmf
     from urns.lxmf import LXMRouter
+    try:
+        # Before the router makes its announce data, which says so.
+        import config
+        lxmf.PACKED_TEXT[0] = bool(getattr(config, "LXMF_PACKED_TEXT", True))
+    except ImportError:
+        pass
     router = LXMRouter(identity=rns.identity)
     dest = router.register_delivery_identity(rns.identity, display_name=node_name)
 

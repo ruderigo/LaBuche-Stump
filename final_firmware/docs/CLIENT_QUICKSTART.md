@@ -527,6 +527,71 @@ to cost 20, a second at 8, minutes at 16), a board can't and sends the
 message without one. The Stump itself never requires stamps: send it
 messages as usual. Its announce says cost `None`.
 
+## Packed text: more in each packet (since 1.0.0-beta.82)
+
+One LoRa packet holds 295 bytes of LXMF content, and the rest of its
+500 is spent before the first letter (addresses, the signature, the
+encryption). So the way to send less is to fit more in each: a Stump
+and an app that both say they can, write a message's content packed, in
+about 60% of its bytes for ordinary chat and a sixth for a `/help`
+reply. A batch of room lines that took two packets takes one; a reply
+that needed a link and several round trips is one packet.
+
+**Saying you read it**: a **fifth item** in your LXMF announce's app
+data, after the app tag:
+
+```
+[display_name, stamp_cost, supported_functionality, "stump:firefly/0.6", {"z": 1}]
+```
+
+A Stump's own LXMF announce carries it too (`null` where the app tag
+would be). Upstream LXMF reads the first three items. Each side packs
+only for an address whose latest announce says `z`; everyone else gets
+plain text, exactly as before, so nothing changes for Sideband,
+MeshChat or an older FireFly.
+
+**The format** (version 1; `urns/ztext.py`; its header
+says the same). A content whose first byte is
+
+- `0xFF` is packed: the rest is the body of one DEFLATE block
+  (RFC 1951);
+- `0xFE` is the rest as it stands (for a content that itself starts
+  with `0xFE` or `0xFF`; no UTF-8 text does);
+- anything else is plain.
+
+The block is a final dynamic-Huffman block whose header is never sent:
+it's a constant (`_HEAD`), with codes made for chat in French, English
+and Spanish. Before it comes a preset dictionary (`_DICT`: the Stump's
+replies, common words, the tokens of its lines). So reading takes no
+code of your own, any inflate does it:
+
+```python
+import zlib
+n = len(DICT)
+stored = bytes((0, n & 255, n >> 8, ~n & 255, (~n >> 8) & 255)) + DICT   # a stored block
+d = zlib.decompressobj(-15)
+text = d.decompress(stored + HEAD + content[1:], n + 2049)[n:]           # at most 2048 bytes
+assert d.eof
+```
+
+Writing is a greedy LZ77 over `DICT + text` with the fixed codes
+(`ztext._deflate`, 80 lines); copy the file, it runs on CPython and
+MicroPython. Rules: pack only when shorter (a short line, or anything
+that isn't text, goes plain); never more than 2048 bytes of text (more
+goes over a link anyway); a packed content that can't be read is
+treated as binary. The message's id and signature are those of the
+content as sent. The LXMF title and fields are not packed.
+
+`DICT`, `HEAD` and the two code tables never change: a different
+dictionary would be another first byte, announced as `{"z": 2}`.
+
+Between Stumps over the radio the same packing carries `#lora-mesh`:
+their pieces are sized as sent, and the broadcast for several Stumps
+(`lb1`) goes as `lb2`, its text packed, when all of them read it.
+
+To turn it off on a Stump: `LXMF_PACKED_TEXT = False` in config.py
+(nothing said in its announce, nothing packed, nothing unpacked).
+
 ## HTTPS
 
 A node with a certificate installed (see `HTTPS_SETUP.md`) also serves
