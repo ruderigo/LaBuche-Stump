@@ -59,6 +59,7 @@ TESTS = [
     ("lb_hold", "assert", []),
     ("stumpid_safe", "assert", []),
     ("mesh_still_here", "assert", []),
+    ("path_fallback", "assert", []),
     ("radio_status", "assert", []),
     ("profiles_store", "assert", []),
     ("conn_limits", "assert", []),
@@ -300,7 +301,7 @@ def main():
                          ("pc_settings", "settings_test.py"),
                          ("pc_discovery", "discovery_test.py"), ("pc_storage", "storage_test.py"),
                          ("pc_conn", "conn_test.py"), ("pc_watchdog", "watchdog_test.py"),
-                         ("pc_radio_only", "pc_radio_only_test.py"), ("pc_chain_radio", "pc_chain_radio_test.py"),
+                         ("pc_radio_only", "pc_radio_only_test.py"), ("pc_chain_radio", "pc_chain_radio_test.py"), ("pc_lora_client_chain", "pc_lora_client_chain_test.py"),
                          ("pc_three_stumps", "pc_three_stumps_test.py")):
         if only and name not in only:
             continue

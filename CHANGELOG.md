@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-beta.80
+- **A route that doesn't deliver is set aside.** On the kit, the Mac never answered a FireFly on LoRa (`/auth`: no answer; nothing it wrote reached the phone). The Mac, like every computer Stump, finds Reticulum apps on its home Wi-Fi (its Local network): it had heard the phone there once and kept a 1-hop path to it over the Wi-Fi, which the phone didn't take messages on; the FireFly's own announces, over the chain through the S3 (2 hops), were turned down as worse, for a day at a time. The boards, with no Local network, were fine. Now when two messages running to a room's client get no delivery proof over its route, while its announces come in over another, that route is set aside for an hour and another asked for; the client's next announce or the chain's answer is taken, and its answers reach it. A client heard no other way is only away: its route is kept.
+- Tests: `path_fallback` (new: the Mac's case, a proof in between, a client heard one way only, an hour later), `pc_lora_client_chain` (new: a LoRa client, on a simulated Heltec, adding a chained Stump with no radio from its QR code, writing to it, `/auth` answered and checked).
+
 ## 1.0.0-beta.79
 Asked by the FireFly team:
 - **The release in the QR code.** `/address`'s link (its QR code, and *Open in FireFly*) ends with `&r=<release>`, the string the beacon carries in `r`. An app adding a Stump from its code knows at once whether it can skip `/auth` over LoRa (beta.71+), before any beacon. A hint only; the signed beacon has the last word. Apps that don't know `r` ignore it.
