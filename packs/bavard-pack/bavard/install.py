@@ -38,7 +38,7 @@ try:
 except ImportError:
     import asyncio
 
-VERSION = "1.2"
+VERSION = "1.3"
 STUMP_API = 4
 
 APP, ASPECT = "bavard", "bot"
@@ -686,6 +686,12 @@ async def _tick():
         _st["busy"] = False
 
 
+def _others_around():
+    """Another Bavard heard lately (on any Stump), free or in a duet."""
+    now, lim = _now(), _seen_s() * 1000
+    return any(time.ticks_diff(now, v[1]) <= lim for v in _heard.values())
+
+
 def _room_shared():
     try:
         import rooms
@@ -707,9 +713,11 @@ async def _solo_tick():
     w = _peer.get("waiting_since")
     if w and not _peer.get("link") and time.ticks_diff(now, w) > 180000 and _peer.get("hex"):
         _dial(_peer["hex"], _peer.get("nick", "?"))    # they never called: we do
-    if _room_shared():
-        # The room goes to other Stumps: only the duet shows there, not
-        # every bot's numbers (set it -local for a load test).
+    if _room_shared() and _others_around():
+        # The room goes to other Stumps and other Bavards are about: only
+        # the duet shows there, not every bot's numbers. A Bavard with no
+        # other to play with says its numbers there too (1.3: it went
+        # quiet, as if broken, alone in a room shared over a chain).
         _st["next_ms"] = time.ticks_add(_now(), _delay())
         return
     for _ in range(MAX_BURST):

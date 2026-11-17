@@ -1,7 +1,7 @@
 {
   "plugin": "bavard",
   "title": "Bavard (a test tool: a bot that never stops talking)",
-  "version": "1.2",
+  "version": "1.3",
   "plugin_api": 4,
   "summary": "Posts non-stop in its own room at a variable pace: alone, a unique line of numbers with the UTC date and time; with another Bavard on another Stump, the two play Molière in the original French, each taking half the characters, turn by turn over a Reticulum link. It starts paused (BAVARD_ON). Every line goes through BarKeep's posting budget; what it refuses is counted and retried. Status at /p/bavard/, numbers at /p/bavard/stats.json, transcript on the SD card.",
   "modifies_core_files": false,
@@ -95,7 +95,7 @@
   ],
   "hashes": {
     "bavard/__init__.py": "ce40f7f4e3770f39",
-    "bavard/install.py": "15c3f7bddd0cc5bb",
+    "bavard/install.py": "12d0fe93819e0c2b",
     "bavard/strings.py": "88925db8b914c708",
     "bavard/scene.py": "e7bc0b9ab0941a04"
   }
