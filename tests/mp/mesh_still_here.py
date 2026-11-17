@@ -32,6 +32,12 @@ class Receipt:
     def set_delivery_callback(self, fn):
         self.cb = fn
 
+    def set_timeout(self, t):                  # (beta.80: a route that doesn't deliver)
+        pass
+
+    def set_timeout_callback(self, fn):
+        pass
+
 
 class Pkt:
     def __init__(self):
