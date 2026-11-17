@@ -3002,7 +3002,10 @@ async def _r_get_node_json(reader, writer, method, path, headers, ip, identifier
     # Who this node is, for discovery: answers without touching
     # the chat (polling /rrc/poll joins you to a room).
     import chain
-    info = {"name": rrc.NODE.get("name"), "lxmf": rrc.NODE.get("lxmf")}
+    # Its name from its settings until the node has set it (1.0.0-beta.81:
+    # a Stump still starting answered "name": null, shown as "null").
+    import config
+    info = {"name": rrc.NODE.get("name") or getattr(config, "NODE_NAME", "") or "Stump", "lxmf": rrc.NODE.get("lxmf")}
     info.update(rrc.NODE_INFO)
     info["ap_ip"] = chain.ap_ip()
     info["proto"] = chain.PROTO        # the chain protocol (chain.py)

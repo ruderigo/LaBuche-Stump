@@ -101,6 +101,17 @@ back = rrc_mesh._get_peer(FF, "bob")
 check("it comes back within the hour: in #bavard, not #lora-mesh", back["room"] == "bavard" and back["home_room"] == rrc.MESH_ROOM, back)
 check("... its join said in #bavard", any("bob" in (m.get("body") or "") for m in rrc.since("bavard", 0)[-2:]), rrc.since("bavard", 0)[-2:])
 check("... and /part still takes it home, to #lora-mesh", rrc_mesh._handle(FF, back, "/part")[1] == rrc.MESH_ROOM)
+# Back before its name is heard again (beta.81): its join under the name
+# it had, so its app sees "✓ ~bob" and switches to that room.
+back["room"] = "bavard"
+back["last_seen"] = time.time() - 400
+rrc_mesh._prune_peers(time.time())
+rrc_mesh._reach.pop(FF, None)
+nameless = rrc_mesh._get_peer(FF, None)
+check("back with no name heard yet: its join in #bavard under the name it had (its app switches on it)",
+      nameless["room"] == "bavard" and nameless["nick"] == "bob"
+      and any(("~bob" in (m.get("body") or "")) for m in rrc.since("bavard", 0)[-2:]), (nameless, rrc.since("bavard", 0)[-2:]))
+back = nameless
 
 back["room"] = "bavard"
 back["last_seen"] = time.time() - 400

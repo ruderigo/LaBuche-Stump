@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta.81
+After beta.80 the Mac set aside the dead home Wi-Fi route to a FireFly, then waited: its path request went unanswered (FireFly confirms its own Wi-Fi link can't send on Android), and the S3 didn't answer it either.
+- **A Stump answers path requests from what it heard, on a board too.** Its store of recent announces threw out any one when full (a MicroPython dict keeps no order: `next(iter())`), often the one a live path answers with; now the oldest one no path uses goes. And a destination that keeps announcing the same way has its stored announce renewed when it's gone. The S3 answers the Mac at once.
+- **`/node.json` never says `"name": null`**: its name from its settings until the node has set it (FireFly showed a "null" Stump).
+- **A client put back in its room (beta.79) before its name is heard again keeps the name it had**, so the "✓ ~nick" in that room is its own: FireFly switches rooms on its own join line.
+- Tests: `announce_cache` (new), `mesh_still_here`.
+
 ## 1.0.0-beta.80
 - **A route that doesn't deliver is set aside.** On the kit, the Mac never answered a FireFly on LoRa (`/auth`: no answer; nothing it wrote reached the phone). The Mac, like every computer Stump, finds Reticulum apps on its home Wi-Fi (its Local network): it had heard the phone there once and kept a 1-hop path to it over the Wi-Fi, which the phone didn't take messages on; the FireFly's own announces, over the chain through the S3 (2 hops), were turned down as worse, for a day at a time. The boards, with no Local network, were fine. Now when two messages running to a room's client get no delivery proof over its route, while its announces come in over another, that route is set aside for an hour and another asked for; the client's next announce or the chain's answer is taken, and its answers reach it. A client heard no other way is only away: its route is kept.
 - Tests: `path_fallback` (new: the Mac's case, a proof in between, a client heard one way only, an hour later), `pc_lora_client_chain` (new: a LoRa client, on a simulated Heltec, adding a chained Stump with no radio from its QR code, writing to it, `/auth` answered and checked).
