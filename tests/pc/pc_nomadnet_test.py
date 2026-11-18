@@ -52,6 +52,13 @@ open(os.path.join(rcfg, "config"), "w").write("""[reticulum]
     listen_port = %d
 """ % RNS_PORT)
 RNS.Reticulum(configdir=rcfg)
+
+# Reticulum 1.6.1 stamps announces, and waits for the stamp before sending
+# one (16 s or more on CI): a cheap one here, so the test never hangs on it.
+# Still the real format; the Stump's patience with a slow one is its own
+# matter (urns/lxmf.py LXMF_PATH_WAIT).
+if hasattr(RNS.Transport, "DESTINATION_VALUE"):
+    RNS.Transport.DESTINATION_VALUE = 8
 me = RNS.Identity()
 
 # A NomadNet node of our own, for the Stump to browse: a page with a form.

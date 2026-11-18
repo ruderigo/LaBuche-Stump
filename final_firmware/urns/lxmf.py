@@ -126,6 +126,8 @@ def _wall():
     return time.time() + (946684800 if sys.platform == "esp32" else 0)
 
 
+LXMF_PATH_WAIT = 180      # seconds a message waits for its recipient's path (1.0.0-beta.85)
+
 class StampJob:
     """Makes one proof-of-work stamp, a slice at a time (step()), so the
     node keeps answering while it works: the work block (3000 rounds of
@@ -657,7 +659,10 @@ class LXMRouter:
 
         # No route yet: solicit a path and defer the send. The retry re-enters
         # this method once the path (and the peer's identity, carried in the
-        # path-response announce) is known.
+        # path-response announce) is known. Up to LXMF_PATH_WAIT: a Reticulum
+        # 1.6.1 app answers only once its announce stamp is made -- 16 s on a
+        # computer the first time, minutes on a phone (1.0.0-beta.85; it gave
+        # up after 15 s, and the reply was lost).
         if not have_link and not Transport.has_path(destination_hash):
             if sl(LOG_VERBOSE):
                 log("No path to " + destination_hash.hex()[:8] + ", requesting path", LOG_VERBOSE)
@@ -668,6 +673,7 @@ class LXMRouter:
                 on_timeout=lambda: log(
                     "LXMF send to " + destination_hash.hex()[:8]
                     + " failed: no path", LOG_ERROR),
+                timeout=LXMF_PATH_WAIT,
             )
             return True   # queued
 

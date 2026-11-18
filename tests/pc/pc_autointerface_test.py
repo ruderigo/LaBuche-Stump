@@ -72,6 +72,14 @@ def role_ref(work):
     enabled = Yes
 """)
     RNS.Reticulum(configdir=cdir)
+
+    # Reticulum 1.6.1 stamps announces, and waits for the stamp before sending
+    # one (16 s or more on CI): a cheap one here, so the test never hangs on it.
+    # Still the real format; the Stump's patience with a slow one is its own
+    # matter (urns/lxmf.py LXMF_PATH_WAIT).
+    if hasattr(RNS.Transport, "DESTINATION_VALUE"):
+        RNS.Transport.DESTINATION_VALUE = 8
+
     me = RNS.Identity()
     router = LXMF.LXMRouter(identity=me, storagepath=os.path.join(work, "lxmf"))
     got = []

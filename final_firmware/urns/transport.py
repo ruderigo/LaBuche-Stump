@@ -34,6 +34,8 @@ _TIME_FLOOR = 1704067200       # 2024-01-01 UTC
 _PATH_APP_NAME = "rnstransport"     # well-known: "rnstransport.path.request"
 _PATH_REQUEST_TIMEOUT = 15          # seconds before a waiting send gives up
 _PATH_REREQUEST_INTERVAL = 5        # seconds between re-requests while waiting
+_PATH_SLOW_AFTER = 15                # ... then, for a longer wait (an LXMF reply: up to 3 min,
+_PATH_SLOW_INTERVAL = 30             # 1.0.0-beta.85), every 30 s: the radio's airtime
 
 # Transport types (module-level for import compatibility)
 BROADCAST  = const.TRANSPORT_BROADCAST
@@ -118,6 +120,7 @@ class Transport:
     # route is removed — see has_path(). path_table is the HDR_2-route subset.
     reachable_destinations = {}   # dest_hash -> last announce heard (capped)
     _path_waiters = {}            # dest_hash -> [ {on_found, on_timeout, deadline} ]
+    _path_since = {}              # dest_hash -> when the wait for its path began
     _path_request_times = {}      # dest_hash -> last request sent (rate-limit)
     _path_request_dest = None     # cached OUT/PLAIN "rnstransport.path.request"
 
@@ -1209,6 +1212,8 @@ class Transport:
         for k in Transport._path_request_times:
             Transport._path_request_times[k] = _sh(
                 Transport._path_request_times[k])
+        for k in Transport._path_since:
+            Transport._path_since[k] = _sh(Transport._path_since[k])
         for k in Transport._announce_rate:
             Transport._announce_rate[k] = [
                 _sh(t) for t in Transport._announce_rate[k]]
@@ -1320,6 +1325,7 @@ class Transport:
         waiters = Transport._path_waiters.get(destination_hash)
         if waiters is None:
             Transport._path_waiters[destination_hash] = [waiter]
+            Transport._path_since[destination_hash] = time.time()
             Transport.request_path(destination_hash)   # first request immediately
         else:
             waiters.append(waiter)                      # request already in flight
@@ -1335,6 +1341,7 @@ class Transport:
             if Transport.has_path(dest):
                 del Transport._path_waiters[dest]
                 Transport._path_request_times.pop(dest, None)
+                Transport._path_since.pop(dest, None)
                 for w in waiters:
                     try:
                         w["on_found"]()
@@ -1354,10 +1361,13 @@ class Transport:
             if not live:
                 del Transport._path_waiters[dest]
                 Transport._path_request_times.pop(dest, None)
+                Transport._path_since.pop(dest, None)
                 continue
             Transport._path_waiters[dest] = live
             last = Transport._path_request_times.get(dest, 0)
-            if now - last >= _PATH_REREQUEST_INTERVAL:
+            gap = (_PATH_REREQUEST_INTERVAL if now - Transport._path_since.get(dest, now) < _PATH_SLOW_AFTER
+                   else _PATH_SLOW_INTERVAL)
+            if now - last >= gap:
                 Transport.request_path(dest)
 
     @staticmethod
