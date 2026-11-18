@@ -1715,13 +1715,47 @@ def board_install_pack(port, pack):
     return ok
 
 
+def _safe_name(s):
+    """One plain name: no folder, nothing hidden, no way out ("..")."""
+    return (isinstance(s, str) and re.match(r"^[A-Za-z0-9][A-Za-z0-9 _.+-]{0,63}$", s) is not None
+            and ".." not in s)
+
+
+def _core_tool_sections(fw=None):
+    """The Tools page sections the Stump itself puts on the card: never a
+    pack's to delete."""
+    names = {"provisioner", "firefly", "fw"}
+    tp = Path(fw or STUMP_APP_DIR) / "tools_payload"
+    if tp.is_dir():
+        names |= {d.name for d in tp.iterdir() if d.is_dir()}
+    return names
+
+
+def _removable_plugins(row):
+    """The plugin folders a removal deletes: plugin names only (a folder
+    such as lib/ or urns/ given an install.py is never one)."""
+    return [p for p in row["plugins"] if plugin_name_problem(p) is None]
+
+
 def _pack_leftovers(row, board):
     """What a pack keeps besides its plugins, for the "delete those too?"
     question: its saved data, its Tools sections, its home files, its
-    theme (paths on the card, relative to it)."""
+    theme (paths on the card, relative to it). The record comes from the
+    board or the folder, so it can be tampered with (1.0.0-beta.84): only
+    the pack's own places are taken from it -- plugins/<its plugin>,
+    tools/<a section the Stump doesn't ship>, home/<one file> -- and
+    anything else in it is ignored. Before, an entry such as "/" or ".."
+    reached outside the card: on a computer Stump, anything its user owns."""
     rec = row["record"] or (pack_record(row["pack"], board) if row["pack"] else {})
-    data = ["plugins/" + p for p in row["plugins"]]
-    return data, list(rec.get("tools") or []), ["home/" + h for h in rec.get("home") or []], rec.get("theme")
+    if not isinstance(rec, dict):
+        rec = {}
+    data = ["plugins/" + p for p in _removable_plugins(row)]
+    core = _core_tool_sections()
+    tools = [t for t in (rec.get("tools") or []) if isinstance(t, str) and t.startswith("tools/")
+             and _safe_name(t[6:]) and t[6:] not in core]
+    home = ["home/" + h for h in (rec.get("home") or []) if _safe_name(h)]
+    theme = rec.get("theme") if isinstance(rec.get("theme"), str) else None
+    return data, tools, home, theme
 
 
 def pc_remove_pack(folder, row, also):
@@ -1729,7 +1763,7 @@ def pc_remove_pack(folder, row, also):
     keeps too (its data, Tools sections, home files and theme)."""
     import shutil
     folder = Path(folder)
-    for p in row["plugins"]:
+    for p in _removable_plugins(row):
         shutil.rmtree(folder / p, ignore_errors=True)
     if also:
         data, tools, home, theme = _pack_leftovers(row, board=False)
@@ -1752,9 +1786,10 @@ def pc_remove_pack(folder, row, also):
 
 
 def board_remove_pack(port, row, also):
-    ok = all(remove_plugin(port, p) for p in row["plugins"])
+    ok = all(remove_plugin(port, p) for p in _removable_plugins(row))
     if also:
         data, tools, home, theme = _pack_leftovers(row, board=True)
+        # Its own folders whole; its home files one by one, never a folder.
         code = ("import os,fserv\n"
                 "fserv.mount_sd()\n"
                 "def rm(p):\n"
@@ -1769,7 +1804,12 @@ def board_remove_pack(port, row, also):
                 "   pass\n"
                 "for p in %r:\n"
                 " rm('/sd/'+p)\n"
-                "print('LEFT-GONE')\n") % (data + tools + home)
+                "for p in %r:\n"
+                " try:\n"
+                "  os.remove('/sd/'+p)\n"
+                " except OSError:\n"
+                "  pass\n"
+                "print('LEFT-GONE')\n") % (data + tools, home)
         good, out = run(["mpremote", "connect", port, "exec", code], timeout=120)
         ok = ok and good and "LEFT-GONE" in (out or "")
         if theme:
@@ -1887,6 +1927,12 @@ KEEPSAKE_NOTE = ("A Stump's identity: whoever has this file can be that Stump on
                  "Keep it safe, and don't share it.")
 
 
+class IdentityUnreadable(Exception):
+    """An identity is there but didn't read whole (a garbled read over a
+    CAM's serial, a damaged file): never taken as "no identity", which
+    would let a new one be written over it unsaved (1.0.0-beta.84)."""
+
+
 def _identity_ok(files):
     return len(files.get("rns/identity") or b"") == 64
 
@@ -1965,20 +2011,42 @@ def read_identity_source(src):
 
 
 def pc_identity(folder):
+    """A computer Stump's identity, or None when it has none yet.
+    IdentityUnreadable when one is there but isn't whole."""
     files = {}
     for rel in IDENTITY_FILES:
         try:
             files[rel] = (Path(folder) / rel).read_bytes()
-        except OSError:
+        except FileNotFoundError:
             pass
-    return files if _identity_ok(files) else None
+        except OSError as e:
+            raise IdentityUnreadable("%s won't read (%s)" % (rel, e))
+    if "rns/identity" not in files:
+        return None
+    if not _identity_ok(files):
+        raise IdentityUnreadable("rns/identity isn't whole (%d bytes)" % len(files["rns/identity"]))
+    return files
+
+
+def _identity_or_none(read, where):
+    """For saving or showing it: an unreadable identity said, as none."""
+    try:
+        return read()
+    except IdentityUnreadable as e:
+        print("  " + yellow("The identity on %s won't read whole (%s): left as it is." % (where, e)))
+        return None
 
 
 def pc_new_identity(folder):
     """A computer Stump's identity, made here before it first starts (as the
     Stump would make it: 64 random bytes, its two private keys), so it can
-    be saved at once. Kept if it has one."""
-    cur = pc_identity(folder)
+    be saved at once. Kept if it has one; one that won't read is left
+    alone, never written over."""
+    try:
+        cur = pc_identity(folder)
+    except IdentityUnreadable as e:
+        print("  " + yellow("Its identity file is there but isn't whole (%s): left as it is." % e))
+        return None
     if cur:
         return cur
     p = Path(folder) / "rns" / "identity"
@@ -2001,14 +2069,60 @@ def pc_put_identity(folder, files):
     _pc_mark_updated(folder)
 
 
-def board_identity(port):
-    tmp = Path(tempfile.mkdtemp())
-    files = {}
-    for rel in IDENTITY_FILES:
-        ok, _ = run(["mpremote", "connect", port, "fs", "cp", ":" + rel, str(tmp / rel.replace("/", "_"))], timeout=30)
-        if ok and (tmp / rel.replace("/", "_")).is_file():
-            files[rel] = (tmp / rel.replace("/", "_")).read_bytes()
-    return files if _identity_ok(files) else None
+def board_identity(port, tries=2):
+    """A board's identity, or None when it has none yet. The board says
+    which files it has, their sizes and SHA-256; each is then copied and
+    checked against that. A read that doesn't match, or a board that
+    doesn't answer whole, is tried again, then IdentityUnreadable -- never
+    taken as none (1.0.0-beta.84: on a CAM a garbled read was, and a new
+    identity went over the old one unsaved)."""
+    import hashlib
+    code = ("import os,json,hashlib,binascii\n"
+            "d={}\n"
+            "for p in %r:\n"
+            " try:\n"
+            "  b=open(p,'rb').read()\n"
+            "  d[p]=[len(b),binascii.hexlify(hashlib.sha256(b).digest()).decode()]\n"
+            " except OSError:\n"
+            "  try:\n"
+            "   os.stat(p)\n"
+            "   d[p]='unreadable'\n"
+            "  except OSError:\n"
+            "   pass\n"
+            "print('IDSTAT:'+json.dumps(d))\n") % (list(IDENTITY_FILES),)
+    why = "the board didn't answer"
+    for _ in range(max(1, tries)):
+        ok, out = run(["mpremote", "connect", port, "exec", code], timeout=40)
+        m = re.search(r"IDSTAT:(\{.*\})", out or "") if ok else None
+        try:
+            stat = json.loads(m.group(1)) if m else None
+        except ValueError:
+            stat = None
+        if not isinstance(stat, dict):
+            why = "the board didn't answer whole"
+            continue
+        if "rns/identity" not in stat:
+            return None
+        tmp = Path(tempfile.mkdtemp())
+        files, why = {}, None
+        for rel in IDENTITY_FILES:
+            if rel not in stat:
+                continue
+            st, dst = stat[rel], tmp / rel.replace("/", "_")
+            if not (isinstance(st, list) and len(st) == 2):
+                why = "%s won't read on the board" % rel
+                break
+            good, _ = run(["mpremote", "connect", port, "fs", "cp", ":" + rel, str(dst)], timeout=30)
+            data = dst.read_bytes() if good and dst.is_file() else None
+            if data is None or len(data) != st[0] or hashlib.sha256(data).hexdigest() != st[1]:
+                why = "%s came across garbled" % rel
+                break
+            files[rel] = data
+        if why is None:
+            if _identity_ok(files):
+                return files
+            why = "rns/identity isn't whole on the board (%d bytes)" % len(files.get("rns/identity") or b"")
+    raise IdentityUnreadable(why)
 
 
 def board_name(port):
@@ -2076,12 +2190,32 @@ def ask_restore_identity():
 
 def _replacing(cur, files, name):
     """Before an identity replaces another: the one there is saved first.
-    Its path, or None when there's nothing to keep (none, or the same)."""
-    if not cur or cur.get("rns/identity") == files.get("rns/identity"):
+    Its path, or None when there's nothing to keep (none, or the same).
+    The same means every file: a different mailbox key alone is saved
+    too (1.0.0-beta.84)."""
+    if not cur or all(cur.get(k) == files.get(k) for k in IDENTITY_FILES):
         return None
     p = save_keepsake(cur, (name or "Stump") + " (replaced " + time.strftime("%Y-%m-%d %H%M") + ")")
     print("  The identity it had is saved first: %s" % p)
     return p
+
+
+def _save_before_replacing(read, files, here, where):
+    """The identity there, read and saved before another goes over it.
+    False, with nothing changed, when it won't read whole or can't be
+    saved (1.0.0-beta.84)."""
+    try:
+        cur = read()
+    except IdentityUnreadable as e:
+        print(yellow("The identity on %s won't read whole (%s): nothing changed. Try again (a CAM: unplug it and plug it "
+                     "back in); save it first with python3 provisioner.py --save-identity." % (where, e)))
+        return False
+    try:
+        _replacing(cur, files, here)
+    except OSError as e:
+        print(yellow("The identity it has couldn't be saved first (%s): nothing changed." % e))
+        return False
+    return True
 
 
 def restore_identity(target, src):
@@ -2100,11 +2234,13 @@ def restore_identity(target, src):
         return False
     if is_pc:
         folder = Path(str(target)).expanduser()
-        _replacing(pc_identity(folder), files, here)
+        if not _save_before_replacing(lambda: pc_identity(folder), files, here, here or folder):
+            return False
         pc_put_identity(folder, files)
         print(green("Done.") + " A running Stump restarts by itself in a few seconds, as %s." % (name or "that Stump"))
         return True
-    _replacing(board_identity(target), files, here)
+    if not _save_before_replacing(lambda: board_identity(target), files, here, here or target):
+        return False
     if not board_put_identity(target, files):
         print(yellow("Not all of it arrived: try again."))
         return False
@@ -2117,7 +2253,11 @@ def save_identity(target, path=None):
     """--save-identity: a Stump's identity into a keepsake."""
     is_pc = (Path(str(target)).expanduser() / "stump_pc.py").is_file()
     folder = Path(str(target)).expanduser()
-    files = pc_identity(folder) if is_pc else board_identity(target)
+    try:
+        files = pc_identity(folder) if is_pc else board_identity(target)
+    except IdentityUnreadable as e:
+        print(yellow("Its identity won't read whole (%s): nothing saved. Try again (a CAM: unplug it and plug it back in)." % e))
+        return False
     name = _folder_name(folder) if is_pc else board_name(target)
     if not files:
         print(yellow("No identity on that Stump yet: it makes one the first time it starts."))
@@ -7064,7 +7204,8 @@ def interactive_wizard():
                 # A Stump brought back (1.0.0-beta.76): its identity on the
                 # board before it first starts.
                 back = ask_restore_identity()
-                if back and board_put_identity(port, back[0]):
+                if back and _save_before_replacing(lambda: board_identity(port), back[0], profile.get("node_name"), port) \
+                        and board_put_identity(port, back[0]):
                     r.note("Identity", "%s, brought back" % (back[1] or identity_fingerprint(back[0])))
             if role == "cam":
                 banner("Finding the node's addresses")
@@ -7084,7 +7225,7 @@ def interactive_wizard():
                     print("No address yet: that's normal right after an upload. Power-cycle the")
                     print("board, wait a few seconds, then: python3 provisioner.py --get-ip %s" % port)
                 if flashed:
-                    kept = offer_save_identity(board_identity(port), profile.get("node_name"))
+                    kept = offer_save_identity(_identity_or_none(lambda: board_identity(port), port), profile.get("node_name"))
                     if kept:
                         r.note("Identity", "saved in %s: keep it safe" % kept)
                 chain = profile.get("chain") or {}
@@ -8318,7 +8459,7 @@ def setup_pc(folder=None, reconfigure=False):
         # A Stump brought back (1.0.0-beta.76): its saved identity, or its
         # old folder. Otherwise its own, made now so it can be saved.
         back = ask_restore_identity()
-        if back:
+        if back and _save_before_replacing(lambda: pc_identity(folder), back[0], _folder_name(folder), folder):
             pc_put_identity(folder, back[0])
             r.note("Identity", "%s, brought back" % (back[1] or identity_fingerprint(back[0])))
         pc_new_identity(folder)
@@ -8426,7 +8567,7 @@ def setup_pc(folder=None, reconfigure=False):
             r.state[[n for n, _ in r.steps].index("Chain")] = "fail"
             r.note("Chain", red("not linked yet: python3 provisioner.py --check-chain"))
     if first:
-        kept = offer_save_identity(pc_identity(folder), _folder_name(folder))
+        kept = offer_save_identity(_identity_or_none(lambda: pc_identity(folder), folder), _folder_name(folder))
         if kept:
             r.note("Identity", "saved in %s: keep it safe" % kept)
     r.note("Open", "http://localhost/ on this computer (8080 if 80 was taken)")
