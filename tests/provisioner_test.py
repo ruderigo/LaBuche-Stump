@@ -28,6 +28,12 @@ check('the firmware zip is named with its release', re.match(r'^Stump-1\.0\.0-be
 check('core manifest current', P._check_local_files_current(fw.resolve()) == [], P._check_local_files_current(fw.resolve()))
 for n in ('fservbot', 'stumpid'):
     check(n + ' verifies', P.verify_plugin(fw / n) == ([], []), P.verify_plugin(fw / n))
+# Every pack the release ships matches its own hashes: Arborist and the
+# Provisioner's shelf refuse one that doesn't (Meter 1.3 and Marco Polo 1.0
+# shipped in beta.82 edited after they were hashed). Fix: --hash-pack.
+for p in P.discover_packs():
+    r, w = P.check_pack(p, P.firmware_plugin_api(fw))
+    check('shipped pack %s matches its hashes' % p['dir'].name, r is None and w == [], (r, w))
 # packs: folder + zip of same -> listed once; zip extraction
 P.PACKS_DIR = Path(tempfile.mkdtemp()) / 'packs'
 P.PACK_CACHE_DIR = Path(tempfile.mkdtemp()) / 'cache'

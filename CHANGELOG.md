@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-beta.83
+- **Meter 1.3 and Marco Polo 1.0 pass their own hash check again.** beta.82 renumbered a line in each after they were hashed, so Arborist and the Provisioner's shelf refused them. Both are rehashed; nothing in them changed.
+- **A test checks every pack the release ships** against its hashes (`tests/provisioner_test.py`), so a stale pack fails the tests instead of reaching a release.
+
 ## 1.0.0-beta.82
 The test repo (potential-broccoli) merged in: packed text, the November code review's fixes, and two tester packs. It had numbered this work "beta.74", then "beta.78"; it ships here as beta.82, with everything of beta.74 to beta.81.
 - **Packed text: more of a chat line in each LoRa packet.** A packet holds 295 bytes of LXMF content whatever is in it; what a Stump sends is text, in three languages, much of it its own replies. Between two ends that both say they read it (a fifth item in their LXMF announce, `{"z": 1}`), a message's content now goes packed (`urns/ztext.py`): about 60% of its bytes for ordinary chat, a sixth for `/help` (800 bytes, a link and a transfer, now 134 bytes, one packet). To anyone else (Sideband, MeshChat, an older FireFly or Stump) text goes as it always did.
