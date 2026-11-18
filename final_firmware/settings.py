@@ -28,7 +28,7 @@ WEIGHT_MAX = 99
 
 # Applied to the running Stump at once; the others need a restart.
 LIVE = ("CREDITS_ENABLED", "CREDIT_WEIGHTS", "AUTH_MODE", "FEATURES", "LIBRARIAN", "PC_STORAGE_MB",
-        "PC_KEEP_AWAKE", "REANNOUNCE_INTERVAL", "LXMF_STAMPS", "DEFAULT_LANG")
+        "PC_KEEP_AWAKE", "REANNOUNCE_INTERVAL", "LXMF_STAMPS", "ANNOUNCE_STAMP", "DEFAULT_LANG")
 
 # A computer's "card": the sd/ folder, PC_STORAGE_MB in size (never more
 # than the disk has free). Uploads fill it to fserv.MAX_SD_RATIO, then the
@@ -132,6 +132,11 @@ def current():
         out["LXMF_STAMPS"] = bool(lxmf.STAMPS[0])
     except ImportError:
         out["LXMF_STAMPS"] = bool(g("LXMF_STAMPS", False))
+    try:
+        from urns import dstamp
+        out["ANNOUNCE_STAMP"] = bool(dstamp.ENABLED[0])
+    except ImportError:
+        out["ANNOUNCE_STAMP"] = bool(g("ANNOUNCE_STAMP", False))
     if on_computer():
         out["LOCAL_DISCOVERY"] = bool(g("LOCAL_DISCOVERY", True))
     out.update(_storage_now())          # (no {**d} on the board's MicroPython)
@@ -238,6 +243,7 @@ def parse_form(fields):
             return None, "announce_min"
         out["REANNOUNCE_INTERVAL"] = mins * 60
         out["LXMF_STAMPS"] = bool(fields.get("lxmf_stamps"))     # (a box in the same group)
+        out["ANNOUNCE_STAMP"] = bool(fields.get("announce_stamp"))   # (and this one, 1.0.0-beta.86)
     if fields.get("computer") and on_computer():          # (the This computer group was on the form)
         out["PC_KEEP_AWAKE"] = bool(fields.get("keep_awake"))
         if fields.get("ld_shown"):                     # (the box was on the form)
@@ -370,6 +376,12 @@ def apply(changes):
             lxmf.STAMPS[0] = bool(changed["LXMF_STAMPS"])
         except ImportError:
             later.append("LXMF_STAMPS")
+    if "ANNOUNCE_STAMP" in changed:
+        try:
+            from urns import dstamp
+            dstamp.set_enabled(changed["ANNOUNCE_STAMP"])
+        except ImportError:
+            later.append("ANNOUNCE_STAMP")
     if "DEFAULT_LANG" in changed:
         import i18n
         if changed["DEFAULT_LANG"] in i18n.LANGUAGES:

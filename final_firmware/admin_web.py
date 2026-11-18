@@ -609,6 +609,10 @@ def _render_admin_setup_section(lang, pw, notice=""):
            + (" checked" if s.get("LXMF_STAMPS") else "") + "> " + T("admin_setup_stamps") + "</label>"
            "<p class='sub'><small>" + T("admin_setup_stamps_note") + "</small></p>"
            + _stamps_status(T) +
+           "<label class='opt'><input type='checkbox' name='announce_stamp' value='1'"
+           + (" checked" if s.get("ANNOUNCE_STAMP") else "") + "> " + T("admin_setup_ann_stamp") + "</label>"
+           "<p class='sub'><small>" + T("admin_setup_ann_stamp_note") + "</small></p>"
+           + _ann_stamp_status(T) +
            "<p class='sub'>" + esc(when) + "</p>"
            "<button type='submit' class='plain' formaction='/admin/announce' formnovalidate>"
            + T("admin_announce_now") + "</button>"
@@ -1625,6 +1629,23 @@ async def route(reader, writer, method, path, headers, ip, identifier, secure):
     else:
         return False
     return True
+
+
+def _ann_stamp_status(T):
+    """With announce stamps on (1.0.0-beta.86): how many of the Stump's
+    destinations have theirs, and the one being worked on."""
+    try:
+        from urns import dstamp
+        st = dstamp.status()
+    except Exception:
+        return ""
+    if not st["on"]:
+        return ""
+    if st["wanted"] and st["stamped"] >= st["wanted"]:
+        msg = T("admin_ann_stamp_done", n=st["stamped"])
+    else:
+        msg = T("admin_ann_stamp_working", n=st["stamped"], total=st["wanted"], tries=st["tries"])
+    return "<p class='sub'><small>" + msg + "</small></p>"
 
 
 def _stamps_status(T):
