@@ -398,12 +398,48 @@
   var IDENTITY_FILES = ["rns/identity", "pn_mailbox_identity"];
   function b64ToU8(t) { var s = atob(t || ""), u = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
   function u8ToB64(u) { var s = ""; for (var i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); }
-  async function readIdentity(repl) {
-    var out = await repl.run("import binascii,json\nd={}\nfor p in " + JSON.stringify(IDENTITY_FILES) + ":\n try:\n" +
-                             "  d[p]=binascii.b2a_base64(open(p,'rb').read()).decode().strip()\n except OSError:\n  pass\nprint('ID'+json.dumps(d))\n");
-    var m = /ID(\{.*\})/.exec(out), d = m ? JSON.parse(m[1]) : {}, files = {};
-    Object.keys(d).forEach(function (k) { files[k] = b64ToU8(d[k]); });
-    return files["rns/identity"] && files["rns/identity"].length === 64 ? files : null;
+  // The board's identity, or null when it has none yet. The board sends
+  // each file with its size and SHA-256, checked here; a read that doesn't
+  // match is tried again, then thrown -- never taken as none, which would
+  // let a new identity go over it unsaved (1.0.0-beta.84; on a CAM a
+  // garbled read was).
+  async function readIdentity(repl, tries) {
+    var why = "the board didn't answer whole";
+    for (var t = 0; t < (tries || 2); t++) {
+      var out = await repl.run("import os,binascii,json,hashlib\nd={}\nfor p in " + JSON.stringify(IDENTITY_FILES) + ":\n try:\n" +
+                               "  b=open(p,'rb').read()\n  d[p]=[binascii.b2a_base64(b).decode().strip(),len(b),binascii.hexlify(hashlib.sha256(b).digest()).decode()]\n" +
+                               " except OSError:\n  try:\n   os.stat(p)\n   d[p]='unreadable'\n  except OSError:\n   pass\nprint('ID'+json.dumps(d))\n");
+      var m = /ID(\{.*\})/.exec(out || ""), d = null;
+      try { d = m ? JSON.parse(m[1]) : null; } catch (e) { d = null; }
+      if (!d || typeof d !== "object") { why = "the board didn't answer whole"; continue; }
+      if (!d["rns/identity"]) return null;
+      var files = {}; why = null;
+      for (var i = 0; i < IDENTITY_FILES.length && !why; i++) {
+        var k = IDENTITY_FILES[i], v = d[k];
+        if (v === undefined) continue;
+        if (!Array.isArray(v) || v.length !== 3) { why = k + " won't read on the board"; break; }
+        var b = null;
+        try { b = b64ToU8(v[0]); } catch (e) { b = null; }
+        if (!b || b.length !== v[1] || (await shaHex(b)) !== v[2]) { why = k + " came across garbled"; break; }
+        files[k] = b;
+      }
+      if (!why) {
+        if (files["rns/identity"].length === 64) return files;
+        why = "rns/identity isn't whole on the board (" + files["rns/identity"].length + " bytes)";
+      }
+    }
+    var err = new Error("Its identity won't read whole (" + why + "): nothing changed. Try again (a CAM: unplug it and plug it back in).");
+    err.unreadable = true;
+    throw err;
+  }
+  // Two identities the same: every file, the mailbox key too (1.0.0-beta.84).
+  async function sameIdentity(a, b) {
+    for (var i = 0; i < IDENTITY_FILES.length; i++) {
+      var k = IDENTITY_FILES[i];
+      if (!a[k] !== !b[k]) return false;
+      if (a[k] && (await shaHex(a[k])) !== (await shaHex(b[k]))) return false;
+    }
+    return true;
   }
   async function identityFingerprint(files) {
     var h = (await shaHex(files["rns/identity"])).slice(0, 16);
@@ -1124,18 +1160,34 @@
   // A pack off the board: its plugin folders; with also, what it keeps too
   // (its saved data in plugins/ on the card, its Tools sections, its home
   // files, its theme). Returns how many paths went.
+  // The record is read from the board, so it can be tampered with
+  // (1.0.0-beta.84): only the pack's own places are taken from it, as the
+  // Provisioner does (_pack_leftovers) -- plugins/<its plugin>,
+  // tools/<a section the Stump doesn't ship>, home/<one file, deleted as a
+  // file> -- and anything else in it is ignored.
+  var CORE_TOOL_SECTIONS = ["apps", "arborist", "flasher", "images", "provisioner", "firefly", "fw"];
+  function safeName(s) { return typeof s === "string" && /^[A-Za-z0-9][A-Za-z0-9 _.+-]{0,63}$/.test(s) && s.indexOf("..") < 0; }
+  function plainPlugin(p) { return typeof p === "string" && /^[a-z][a-z0-9_]{1,23}$/.test(p) &&
+                                   ["urns", "lib", "peripherals", "web", "docs", "third_party", "tools_payload", "sd", "rns", "tls",
+                                    "plugins_state", "boot", "main", "config"].indexOf(p) < 0; }
+  function packLeftovers(pack) {
+    var rec = pack.record && typeof pack.record === "object" ? pack.record : {};
+    return {
+      dirs: pack.plugins.filter(plainPlugin).map(function (p) { return "plugins/" + p; })
+                .concat((Array.isArray(rec.tools) ? rec.tools : []).filter(function (t) {
+                  return typeof t === "string" && t.indexOf("tools/") === 0 && safeName(t.slice(6)) && CORE_TOOL_SECTIONS.indexOf(t.slice(6)) < 0; })),
+      files: (Array.isArray(rec.home) ? rec.home : []).filter(safeName).map(function (h) { return "home/" + h; }),
+      theme: typeof rec.theme === "string" ? rec.theme : null };
+  }
   async function removePack(repl, pack, also) {
-    var rec = pack.record || {}, card = [];
-    if (also) {
-      card = pack.plugins.map(function (p) { return "plugins/" + p; }).concat(rec.tools || [])
-                         .concat((rec.home || []).map(function (h) { return "home/" + h; }));
-    }
+    var left = also ? packLeftovers(pack) : { dirs: [], files: [], theme: null }, card = left.dirs.length || left.files.length;
     var out = await repl.run(
       "import os\nn=0\ndef rm(p):\n global n\n try:\n  for e in os.listdir(p):\n   rm(p+'/'+e)\n  os.rmdir(p)\n  n+=1\n" +
       " except OSError:\n  try:\n   os.remove(p)\n   n+=1\n  except OSError:\n   pass\n" +
-      "for p in " + JSON.stringify(pack.plugins) + ":\n rm(p)\n" +
-      (card.length ? "try:\n import fserv\n fserv.mount_sd()\nexcept Exception:\n pass\nfor p in " + JSON.stringify(card) + ":\n rm(" + py(CARD.root) + "+'/'+p)\n" : "") +
-      (also && rec.theme ? "import json\ntry:\n d=json.load(open('themes.json'))\n d.pop(" + py(rec.theme) + ",None)\n f=open('themes.json','w')\n f.write(json.dumps(d))\n f.close()\nexcept Exception:\n pass\n" : "") +
+      "for p in " + JSON.stringify(pack.plugins.filter(plainPlugin)) + ":\n rm(p)\n" +
+      (card ? "try:\n import fserv\n fserv.mount_sd()\nexcept Exception:\n pass\nfor p in " + JSON.stringify(left.dirs) + ":\n rm(" + py(CARD.root) + "+'/'+p)\n" +
+              "for p in " + JSON.stringify(left.files) + ":\n try:\n  os.remove(" + py(CARD.root) + "+'/'+p)\n  n+=1\n except OSError:\n  pass\n" : "") +
+      (left.theme ? "import json\ntry:\n d=json.load(open('themes.json'))\n d.pop(" + py(left.theme) + ",None)\n f=open('themes.json','w')\n f.write(json.dumps(d))\n f.close()\nexcept Exception:\n pass\n" : "") +
       "print('GONE%d' % n)\n", 120000);
     var m = /GONE(\d+)/.exec(out);
     return m ? +m[1] : 0;
@@ -1241,7 +1293,7 @@
               clearLeftovers: clearLeftovers, flashUse: flashUse, boardInfo: boardInfo, memory: memory,
               scanWifi: scanWifi, lookAround: lookAround, offers: offers, chainIdOf: chainIdOf, wifiPass: wifiPass,
               IMAGE_FOR: IMAGE_FOR, imageForChip: imageForChip, imageInfo: imageInfo, notFrozen: notFrozen,
-              removeFrozenCopies: removeFrozenCopies, removeRetired: removeRetired, listPacks: listPacks, removePack: removePack, PACK_MARK: PACK_MARK, readIdentity: readIdentity, putIdentity: putIdentity, keepsake: keepsake, readKeepsake: readKeepsake, keepsakeName: keepsakeName, identityFingerprint: identityFingerprint, HELTEC_ON_HOTSPOT: HELTEC_ON_HOTSPOT, HELTEC_FIRST: HELTEC_FIRST,
+              removeFrozenCopies: removeFrozenCopies, removeRetired: removeRetired, listPacks: listPacks, removePack: removePack, packLeftovers: packLeftovers, PACK_MARK: PACK_MARK, readIdentity: readIdentity, sameIdentity: sameIdentity, putIdentity: putIdentity, keepsake: keepsake, readKeepsake: readKeepsake, keepsakeName: keepsakeName, identityFingerprint: identityFingerprint, HELTEC_ON_HOTSPOT: HELTEC_ON_HOTSPOT, HELTEC_FIRST: HELTEC_FIRST,
               CARD: CARD, USB_MAX: USB_MAX, cardStatus: cardStatus, wipeCard: wipeCard, toCard: toCard,
               readZip: readZip, packFrom: packFrom, installPack: installPack, fillTools: fillTools, shaHex: shaHex,
               readSettings: readSettings, writeSettings: writeSettings,

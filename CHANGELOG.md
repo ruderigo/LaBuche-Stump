@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta.84
+Two findings from the r36max team's review, and a third found while fixing them.
+- **Removing a pack deletes only the pack's own places.** With "delete what it keeps too", the Provisioner and Arborist took the folders to delete from the pack's record (`.from_pack`), read from the board or the Stump's folder, and trusted it. A tampered record could empty a board's SD card, and on a computer Stump an entry such as `/` or `..` reached outside its folder: anything the user running the Provisioner owns. Now only `plugins/<its plugin>`, its own Tools section (never one the Stump ships) and `home/<one file>` are taken from it, home files are deleted one by one, and a folder such as `lib/` given an `install.py` is never taken for a plugin.
+- **A pack's name must be a plain name** (as Arborist already asked). A downloaded pack named `../..` wrote its tools outside a computer Stump's folder, and removing it deleted there. A pack zip is also unpacked under a plain name.
+- **An identity that won't read whole is never taken as "no identity".** On a CAM, a garbled read let a restore write the new identity over the old one without saving it. The board now sends each identity file's size and SHA-256 and the copy is checked against them (tried twice); a computer Stump's damaged file counts too. A restore then stops and changes nothing, and nothing is made over it. When only the mailbox key differs, the one there is saved first too. Same in Arborist.
+- Tests: the crafted record (kept relative, so it can never reach outside the test's own folder), garbled reads, a mailbox-only difference, a damaged file, unsafe pack names.
+
 ## 1.0.0-beta.83
 - **Meter 1.3 and Marco Polo 1.0 pass their own hash check again.** beta.82 renumbered a line in each after they were hashed, so Arborist and the Provisioner's shelf refused them. Both are rehashed; nothing in them changed.
 - **A test checks every pack the release ships** against its hashes (`tests/provisioner_test.py`), so a stale pack fails the tests instead of reaching a release.

@@ -794,6 +794,15 @@ with contextlib.redirect_stdout(io.StringIO()):
 shutil.copy(P.Path(P.__file__).resolve().parent / "tests" / "config.py", ps / "config.py")
 (ps / "meter").mkdir(); (ps / "meter" / "install.py").write_text("def setup(s):\n    pass\n")   # copied in by hand
 here = [P.load_pack(W / "packs" / n) for n in ("tavern-pack", "simple-pack")]
+# A pack's name becomes a folder and goes in its record (1.0.0-beta.84): a
+# downloaded pack named "../.." is refused, as Arborist refuses it.
+_bad = Path(tempfile.mkdtemp(prefix="pack-badname-"))
+for nm in ("../..", "tools/x", "Bad Name", ".hidden"):
+    (_bad / "pack.json").write_text(json.dumps({"name": nm, "version": "1", "author": "a", "license": "MIT"}))
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        got = P.load_pack(_bad)
+    check('a pack named %r is refused' % nm, got is None and "plain name" in out.getvalue(), out.getvalue())
+shutil.rmtree(_bad, ignore_errors=True)
 said = []
 real_ask, real_yn = P.ask, P.ask_yes_no
 def script(*a):
@@ -855,6 +864,59 @@ P.run = real_run
 check('a board\'s packs: its plugins that aren\'t built in, with their record (none before beta.75)',
       got == {"tavern": {"pack": "tavern", "version": "1.2"}, "simple": None}, got)
 shutil.rmtree(brd, ignore_errors=True)
+# A tampered pack record (1.0.0-beta.84): removing the pack "with what it
+# keeps" read its places from the record, and could have emptied the card
+# -- on a computer Stump, anything its user owns ("/" in the record reached
+# the disk's root). Only the pack's own places go now; home files one by one.
+# SAFETY: every entry here is relative (never "/" nor an absolute path), so
+# even against code without the fix it reaches no further than the test's
+# own temporary folder.
+CRAFTED = {"pack": "tavern", "version": "1.2", "plugins": ["tavern"], "theme": {"x": 1},
+           "tools": ["tools/", "tools", "tools/..", "tools/../home", "tools/provisioner", "tools/firefly", "tools/apps",
+                     "../shared", "", "..", "tools/tavern"],
+           "home": ["", ".", "..", "../", "../tools/provisioner/provisioner.py", "sub/dir", "sub", ".hidden", "banner.txt"]}
+for _e in CRAFTED["tools"] + CRAFTED["home"]:
+    assert not _e.startswith("/"), "a crafted entry must stay relative"
+KEEP = ["sd/tools/provisioner/provisioner.py", "sd/tools/firefly/README.md", "sd/tools/apps/x.zip",
+        "sd/home/index.html", "sd/home/sub/dir", "sd/home/.hidden", "sd/notes.txt", "shared/photo.jpg", "config.py"]
+def _stump(root):
+    for k in KEEP + ["sd/plugins/tavern/data.json", "sd/tools/tavern/plays.txt", "sd/home/banner.txt"]:
+        (root / k).parent.mkdir(parents=True, exist_ok=True); (root / k).write_text("x")
+def _stump_ok(root):
+    return ([k for k in KEEP if not (root / k).is_file()],
+            [k for k in ("sd/plugins/tavern", "sd/tools/tavern", "sd/home/banner.txt") if (root / k).exists()])
+row = {"name": "tavern", "pack": None, "plugins": ["tavern"], "record": CRAFTED, "state": "yours"}
+_jail = Path(tempfile.mkdtemp(prefix="crafted-jail-"))
+ps = _jail / "stump"
+(ps / "tavern").mkdir(parents=True); (ps / "tavern" / "install.py").write_text("x")
+_stump(ps)
+with contextlib.redirect_stdout(io.StringIO()):
+    P.pc_remove_pack(ps, row, True)
+check('a tampered pack record, on a computer Stump: only its own places go, everything else stays',
+      _stump_ok(ps) == ([], []) and not (ps / "tavern").exists(), _stump_ok(ps))
+brd = _jail / "board"
+(brd / "tavern").mkdir(parents=True); (brd / "tavern" / "install.mpy").write_text("x")
+(brd / "lib").mkdir(); (brd / "lib" / "install.py").write_text("x")
+_stump(brd)
+def _brd_sd(cmd, timeout=None):
+    if cmd[3:4] != ["exec"]:
+        return True, ""
+    here_ = os.getcwd(); os.chdir(brd)
+    sys.modules["fserv"] = type(sys)("fserv"); sys.modules["fserv"].mount_sd = lambda: None
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            exec(cmd[-1].replace("'/sd/'", repr(str(brd / "sd") + "/")), {})
+    finally:
+        os.chdir(here_); sys.modules.pop("fserv", None)
+    return True, buf.getvalue()
+P.run = _brd_sd
+with contextlib.redirect_stdout(io.StringIO()):
+    P.board_remove_pack("/dev/ttyUSB0", dict(row, plugins=["tavern", "lib"]), True)
+P.run = real_run
+check('... and on a board (a core folder given an install.py not taken for a plugin either)',
+      _stump_ok(brd) == ([], []) and not (brd / "tavern").exists() and (brd / "lib" / "install.py").is_file(), _stump_ok(brd))
+shutil.rmtree(_jail, ignore_errors=True)
 # The identity keepsake (1.0.0-beta.76): a Stump's identity in one file,
 # to bring the same Stump back on a fresh install or another board.
 home = Path(tempfile.mkdtemp(prefix="home-")); old_home = os.environ.get("HOME"); os.environ["HOME"] = str(home)
@@ -934,8 +996,20 @@ P.ask, P.ask_yes_no = real_ask, yn
 # On a board: read and written over mpremote (a pretend board here).
 bd = Path(tempfile.mkdtemp(prefix="board-id-"))
 (bd / "rns").mkdir(); (bd / "rns" / "identity").write_bytes(b"b" * 64); (bd / "config.py").write_text("NODE_NAME = 'Gearn'\n")
+GARBLE = {"cp": False, "exec": False}
 def _mp(cmd, timeout=None):
     a = cmd[3:]
+    if a[:1] == ["exec"]:
+        if GARBLE["exec"]:
+            return True, "IDSTAT:{\"rns/ident"
+        here_ = os.getcwd(); os.chdir(bd)
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                exec(a[1], {})
+        finally:
+            os.chdir(here_)
+        return True, buf.getvalue()
     if a[:2] == ["fs", "cp"]:
         src, dst = a[2], a[3]
         rd = lambda x: (bd / x[1:]) if x.startswith(":") else Path(x)
@@ -943,6 +1017,8 @@ def _mp(cmd, timeout=None):
             data = rd(src).read_bytes()
         except OSError:
             return False, "no such file"
+        if GARBLE["cp"] and src.startswith(":"):
+            data = data[:40] + b"\x00" * 3 + data[43:]
         rd(dst).parent.mkdir(parents=True, exist_ok=True); rd(dst).write_bytes(data)
         return True, ""
     if a[:2] == ["fs", "cat"]:
@@ -969,6 +1045,54 @@ P.run = real_run
 check('--restore-identity onto a board: its identity and mailbox there, the one it had saved first',
       ok and (bd / "rns" / "identity").read_bytes() == files["rns/identity"] and (bd / "pn_mailbox_identity").read_bytes() == b"m" * 64
       and list(home.glob("Gearn (replaced*")), out.getvalue())
+# A garbled read (1.0.0-beta.84: a CAM's serial): never taken as "no
+# identity". The restore stops and changes nothing, and nothing new is saved.
+(bd / "rns" / "identity").write_bytes(b"g" * 64); (bd / "pn_mailbox_identity").write_bytes(b"q" * 64)
+other = home / "other.stump-identity"; other.write_bytes(P.keepsake_bytes({"rns/identity": b"o" * 64}, "Other"))
+for mode in ("cp", "exec"):
+    GARBLE[mode] = True
+    before = sorted(home.iterdir())
+    P.run = _mp
+    P.ask_yes_no = lambda q, d=True: True
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        try:
+            P.board_identity("/dev/ttyUSB0"); raised = False
+        except P.IdentityUnreadable:
+            raised = True
+        ok = P.restore_identity("/dev/ttyUSB0", str(other))
+    P.run, P.ask_yes_no = real_run, yn
+    GARBLE[mode] = False
+    check('a garbled read of a board\'s identity (%s): not taken as none; the restore stops, nothing changed nor saved' %
+          {"cp": "the file", "exec": "the board's answer"}[mode],
+          raised and not ok and (bd / "rns" / "identity").read_bytes() == b"g" * 64 and (bd / "pn_mailbox_identity").read_bytes() == b"q" * 64
+          and sorted(home.iterdir()) == before and "nothing changed" in out.getvalue(), out.getvalue())
+# Only the mailbox key differs: it is saved first too.
+same_id = home / "same-id.stump-identity"
+same_id.write_bytes(P.keepsake_bytes({"rns/identity": b"g" * 64, "pn_mailbox_identity": b"n" * 64}, "Gearn"))
+for f_ in home.glob("Gearn (replaced*"):
+    f_.unlink()
+P.run = _mp
+P.ask_yes_no = lambda q, d=True: True
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    ok = P.restore_identity("/dev/ttyUSB0", str(same_id))
+P.run, P.ask_yes_no = real_run, yn
+saved = list(home.glob("Gearn (replaced*"))
+check('... the same identity, another mailbox key: the mailbox it had is saved first, then replaced',
+      ok and len(saved) == 1 and P.read_identity_source(saved[0])[0].get("pn_mailbox_identity") == b"q" * 64
+      and (bd / "pn_mailbox_identity").read_bytes() == b"n" * 64, out.getvalue())
+# A computer Stump whose identity file is damaged: the same.
+dmg = Path(tempfile.mkdtemp(prefix="stump-dmg-"))
+with contextlib.redirect_stdout(io.StringIO()):
+    P._pc_copy_firmware(P.STUMP_APP_DIR, dmg)
+(dmg / "rns").mkdir(exist_ok=True); (dmg / "rns" / "identity").write_bytes(b"d" * 30)
+P.ask_yes_no = lambda q, d=True: True
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    ok = P.restore_identity(str(dmg), str(other))
+    made = P.pc_new_identity(dmg)
+P.ask_yes_no = yn
+check('... a computer Stump\'s damaged identity file: the restore stops, and no new one is made over it',
+      not ok and made is None and (dmg / "rns" / "identity").read_bytes() == b"d" * 30, out.getvalue())
+shutil.rmtree(dmg, ignore_errors=True)
 if old_home is None:
     os.environ.pop("HOME", None)
 else:

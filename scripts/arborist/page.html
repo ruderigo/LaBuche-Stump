@@ -1600,7 +1600,10 @@ async function identitySave() {
   steps("Saving its identity", ["Choose the board", "Connect", "Read its identity", "Restart"]);
   step(0); await choosePort();
   step(1); var repl = await readyRepl();
-  step(2); var files = await R.readIdentity(repl), name = await R.readSettings(repl).catch(function () { return null; });
+  step(2);
+  var files, name;
+  try { files = await R.readIdentity(repl); name = await R.readSettings(repl).catch(function () { return null; }); }
+  catch (e) { await R.restart(repl).catch(function () {}); await closePort(); throw e; }
   step(3); await R.restart(repl); await closePort();
   if (!files) throw new Error("It has no identity yet: a Stump makes it the first time it starts. Let it start once, then save it.");
   var nm = name && name.NODE_NAME || "";
@@ -1617,7 +1620,13 @@ async function identityPut() {
   step(1); var repl = await readyRepl();
   CURRENT = repl;
   step(2);
-  var cur = await R.readIdentity(repl), same = cur && R.shaHex && (await R.shaHex(cur["rns/identity"])) === (await R.shaHex(KEEP.files["rns/identity"]));
+  // An identity that won't read whole stops here, nothing changed; the one
+  // it has is saved first when anything differs, its mailbox key too
+  // (1.0.0-beta.84).
+  var cur;
+  try { cur = await R.readIdentity(repl); }
+  catch (e) { await R.restart(repl).catch(function () {}); await closePort(); CURRENT = null; throw e; }
+  var same = cur && await R.sameIdentity(cur, KEEP.files);
   if (cur && !same) {
     var s = await R.readSettings(repl).catch(function () { return null; }), nm = (s && s.NODE_NAME || "Stump") + " (replaced)";
     download(R.keepsakeName(nm), await R.keepsake(cur, nm, (await payload()).head.release), "application/json");
