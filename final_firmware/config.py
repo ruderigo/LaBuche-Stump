@@ -73,6 +73,14 @@ REANNOUNCE_INTERVAL = 120
 # no tickets, as before 1.0.0-beta.53.
 LXMF_STAMPS = False
 
+# Announce stamps (1.0.0-beta.86, /admin -> Stump settings -> Announcing):
+# the proof of work Reticulum 1.6.1 puts on announces, so a node that
+# enforces stamps hears this Stump. Off: announces as before. A computer
+# Stump makes its stamps in the background (about a minute each); a board
+# slowly, between everything else -- or the Provisioner makes them on a
+# computer: python3 provisioner.py --stamp-announces
+ANNOUNCE_STAMP = False
+
 # Announce rebroadcast throttling. When this node relays for the mesh,
 # it won't rebroadcast more than ANNOUNCE_RATE_MAX announces from the
 # same source within ANNOUNCE_RATE_WINDOW seconds -- protects the wider

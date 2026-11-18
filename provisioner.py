@@ -30,6 +30,7 @@ Usage:
     python3 provisioner.py --packs [PORT|FOLDER]      # a Stump's packs: install, update, remove
     python3 provisioner.py --save-identity [PORT|FOLDER] [FILE]   # a Stump's identity in a file to keep
     python3 provisioner.py --restore-identity PORT|FOLDER FILE|OLD_FOLDER   # bring that Stump back
+    python3 provisioner.py --stamp-announces [PORT|FOLDER]   # its announce stamps, worked out here
     python3 provisioner.py --install-pack PORT PACK   # add a pack (folder or .zip) to a node
     python3 provisioner.py --remove-plugin PORT NAME  # take a plugin off a node
     python3 provisioner.py --hash-pack FOLDER         # pack authors: hash before publishing
@@ -357,14 +358,14 @@ DEFAULT_CREDIT_WEIGHTS = {"video": 3, "music": 2, "document": 1, "other": 1}
 #    for f in sorted(Path('final_firmware').rglob('*')) if f.is_file()]"
 EXPECTED_FILE_HASHES = {
     "_sd_web/billboard.txt": "e3b0c44298fc1c14",
-    "admin_web.py": "333ca6d3e166b30e",
+    "admin_web.py": "53520d04f9fdb2a3",
     "announcer.py": "555c52b729947a67",
     "barkeep.py": "af005a0a83d1c408",
     "billboard.py": "73e95795f9430ea5",
     "boot_common.py": "dc95827c3989d1ca",
     "captive_portal.py": "d1820b686ce5364b",
     "chain.py": "0aaf1cffd20c1c6c",
-    "config.py": "e7eaea890e2b39ee",
+    "config.py": "9a0367a36df5ec2e",
     "conn.py": "b17cf4fb4f80fbbf",
     "discovery.py": "dabf766fa6524a71",
     "docs/ARBORIST.md": "6974376de39c17e5",
@@ -379,12 +380,12 @@ EXPECTED_FILE_HASHES = {
     "docs/PACKS.md": "5a3e3957321a93a7",
     "docs/PC.md": "0f9263279ac36d79",
     "docs/PLUGINS.md": "8085ca56b773b64a",
-    "example_node.py": "3f589bf418c185c4",
+    "example_node.py": "9d2f7da762a95078",
     "features.py": "81e8af361c64a911",
     "fserv.py": "06b87b1d6fb95eb4",
     "fservbot/plugin.json": "12b3c544160411e3",
     "guard.py": "526fac7536abfe7f",
-    "i18n.py": "d92e5801b2fec5ae",
+    "i18n.py": "2e1271b63108e4cb",
     "keepalive.py": "482058c9e1eb17fa",
     "layout.py": "48b030ed144b50fd",
     "lib/bz2_fast_xtensawin.mpy": "ac55d9eda2126432",
@@ -405,7 +406,7 @@ EXPECTED_FILE_HASHES = {
     "rrc.py": "4f1128b2a4080505",
     "rrc_mesh.py": "eadf13e567c3d20e",
     "rrc_ui.py": "bac6f49ea930a979",
-    "settings.py": "2fdadde51ffeae0c",
+    "settings.py": "75e7a9385d9b2624",
     "store.py": "625ba090410222cf",
     "stump_tls.py": "32a9394408ae392e",
     "stumpid/plugin.json": "6b19e9911bbf4b75",
@@ -566,7 +567,8 @@ EXPECTED_FILE_HASHES = {
     "urns/crypto/sha512.py": "80ac504ccc9ac829",
     "urns/crypto/token.py": "44320e140e635436",
     "urns/crypto/x25519.py": "90154db88af8cbd3",
-    "urns/destination.py": "42f2a100a251df5b",
+    "urns/destination.py": "1e16911050ff8edd",
+    "urns/dstamp.py": "a754bf360dd2681a",
     "urns/identity.py": "248dc870b67e352b",
     "urns/interfaces/__init__.py": "b3b812bd66eeac2d",
     "urns/interfaces/auto.py": "2a0430083c701c00",
@@ -2280,6 +2282,126 @@ def save_identity(target, path=None):
         print(yellow("Couldn't write it there: %s" % e))
         return False
     print(green("Saved: %s" % p) + "  (fingerprint %s). Keep it safe; don't share it." % identity_fingerprint(files))
+    return True
+
+
+# ── Announce stamps (1.0.0-beta.86) ──────────────────────────────────
+# A Stump with "Announce stamps" on (/admin) lists the destinations it
+# announces in rns/stamps_wanted.json, each with its stamp material; a
+# stamp is 14 bytes whose SHA-256 after that material starts with
+# STAMP_COST zero bits (urns/dstamp.py). A board finds them slowly;
+# here every core works on them, then they go in rns/stamps.json, which
+# the Stump reads within a minute.
+STAMP_COST = 25
+STAMP_LEN = 14
+
+
+def _stamp_ok(material, stamp, cost=None):
+    import hashlib
+    cost = STAMP_COST if cost is None else cost
+    d = hashlib.sha256(material + stamp).digest()
+    full, rest = cost // 8, cost % 8
+    return len(stamp) == STAMP_LEN and not any(d[:full]) and (not rest or d[full] < (1 << (8 - rest)))
+
+
+def _stamp_search(args):
+    """One worker's share: up to `tries` random stamps; the first that
+    meets the cost, or None."""
+    import hashlib
+    material, tries, cost = args
+    full, rest = cost // 8, cost % 8
+    limit = 1 << (8 - rest) if rest else 256
+    zero = bytes(full)
+    sha, rnd = hashlib.sha256, os.urandom
+    base = sha(material)
+    for _ in range(tries):
+        s = rnd(STAMP_LEN)
+        h = base.copy()
+        h.update(s)
+        d = h.digest()
+        if d[:full] == zero and d[full] < limit:
+            return s
+    return None
+
+
+def find_stamp(material, cost=None, progress=None):
+    """A stamp for this material, every core on it."""
+    import multiprocessing
+    cost = STAMP_COST if cost is None else cost
+    n = max(1, multiprocessing.cpu_count())
+    chunk = 200000
+    done = 0
+    with multiprocessing.Pool(n) as pool:
+        while True:
+            for s in pool.imap_unordered(_stamp_search, [(material, chunk, cost)] * n):
+                done += chunk
+                if s is not None:
+                    pool.terminate()
+                    return s
+            if progress:
+                progress(done)
+
+
+def _stamps_files(target):
+    """(is_pc, folder or port, its wanted list, its stamps): read from a
+    computer Stump's folder or a board."""
+    folder = Path(str(target)).expanduser()
+    is_pc = (folder / "stump_pc.py").is_file()
+    def _json(text):
+        try:
+            d = json.loads(text[text.index("{"):text.rindex("}") + 1])
+            return d if isinstance(d, dict) else {}
+        except ValueError:
+            return {}
+    if is_pc:
+        read = lambda name: _json((folder / "rns" / name).read_text(encoding="utf-8")) if (folder / "rns" / name).is_file() else {}
+    else:
+        def read(name):
+            ok, out = run(["mpremote", "connect", str(target), "fs", "cat", ":rns/" + name], timeout=30)
+            return _json(out or "") if ok else {}
+    return is_pc, folder if is_pc else target, read("stamps_wanted.json"), read("stamps.json")
+
+
+def stamp_announces(target):
+    """--stamp-announces: works out the stamps a Stump is missing and gives
+    them to it. True when it has them all."""
+    is_pc, where, wanted, have = _stamps_files(target)
+    if not wanted:
+        print(yellow("That Stump doesn't list what it announces yet.") + " In its /admin, Stump settings -> Announcing, tick"
+              " \"Announce stamps\", let it announce once (a few minutes), then run this again.")
+        return False
+    todo = {}
+    for h, m in wanted.items():
+        try:
+            material = bytes.fromhex(m)
+            if not _stamp_ok(material, bytes.fromhex(have.get(h, ""))):
+                todo[h] = material
+        except ValueError:
+            continue
+    if not todo:
+        print(green("Its %d announce stamp(s) are all there." % len(wanted)))
+        return True
+    print("Working out %d announce stamp(s) (%d bits each; about 2^%d tries, every core of this computer)..."
+          % (len(todo), STAMP_COST, STAMP_COST))
+    t0 = time.time()
+    for i, (h, material) in enumerate(sorted(todo.items()), 1):
+        st = find_stamp(material, progress=lambda n: print("\r  %d/%d  %s...  %d million tries"
+                                                          % (i, len(todo), h[:8], n // 1000000), end="", flush=True))
+        have[h] = st.hex()
+        print("\r  %d/%d  %s  found%s" % (i, len(todo), h[:8], " " * 24))
+    print("  (%d s)" % int(time.time() - t0))
+    data = json.dumps(have)
+    if is_pc:
+        (where / "rns").mkdir(exist_ok=True)
+        (where / "rns" / "stamps.json").write_text(data, encoding="utf-8")
+    else:
+        tmp = Path(tempfile.mkdtemp()) / "stamps.json"
+        tmp.write_text(data, encoding="utf-8")
+        good, _ = run(["mpremote", "connect", str(where), "fs", "cp", str(tmp), ":rns/stamps.json"], timeout=30)
+        if not good:
+            print(yellow("Couldn't copy them to the board: try again."))
+            return False
+    print(green("Done.") + " The Stump takes them within a minute and announces stamped.")
     return True
 
 
@@ -8703,6 +8825,11 @@ def main():
         rest = [a for a in args[idx + 1:idx + 3] if not a.startswith("--")]
         target = rest[0] if rest else ask_stump_target("Whose identity?")
         sys.exit(0 if target and save_identity(target, rest[1] if len(rest) > 1 else None) else 1)
+    elif "--stamp-announces" in args:
+        idx = args.index("--stamp-announces")
+        rest = [a for a in args[idx + 1:idx + 2] if not a.startswith("--")]
+        target = rest[0] if rest else ask_stump_target("Whose announce stamps?")
+        sys.exit(0 if target and stamp_announces(target) else 1)
     elif "--restore-identity" in args:
         idx = args.index("--restore-identity")
         rest = [a for a in args[idx + 1:idx + 3] if not a.startswith("--")]

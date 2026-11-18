@@ -144,6 +144,17 @@ class Destination:
                 if isinstance(returned, bytes):
                     app_data = returned
 
+        # Its Reticulum 1.6.1 stamp, after the app data, when stamping is on
+        # and it has one (urns/dstamp.py, 1.0.0-beta.86); else as before.
+        stamp = None
+        try:
+            from . import dstamp
+            stamp = dstamp.want(self)
+        except Exception:
+            stamp = None
+        if stamp is not None:
+            app_data = (app_data or b"") + dstamp.ext(stamp)
+
         signed_data = self.hash + self.identity.get_public_key() + self.name_hash + random_hash + ratchet
         if app_data is not None:
             signed_data += app_data
@@ -179,6 +190,11 @@ class Destination:
 
         if send:
             announce_packet.send()
+            try:
+                from . import dstamp
+                dstamp.counted(len(announce_packet.raw or b""), stamp is not None)
+            except Exception:
+                pass
         else:
             return announce_packet
 

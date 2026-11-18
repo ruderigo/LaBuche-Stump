@@ -356,3 +356,68 @@ def test_more_text_fits_one_packet_packed():
                             desired_method=LXMF.LXMessage.OPPORTUNISTIC)
     packed.pack()
     assert packed.method == LXMF.LXMessage.OPPORTUNISTIC  # one packet
+
+
+# ── Announce stamps (1.0.0-beta.86) ───────────────────────────────────
+# Reticulum 1.6.1 puts a proof-of-work stamp on announces, and a node can
+# enforce it. A Stump with ANNOUNCE_STAMP on adds its own: it must pass
+# 1.6.1's own check under enforcement, its app data reading as before.
+
+def _ref_announce(packet_raw):
+    p = RNS.Packet(None, packet_raw)
+    assert p.unpack()
+    return p
+
+
+def _stamped_urns_announce(app_data, cost):
+    from urns import dstamp
+    ident = UIdentity()
+    d = UDestination(ident, UDestination.IN, UDestination.SINGLE, "nomadnetwork", "node")
+    saved = (dstamp.COST, dstamp.ENABLED[0], dict(dstamp._stamps), dict(dstamp._wanted))
+    dstamp.COST, dstamp.ENABLED[0] = cost, True
+    try:
+        dstamp.want(d)
+        while not dstamp.step(200):
+            pass
+        pkt = d.announce(app_data=app_data, send=False)
+        pkt.pack()
+        return d, pkt.raw
+    finally:
+        dstamp.COST, dstamp.ENABLED[0] = saved[0], saved[1]
+        dstamp._stamps.clear(); dstamp._stamps.update(saved[2])
+        dstamp._wanted.clear(); dstamp._wanted.update(saved[3])
+
+
+def _unstamped_urns_announce(app_data):
+    d = UDestination(UIdentity(), UDestination.IN, UDestination.SINGLE, "nomadnetwork", "node")
+    pkt = d.announce(app_data=app_data, send=False)
+    pkt.pack()
+    return d, pkt.raw
+
+
+@pytest.mark.skipif(not hasattr(RNS.Transport, "STAMPS_ENFORCED"), reason="Reticulum before 1.6.1 has no announce stamps")
+def test_a_stamped_urns_announce_passes_reference_stamp_enforcement():
+    keep = (RNS.Transport.STAMPS_ENFORCED, RNS.Transport.DESTINATION_COST)
+    # A light cost so the test is quick; the format and the check are 1.6.1's own.
+    RNS.Transport.STAMPS_ENFORCED, RNS.Transport.DESTINATION_COST = True, 10
+    try:
+        d, raw = _stamped_urns_announce(b"Aleph node", 12)
+        assert RNS.Identity.validate_announce(_ref_announce(raw))
+        assert RNS.Identity.known_destinations[d.hash][3] == b"Aleph node"      # the stamp left out, as 1.6.1 does
+        u, raw = _unstamped_urns_announce(b"Bet node")
+        assert not RNS.Identity.validate_announce(_ref_announce(raw))
+        RNS.Transport.STAMPS_ENFORCED = False
+        u, raw = _unstamped_urns_announce(b"Bet node")        # (a new one: 1.6.1 remembers the one it refused)
+        assert RNS.Identity.validate_announce(_ref_announce(raw))       # not enforced: as before
+        assert RNS.Identity.known_destinations[u.hash][3] == b"Bet node"
+    finally:
+        RNS.Transport.STAMPS_ENFORCED, RNS.Transport.DESTINATION_COST = keep
+
+
+def test_a_stamp_at_the_stumps_cost_meets_reference_defaults():
+    """COST 25 is 1.6.1's DESTINATION_VALUE: above the cost a node
+    enforcing stamps asks by default (23.5)."""
+    from urns import dstamp
+    assert dstamp.COST == 25 and dstamp.EXT_LEN == 18
+    if hasattr(RNS.Transport, "DESTINATION_VALUE"):
+        assert dstamp.COST >= RNS.Transport.DESTINATION_VALUE >= RNS.Transport.DESTINATION_COST

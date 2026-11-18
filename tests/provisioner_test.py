@@ -794,6 +794,31 @@ with contextlib.redirect_stdout(io.StringIO()):
 shutil.copy(P.Path(P.__file__).resolve().parent / "tests" / "config.py", ps / "config.py")
 (ps / "meter").mkdir(); (ps / "meter" / "install.py").write_text("def setup(s):\n    pass\n")   # copied in by hand
 here = [P.load_pack(W / "packs" / n) for n in ("tavern-pack", "simple-pack")]
+# Announce stamps (1.0.0-beta.86): --stamp-announces works out what a
+# Stump lists in rns/stamps_wanted.json and gives it rns/stamps.json. A
+# light cost so the test is quick.
+_st = Path(tempfile.mkdtemp(prefix="stump-stamps-"))
+(_st / "stump_pc.py").write_text("x"); (_st / "rns").mkdir()
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    none_yet = P.stamp_announces(str(_st))
+check('--stamp-announces before the Stump lists anything: says how', not none_yet and "Announce stamps" in out.getvalue(), out.getvalue())
+_m1, _m2 = os.urandom(90), os.urandom(90)
+_good = None
+_keep_cost, P.STAMP_COST = P.STAMP_COST, 10
+while _good is None:
+    _good = P._stamp_search((_m2, 100000, 10))
+(_st / "rns" / "stamps_wanted.json").write_text(json.dumps({"aa" * 16: _m1.hex(), "bb" * 16: _m2.hex()}))
+(_st / "rns" / "stamps.json").write_text(json.dumps({"bb" * 16: _good.hex(), "cc" * 16: "00" * 14}))
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    ok = P.stamp_announces(str(_st))
+got = json.loads((_st / "rns" / "stamps.json").read_text())
+check('--stamp-announces: the missing one worked out and checks; the one there kept; the rest of the file kept',
+      ok and P._stamp_ok(_m1, bytes.fromhex(got["aa" * 16])) and got["bb" * 16] == _good.hex() and "cc" * 16 in got, out.getvalue())
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    again = P.stamp_announces(str(_st))
+check('... run again: nothing to do', again and "all there" in out.getvalue(), out.getvalue())
+P.STAMP_COST = _keep_cost
+shutil.rmtree(_st, ignore_errors=True)
 # A pack's name becomes a folder and goes in its record (1.0.0-beta.84): a
 # downloaded pack named "../.." is refused, as Arborist refuses it.
 _bad = Path(tempfile.mkdtemp(prefix="pack-badname-"))

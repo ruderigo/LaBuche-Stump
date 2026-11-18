@@ -35,7 +35,7 @@ except ImportError:
 STUMP_VERSION = "Beta A"
 # The exact release (a git tag "v" + this, built and signed by
 # .github/workflows/release.yml, which refuses a tag that doesn't match).
-STUMP_RELEASE = "1.0.0-beta.85"
+STUMP_RELEASE = "1.0.0-beta.86"
 
 # Node-type beacon: a second destination on this node's own identity,
 # aspect "stump.node", so clients can tell a Stump from a person without
@@ -686,6 +686,23 @@ def main():
             asyncio.create_task(router.stamp_loop())
         except Exception as e:
             print("[stamps] not started:", e)
+        # Announce stamps (Reticulum 1.6.1; opt-in, /admin; 1.0.0-beta.86):
+        # the ones kept, and the maker, idle unless it's on and one's missing.
+        try:
+            from urns import dstamp as _ds
+            from urns.identity import Identity as _Id
+            import config as _cfg
+            import sys as _sys
+            _ds.load(_Id.storagepath)
+            _ds.set_enabled(getattr(_cfg, "ANNOUNCE_STAMP", False))
+
+            def _stamped():
+                import announcer
+                announcer.request()          # announced again soon, stamped (NOW_GAP apart)
+            _ds.ON_FOUND[0] = _stamped
+            asyncio.create_task(_ds.loop(budget_ms=30 if _sys.platform == "esp32" else 100))
+        except Exception as e:
+            print("[stamps] announce stamps not started:", e)
         asyncio.create_task(initial_announce())
         asyncio.create_task(reannounce_loop())
         if beacon is not None:
