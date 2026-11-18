@@ -452,6 +452,24 @@ with zipfile.ZipFile(out / "climb.zip", "w") as zf:
             !fs.existsSync(path.join(root, "demo")) && !fs.existsSync(path.join(card, "plugins/demo"))
             && !fs.existsSync(path.join(card, "tools/demo")) && !fs.existsSync(path.join(card, "home/banner.txt"))
             && !JSON.parse(fs.readFileSync(path.join(root, "themes.json"), "utf8")).demo);
+      // A tampered record (1.0.0-beta.84): it could have emptied the card.
+      // Only the pack's own places go; everything else stays. Every entry is
+      // relative, so even without the fix this reaches no further than the
+      // test's own folder (never "/").
+      await R.installPack(repl, demo.plan);
+      const crafted = { pack: "demo", version: "1.0", plugins: ["demo"], theme: { x: 1 },
+                        tools: ["tools/", "tools", "tools/..", "tools/../home", "tools/provisioner", "tools/firefly", "../shared", "", "tools/demo"],
+                        home: ["", ".", "..", "../", "../tools/provisioner/provisioner.py", "sub/dir", ".hidden", "banner.txt"] };
+      fs.writeFileSync(path.join(root, "demo/" + R.PACK_MARK), JSON.stringify(crafted));
+      const keep = ["home/index.html", "home/sub/dir", "home/.hidden", "tools/provisioner/provisioner.py", "tools/firefly/README.md", "notes.txt"];
+      for (const k of keep) { fs.mkdirSync(path.dirname(path.join(card, k)), { recursive: true }); fs.writeFileSync(path.join(card, k), "mine"); }
+      have = await R.listPacks(repl, ["fservbot", "stumpid"]);
+      await R.removePack(repl, have[0], true);
+      check("a tampered pack record: only the pack's own places go (its plugin, tools/demo, home/banner.txt); the rest of the card and the flash stay",
+            !fs.existsSync(path.join(root, "demo")) && !fs.existsSync(path.join(card, "tools/demo")) && !fs.existsSync(path.join(card, "home/banner.txt"))
+            && keep.every(k => fs.existsSync(path.join(card, k))) && fs.existsSync(path.join(root, "config.py")),
+            keep.filter(k => !fs.existsSync(path.join(card, k))));
+      for (const k of keep) fs.rmSync(path.join(card, k));
       await R.installPack(repl, demo.plan);
       // The Tools page.
       const tools = [["tools/provisioner/provisioner.py", "print('p')\n"], ["tools/provisioner/Stump-1.0.0-beta.9.zip", "new zip"],
@@ -539,6 +557,21 @@ with zipfile.ZipFile(out / "climb.zip", "w") as zf:
       check("a file that isn't one, or damaged: said", /isn't a saved/.test(R.readKeepsake("{}").error)
             && /isn't whole/.test(R.readKeepsake(JSON.stringify({ stump_identity: 1, files: { "rns/identity": "AAAA" } })).error));
       check("its file name, from the Stump's name (no characters a disk refuses)", R.keepsakeName('Bob/s "Glitch"') === "Bob_s _Glitch_.stump-identity");
+      // A garbled read (1.0.0-beta.84: a CAM's serial): thrown, never taken
+      // as no identity. A flipped character in the file, then an answer cut short.
+      const realRun = repl.run.bind(repl);
+      for (const [what, garble] of [["the file", o => o.replace(/ID\{"rns\/identity": \["(.)/, (m, c) => 'ID{"rns/identity": ["' + (c === "A" ? "B" : "A"))],
+                                    ["the board's answer", o => o.replace(/ID\{.*/, 'ID{"rns/ident')]]) {
+        repl.run = async (code) => { const o = await realRun(code); return /^ID\{/m.test(o) ? garble(o) : o; };
+        let err = null, got = "none";
+        try { got = await R.readIdentity(repl); } catch (e) { err = e; }
+        repl.run = realRun;
+        check("a garbled read of a board's identity (" + what + "): thrown, not taken as none", err && err.unreadable && /nothing changed/.test(err.message), err ? err.message : got);
+      }
+      check("... the same identity with another mailbox key isn't the same (it is saved first)",
+            await R.sameIdentity({ "rns/identity": other }, { "rns/identity": other })
+            && !(await R.sameIdentity({ "rns/identity": other, "pn_mailbox_identity": mail }, { "rns/identity": other, "pn_mailbox_identity": Buffer.alloc(64, 7) }))
+            && !(await R.sameIdentity({ "rns/identity": other, "pn_mailbox_identity": mail }, { "rns/identity": other })));
     } catch (e) {
       check("the identity on a board: ran through", false, e.stack + (e.traceback ? "\n" + e.traceback : ""));
     } finally { repl.stop(); }
