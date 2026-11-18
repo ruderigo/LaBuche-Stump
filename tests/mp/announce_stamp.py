@@ -67,4 +67,64 @@ try:
 finally:
     Transport.request_path = real_rp
 
+# Our own stamps (1.0.0-beta.86): urns/dstamp. A light cost so the test is
+# quick; the reference tests check 1.6.1 takes them at the real one.
+from urns import dstamp
+from urns.destination import Destination
+from urns.transport import Transport
+import os
+if not getattr(Transport, "identity", None):
+    Transport.identity = Identity()
+tmp = "/tmp/stamps-test-%d" % (os.urandom(2)[0])
+try:
+    os.mkdir(tmp)
+except OSError:
+    pass
+dstamp._dir[0] = tmp
+dstamp.COST = 10
+me = Identity()
+d = Destination(me, Destination.IN, Destination.SINGLE, "nomadnetwork", "node")
+check("stamping off: no stamp, nothing listed", dstamp.want(d) is None and dstamp.status()["on"] is False)
+pkt = d.announce(app_data=b"Aleph node", send=False)
+check("... and the announce as before", pkt.data.endswith(b"Aleph node"))
+dstamp.set_enabled(True)
+check("on: listed for the Provisioner (rns/stamps_wanted.json), its material with it",
+      dstamp._read(dstamp.WANTED_FILE).get(d.hash.hex()) == dstamp.material(d).hex())
+check("... no stamp yet: the announce still goes, as before", dstamp.want(d) is None)
+n = 0
+while not dstamp.step(50):
+    n += 1
+st = dstamp.want(d)
+check("the maker finds it a slice at a time; it checks", st is not None and dstamp.valid(dstamp.material(d), st), n)
+check("... kept in rns/stamps.json", dstamp._read(dstamp.STAMPS_FILE).get(d.hash.hex()) == st.hex())
+pkt = d.announce(app_data=b"Aleph node", send=False)
+check("stamped: after the app data, as 1.6.1 puts it (0xC1, 0, the stamp, a link cost of 0)",
+      pkt.data.endswith(b"Aleph node" + bytes([0xC1, 0]) + st + b"\x00\x00"))
+Identity.known_destinations.pop(d.hash, None)
+pkt.pack()
+from urns.packet import Packet
+p2 = Packet(None, pkt.raw)
+p2.unpack()
+check("another Stump takes it (signed with the stamp), and reads the name without it",
+      Identity.validate_announce(p2) and Identity.recall_app_data(d.hash) == b"Aleph node")
+dstamp._stamps.clear()
+dstamp.load()
+check("read back at the next start", dstamp.want(d) == st)
+other = Destination(Identity(), Destination.IN, Destination.SINGLE, "nomadnetwork", "node")
+dstamp._stamps[other.hash.hex()] = st                  # a stamp that isn't this one's
+dstamp._wanted.pop(other.hash.hex(), None)
+check("a stamp that doesn't check (another identity's) isn't used", dstamp.want(other) is None)
+dstamp.set_enabled(False)
+check("off again: announces as before", dstamp.want(d) is None)
+s0 = dict(dstamp.stats)
+dstamp.counted(200, True); dstamp.counted(180, False)
+check("counted for /meter: announces, bytes, stamp bytes",
+      dstamp.stats["announces"] == s0["announces"] + 2 and dstamp.stats["bytes"] == s0["bytes"] + 380
+      and dstamp.stats["stamp_bytes"] == s0["stamp_bytes"] + 18)
+for f in (dstamp.STAMPS_FILE, dstamp.WANTED_FILE):
+    try:
+        os.remove(tmp + "/" + f)
+    except OSError:
+        pass
+
 print("FAILURES", FAIL)

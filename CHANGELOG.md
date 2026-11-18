@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-beta.86
+- **Announce stamps, your choice** (/admin -> Stump settings -> Announcing, off by default). Reticulum 1.6.1 puts a proof-of-work stamp on announces, and a node can be set to ignore announces without one. Ticked, the Stump adds its own to every destination it announces: the same format, strength 25 (1.6.1's default target; a node enforcing stamps asks 23.5 by default), 18 bytes more per announce. A stamp depends only on the destination, so it's worked out once and kept (`rns/stamps.json`):
+  - a computer Stump works it out in the background (about a minute each);
+  - a board works on it a slice at a time between everything else (much longer; the time on an S3 still to be measured);
+  - or faster: `python3 provisioner.py --stamp-announces [PORT|FOLDER]` works out what the Stump lists in `rns/stamps_wanted.json` with every core of the computer (8–16 s each on a 2-core machine) and copies them over; the Stump takes them within a minute and announces again.
+  - Until a destination has its stamp, its announce goes as before. /admin shows how many are ready. The stamp asks no stamp of links to the Stump (link cost 0).
+- **Meter 1.4: `/meter ann`.** The announces sent, their bytes, and how many of those bytes are stamps, to see what stamping costs in airtime. On the Wi-Fi page, `/meter` shows it too.
+- Tests: Reticulum 1.6.1 takes a stamped Stump announce under stamp enforcement, and refuses an unstamped one (reference); the stamp maker, the files, a stamp that doesn't check (`announce_stamp`); `--stamp-announces` (Provisioner); `/meter ann`.
+
 ## 1.0.0-beta.85
 - **A Reticulum 1.6.1 node's announce reads right.** Reticulum 1.6.1 (out 18 Nov) stamps every announce: it appends a marker, flags, a 14-byte proof-of-work stamp and the link cost to the announce's app data. Reference Reticulum hands applications the app data without it; urns didn't, so a 1.6.1 node's name read with 18 bytes of stamp after it (CI's NomadNet test: the Stump listed the node under its hash). urns now leaves the stamp out of what it keeps (the stamp isn't checked: 1.6.1 doesn't enforce stamps by default, and still takes a Stump's unstamped announces). 1.6.1's stamped path requests already read right.
 - **A reply waits for a 1.6.1 app's path.** A 1.6.1 app answers a path request only once its announce stamp is made: 16 s on CI the first time, minutes on a phone. The Stump gave up on a reply after 15 s, and the reply was lost (CI's AutoInterface test: the app's message arrived, the Stump's answer never did). An LXMF message now waits up to 3 minutes for its recipient's path, asking again every 30 s after the first 15 s (the radio's airtime); other path waits are as they were.

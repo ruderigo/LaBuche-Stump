@@ -12,6 +12,7 @@
 #   /meter 1|2|3    sends you a fixed text of 1, 2 or 3 lines to measure
 #   /meter last     what your last test took
 #   /meter room     an estimate from this room's latest lines
+#   /meter ann      the announces sent, and the bytes their stamps add (1.4)
 #   /meter reset    back to zero
 #
 # It only counts: the mesh_out hook (plugin API 2) looks at each message
@@ -30,7 +31,7 @@
 
 import time
 
-VERSION = "1.3"
+VERSION = "1.4"
 STUMP_API = 2
 
 # One opportunistic LXMF packet: LXMessage.ENCRYPTED_PACKET_MAX_CONTENT.
@@ -310,8 +311,26 @@ def _stats(ctx):
     ]
     if not ctx.is_mesh:
         # The Wi-Fi page has room for more than the mesh's three lines.
-        out = _info(ctx) + out + [ctx.t("wifi")]
+        out = _info(ctx) + out + _ann(ctx) + [ctx.t("wifi")]
     return out
+
+
+def _ann(ctx):
+    """The announces this Stump sent since it started, their bytes, and
+    those of their Reticulum 1.6.1 stamps (1.4; urns/dstamp.py, from
+    1.0.0-beta.86). Counted by the firmware: /meter reset leaves them."""
+    try:
+        from urns import dstamp
+        st, s = dstamp.stats, dstamp.status()
+    except Exception:
+        return [ctx.t("ann_none")]
+    if not s["on"]:
+        state = ctx.t("stamp_off")
+    elif s["wanted"] and s["stamped"] >= s["wanted"]:
+        state = ctx.t("stamp_all", n=s["wanted"])
+    else:
+        state = ctx.t("stamp_some", ready=s["stamped"], n=s["wanted"])
+    return [ctx.t("ann", n=st["announces"], b=st["bytes"], sb=st["stamp_bytes"], state=state)]
 
 
 def _last(ctx):
@@ -377,6 +396,8 @@ def _meter(ctx, arg):
         return _room(ctx)
     if a == "info":
         return _info(ctx)
+    if a in ("ann", "announces", "annonces", "anuncios"):
+        return _ann(ctx)
     if a == "reset":
         _zero()
         return [ctx.t("reset")]

@@ -14,6 +14,7 @@ the apps that read it (CLIENT_QUICKSTART, *Packed text*).
 | `/meter 3` (or `1`, `2`) | A fixed test text of that many lines, sent to you |
 | `/meter last` | What your last test took |
 | `/meter room` | An estimate from the latest lines of the room you're in |
+| `/meter ann` | The announces the Stump sent, their bytes, and how many of those bytes are Reticulum 1.6.1 stamps (1.4; firmware 1.0.0-beta.86 and later) |
 | `/meter reset` | Counters back to zero (for everyone) |
 
 Slash only: nothing of it shows in the room.

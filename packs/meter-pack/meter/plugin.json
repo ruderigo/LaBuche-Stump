@@ -1,7 +1,7 @@
 {
   "plugin": "meter",
   "title": "Meter (a tester's counter: bytes and packets sent to apps)",
-  "version": "1.3",
+  "version": "1.4",
   "plugin_api": 2,
   "summary": "Counts what the Stump sends people's apps over LXMF: bytes of text, bytes as sent, and how many messages fit one LoRa packet. /meter shows the numbers, /meter 1|2|3 sends a fixed test text. The same on any firmware since 1.0.0-beta.53, to compare a kit before and after packed text (1.0.0-beta.82). It changes nothing that is sent.",
   "modifies_core_files": false,
@@ -30,7 +30,7 @@
   ],
   "hashes": {
     "meter/__init__.py": "d1e66786f37bb7d6",
-    "meter/install.py": "a35cf551b9669020",
-    "meter/strings.py": "e4a073cb9a6efdd1"
+    "meter/install.py": "2d976b28aefb162e",
+    "meter/strings.py": "a6c552d700b00e2c"
   }
 }

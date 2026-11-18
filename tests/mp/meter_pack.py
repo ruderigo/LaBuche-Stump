@@ -257,8 +257,9 @@ cmd(A, '/meter reset')
 cmd(A, '/meter reset')
 M._asked.clear()
 r = cmd(W, '/meter', room='main')
-check("on the Wi-Fi: the same three lines, and why they may read zero",
-      len(r) == 5 and r[0].startswith("meter ·") and r[1].startswith("to apps:") and "What the Wi-Fi page shows isn't counted" in r[4], r)
+check("on the Wi-Fi: the same three lines, the announces (1.4), and why they may read zero",
+      len(r) == 6 and r[0].startswith("meter ·") and r[1].startswith("to apps:") and r[4].startswith("announces")
+      and "What the Wi-Fi page shows isn't counted" in r[5], r)
 tw = cmd(W, '/meter 3', room='main')
 check("... /meter 3 there: the same test lines", tw == t3, tw)
 r = cmd(W, '/meter last', room='main')
@@ -304,5 +305,26 @@ plugins.set_enabled('meter', False)
 n = M._n["msgs"]
 plugins.mesh_out(A, "after it was switched off", "")
 check("switched off in /admin: counts nothing", M._n["msgs"] == n)
+
+# /meter ann (1.4): the announces sent and what their Reticulum 1.6.1
+# stamps add (urns/dstamp, 1.0.0-beta.86).
+try:
+    from urns import dstamp
+except ImportError:
+    dstamp = None
+if dstamp is not None:
+    class _Ctx:
+        def t(self, k, **kw):
+            return (k, kw)
+    keep = dict(dstamp.stats), dstamp.ENABLED[0]
+    dstamp.stats.update({"announces": 3, "bytes": 600, "stamp_bytes": 36})
+    dstamp.ENABLED[0] = False
+    off = M._ann(_Ctx())
+    dstamp.ENABLED[0] = True
+    b = M._ann(_Ctx())
+    dstamp.stats.clear(); dstamp.stats.update(keep[0]); dstamp.ENABLED[0] = keep[1]
+    check("/meter ann: the announces, their bytes, those of stamps, and whether stamping is on",
+          off[0][1]["state"] == ("stamp_off", {}) and
+          b and b[0][0] == "ann" and b[0][1]["n"] == 3 and b[0][1]["b"] == 600 and b[0][1]["sb"] == 36, b)
 
 print("FAILURES:", FAIL)
