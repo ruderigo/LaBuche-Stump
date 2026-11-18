@@ -40,8 +40,26 @@ class Identity:
     known_ratchets = {}
     storagepath = "/rns"  # Set by Reticulum.__init__
 
+    # Reticulum 1.6.1 stamps announces: it appends to the app data a marker
+    # (0xC1, never at a msgpack object boundary), flags, a 14-byte stamp and
+    # the 2-byte link cost. Reference Reticulum hands applications the app
+    # data without it, and so does this (1.0.0-beta.85): a 1.6.1 node's name
+    # read as its name, not with 18 bytes of stamp after it. The stamp isn't
+    # checked; stamps aren't enforced by default in 1.6.1 either.
+    EXT_MARKER = 0xC1
+    EXT_LENGTH = 18
+
+    @staticmethod
+    def without_stamp(app_data):
+        if app_data and len(app_data) >= Identity.EXT_LENGTH:
+            t = app_data[-Identity.EXT_LENGTH:]
+            if t[0] == Identity.EXT_MARKER and not (t[-1] & 0x80) and (t[-1] & 0x7F) <= 100:
+                return app_data[:-Identity.EXT_LENGTH] or None
+        return app_data
+
     @staticmethod
     def remember(packet_hash, destination_hash, public_key, app_data=None):
+        app_data = Identity.without_stamp(app_data)
         if len(public_key) != Identity.KEYSIZE // 8:
             raise TypeError("Invalid public key size: " + str(len(public_key)))
         kd = Identity.known_destinations

@@ -63,6 +63,7 @@ TESTS = [
     ("mesh_still_here", "assert", []),
     ("path_fallback", "assert", []),
     ("announce_cache", "assert", []),
+    ("announce_stamp", "assert", []),
     ("radio_status", "assert", []),
     ("profiles_store", "assert", []),
     ("conn_limits", "assert", []),

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-beta.85
+- **A Reticulum 1.6.1 node's announce reads right.** Reticulum 1.6.1 (out 18 Nov) stamps every announce: it appends a marker, flags, a 14-byte proof-of-work stamp and the link cost to the announce's app data. Reference Reticulum hands applications the app data without it; urns didn't, so a 1.6.1 node's name read with 18 bytes of stamp after it (CI's NomadNet test: the Stump listed the node under its hash). urns now leaves the stamp out of what it keeps (the stamp isn't checked: 1.6.1 doesn't enforce stamps by default, and still takes a Stump's unstamped announces). 1.6.1's stamped path requests already read right.
+- Test: `announce_stamp` (new); the NomadNet test passes against Reticulum 1.6.1.
+
 ## 1.0.0-beta.84
 Two findings from the r36max team's review, and a third found while fixing them.
 - **Removing a pack deletes only the pack's own places.** With "delete what it keeps too", the Provisioner and Arborist took the folders to delete from the pack's record (`.from_pack`), read from the board or the Stump's folder, and trusted it. A tampered record could empty a board's SD card, and on a computer Stump an entry such as `/` or `..` reached outside its folder: anything the user running the Provisioner owns. Now only `plugins/<its plugin>`, its own Tools section (never one the Stump ships) and `home/<one file>` are taken from it, home files are deleted one by one, and a folder such as `lib/` given an `install.py` is never taken for a plugin.
