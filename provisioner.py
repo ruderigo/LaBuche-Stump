@@ -379,7 +379,7 @@ EXPECTED_FILE_HASHES = {
     "docs/PACKS.md": "5a3e3957321a93a7",
     "docs/PC.md": "0f9263279ac36d79",
     "docs/PLUGINS.md": "8085ca56b773b64a",
-    "example_node.py": "e7e7c4692215e62a",
+    "example_node.py": "45f9d81720719ea0",
     "features.py": "81e8af361c64a911",
     "fserv.py": "06b87b1d6fb95eb4",
     "fservbot/plugin.json": "12b3c544160411e3",
@@ -1183,7 +1183,9 @@ def load_pack(path):
     """A pack folder or .zip -> {"dir", "spec", "source"}, or None."""
     p = Path(path).expanduser()
     if p.is_file() and p.suffix.lower() == ".zip":
-        dest = PACK_CACHE_DIR / p.stem
+        # Unpacked under a plain name: a zip called "...zip" never makes it ".." (1.0.0-beta.84).
+        dest = PACK_CACHE_DIR / (p.stem if re.match(r"^[A-Za-z0-9][A-Za-z0-9 _.+-]{0,63}$", p.stem) and ".." not in p.stem
+                                 else "pack-" + __import__("hashlib").sha256(p.stem.encode("utf-8", "replace")).hexdigest()[:12])
         if dest.exists():
             shutil.rmtree(dest)
         dest.mkdir(parents=True)
@@ -1211,6 +1213,13 @@ def load_pack(path):
         if not spec.get(key):
             print(f"  (skipping {p_dir.name}: pack.json has no \"{key}\")")
             return None
+    # Its name becomes a folder (tools/<name>/ on a computer Stump) and goes
+    # in its record: a plain name only, as Arborist asks (1.0.0-beta.84).
+    # Before, a downloaded pack named "../.." wrote its tools outside the
+    # Stump's folder, and removing it deleted there.
+    if not isinstance(spec["name"], str) or not re.match(r"^[a-z][a-z0-9_-]{0,31}$", spec["name"]):
+        print(f"  (skipping {p_dir.name}: the pack's name isn't a plain name)")
+        return None
     return {"dir": p_dir, "spec": spec, "source": source}
 
 

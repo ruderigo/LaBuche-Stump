@@ -794,6 +794,15 @@ with contextlib.redirect_stdout(io.StringIO()):
 shutil.copy(P.Path(P.__file__).resolve().parent / "tests" / "config.py", ps / "config.py")
 (ps / "meter").mkdir(); (ps / "meter" / "install.py").write_text("def setup(s):\n    pass\n")   # copied in by hand
 here = [P.load_pack(W / "packs" / n) for n in ("tavern-pack", "simple-pack")]
+# A pack's name becomes a folder and goes in its record (1.0.0-beta.84): a
+# downloaded pack named "../.." is refused, as Arborist refuses it.
+_bad = Path(tempfile.mkdtemp(prefix="pack-badname-"))
+for nm in ("../..", "tools/x", "Bad Name", ".hidden"):
+    (_bad / "pack.json").write_text(json.dumps({"name": nm, "version": "1", "author": "a", "license": "MIT"}))
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        got = P.load_pack(_bad)
+    check('a pack named %r is refused' % nm, got is None and "plain name" in out.getvalue(), out.getvalue())
+shutil.rmtree(_bad, ignore_errors=True)
 said = []
 real_ask, real_yn = P.ask, P.ask_yes_no
 def script(*a):
