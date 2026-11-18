@@ -36,4 +36,35 @@ Identity.remember(b"p" * 32, h, bytes(64), b"Aleph node" + EXT)
 check("remembered without it: what plugins and names read", Identity.recall_app_data(h) == b"Aleph node", Identity.recall_app_data(h))
 kd.pop(h, None)
 
+# A 1.6.1 app answers a path request only once its announce stamp is made
+# (16 s on CI the first time, minutes on a phone): a reply to it waits up to
+# LXMF_PATH_WAIT for its path, asking again every 30 s after the first 15 s
+# (the radio's airtime). It gave up after 15 s and the reply was lost.
+from urns import lxmf
+from urns.transport import Transport
+import time
+asked = []
+real_rp = Transport.request_path
+Transport.request_path = staticmethod(lambda h, *a, **k: asked.append(h))
+try:
+    r = lxmf.LXMRouter(identity=Identity())
+    far = bytes(range(16))
+    Transport._path_waiters.pop(far, None)
+    t0 = time.time()
+    r.send_message(far, "welcome")
+    w = Transport._path_waiters.get(far) or [{}]
+    check("a reply to someone with no path yet waits up to 3 min for it", w[0].get("deadline", 0) - t0 >= lxmf.LXMF_PATH_WAIT - 2,
+          w[0].get("deadline", 0) - t0)
+    n = len(asked)
+    Transport._path_since[far] = time.time() - 20
+    Transport._path_request_times[far] = time.time() - 10
+    Transport._process_path_waiters()
+    check("... past 15 s, not asked again 10 s after the last time", len(asked) == n, len(asked) - n)
+    Transport._path_request_times[far] = time.time() - 31
+    Transport._process_path_waiters()
+    check("... but 30 s after", len(asked) == n + 1, len(asked) - n)
+    Transport._path_waiters.pop(far, None); Transport._path_since.pop(far, None); Transport._path_request_times.pop(far, None)
+finally:
+    Transport.request_path = real_rp
+
 print("FAILURES", FAIL)
