@@ -6,7 +6,7 @@
 Writes to dist/:
 
   Stump-<version>.zip         everything a technician needs, in one folder:
-                              provisioner.py, final_firmware/, packs/, pc/, bench/,
+                              provisioner.py, final_firmware/, packs/, pc/, bench/, pi/,
                               README, CHANGELOG, LICENSE, and what checks
                               a release (docs/RELEASE.md, the signing key,
                               scripts/sign_release.py)
@@ -90,7 +90,9 @@ def main():
                if (ROOT / n).is_file()]
     # pc/: Stump on a computer (provisioner.py --pc, docs/PC.md).
     # bench/: measurements run on a CAM (tls_probe.py: docs/HTTPS_SETUP.md step 0).
-    for base in ("final_firmware", "packs", "pc", "bench"):
+    # pi/: Stump OS, the Raspberry Pi image -- a Pi updates itself from this
+    # zip, and runs its pi/stump_update.py the next time (1.0.0-beta.87).
+    for base in ("final_firmware", "packs", "pc", "bench", "pi"):
         entries += [(p, top + p.relative_to(ROOT).as_posix()) for p in files_under(ROOT / base) if p.suffix != ".zip"]
     # Arborist, when build_arborist.py has made it in the same folder first
     # (the release workflow does): next to the Provisioner, which puts it on

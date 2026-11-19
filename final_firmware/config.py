@@ -81,6 +81,13 @@ LXMF_STAMPS = False
 # computer: python3 provisioner.py --stamp-announces
 ANNOUNCE_STAMP = False
 
+# Stump OS (1.0.0-beta.87): set by the Raspberry Pi image (pi/), not by
+# hand. ADMIN_CLAIM: with no admin password yet, the first visit to /admin
+# chooses it. STUMP_OS: /admin offers the in-place update and shutting
+# the Pi down.
+ADMIN_CLAIM = False
+STUMP_OS = False
+
 # Announce rebroadcast throttling. When this node relays for the mesh,
 # it won't rebroadcast more than ANNOUNCE_RATE_MAX announces from the
 # same source within ANNOUNCE_RATE_WINDOW seconds -- protects the wider

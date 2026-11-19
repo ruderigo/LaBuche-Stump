@@ -1,0 +1,5 @@
+{
+  "_about": "Stump OS (pi/stump_update.py): the Provisioner's answers when a Pi updates itself in place. Nothing is changed but the firmware: settings, identity, packs and files are kept; a pack new in the release isn't installed (that's a choice for /admin's owner, not the updater).",
+  "change something": "",
+  "start this stump automatically when you log in": false
+}

@@ -48,6 +48,8 @@ jobs:
     needs: images
     runs-on: ubuntu-24.04   # Playwright 1.56 has no Chromium for 26.04 yet (Arborist's test)
     timeout-minutes: 40
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -172,3 +174,13 @@ jobs:
           body_path: notes.md
           prerelease: ${{ steps.v.outputs.prerelease }}
           files: dist/*
+
+  # Stump OS, the Raspberry Pi image (pi/README.md): built once the release
+  # is out, then put on it, with Raspberry Pi Imager's catalogue.
+  pi-image:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/pi-image.yml
+    with:
+      version: ${{ needs.release.outputs.version }}
+      publish: true

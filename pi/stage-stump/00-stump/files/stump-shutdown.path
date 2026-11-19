@@ -1,0 +1,9 @@
+[Unit]
+Description=Stump OS: shutting the Pi down, asked from /admin
+
+[Path]
+PathExists=/home/stump/Stump/.shutdown-request
+Unit=stump-shutdown.service
+
+[Install]
+WantedBy=paths.target

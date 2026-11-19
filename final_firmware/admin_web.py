@@ -54,6 +54,111 @@ def _render_admin_login_page(lang, error=False, wait=0):
     )
 
 
+def _claimable():
+    """Stump OS, a Raspberry Pi set up from the image (config ADMIN_CLAIM,
+    1.0.0-beta.87): no admin password yet, so the first person to open
+    /admin chooses it -- there's no terminal to set one. Only until one
+    is set; a file on the card's boot partition clears it again
+    (pi/stump-net)."""
+    try:
+        import config
+    except ImportError:
+        return False
+    if not getattr(config, "ADMIN_CLAIM", False):
+        return False
+    if getattr(config, "AUTH_ADMIN_PASSWORD", "") or getattr(config, "FSERVBOT_OP_PASSWORD", ""):
+        return False
+    try:
+        import stumpid.core as _sc
+        if _sc.AUTH_ADMIN_PASSWORD:
+            return False
+    except ImportError:
+        pass
+    return True
+
+
+CLAIM_MIN = 6
+
+
+def _render_admin_claim_page(lang, error=""):
+    """The first visit to a fresh Stump OS's /admin: choose its password."""
+    err = "<p class='sub' style='color:var(--ember-bright);'>" + error + "</p>" if error else ""
+    return (
+        "<h1>" + i18n.t("admin_claim_title", lang) + "</h1>"
+        "<p class='sub'>" + i18n.t("admin_claim_intro", lang, n=CLAIM_MIN) + "</p>"
+        + err +
+        "<form method='POST' action='/admin' class='row'>"
+        "<input type='password' name='admin_claim' minlength='" + str(CLAIM_MIN) + "' placeholder='"
+        + i18n.t("admin_claim_pw", lang) + "' autofocus>"
+        "<input type='password' name='admin_claim2' minlength='" + str(CLAIM_MIN) + "' placeholder='"
+        + i18n.t("admin_claim_again", lang) + "'>"
+        "<button type='submit'>" + i18n.t("admin_claim_button", lang) + "</button>"
+        "</form>"
+    )
+
+
+def _claim(pw):
+    """Sets the admin password a fresh Stump OS was claimed with: in
+    config.py, and live (stumpid reads it at import). True if kept."""
+    import settings
+    if not settings.write_config({"AUTH_ADMIN_PASSWORD": pw}):
+        return False
+    try:
+        import config
+        config.AUTH_ADMIN_PASSWORD = pw
+    except ImportError:
+        pass
+    try:
+        import stumpid.core as _sc
+        _sc.AUTH_ADMIN_PASSWORD = pw
+    except ImportError:
+        pass
+    return True
+
+
+def _stump_os():
+    try:
+        import config
+        return bool(getattr(config, "STUMP_OS", False))
+    except ImportError:
+        return False
+
+
+def _os_status():
+    """What the Stump OS updater last said (pi/stump_update.py writes it)."""
+    h = _host()
+    root = str(getattr(h, "ROOT", "") or "") if h is not None else ""
+    try:
+        import json
+        with open((root + "/" if root else "") + "update-status.json") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _render_admin_os_section(lang, pw):
+    """Stump OS (a Pi from the image): update in place, settings,
+    identity and files kept; shut the Pi down before unplugging it."""
+    T = lambda k, **kw: i18n.t(k, lang, **kw)
+    st = _os_status()
+    state = st.get("state", "")
+    line = ""
+    if state:
+        line = "<p class='sub'><small>" + T("admin_os_status_" + state, release=billboard._esc(str(st.get("release", ""))),
+                                            why=billboard._esc(str(st.get("why", "")))) + "</small></p>"
+    hidden = "<input type='hidden' name='admin_pass' value='" + billboard._esc(pw) + "'>"
+    return (
+        "<h2 class='sub'>" + T("admin_os_title") + "</h2>"
+        "<p class='sub'>" + T("admin_os_intro") + "</p>" + line +
+        "<form method='POST' action='/admin/osupdate' class='row'>" + hidden +
+        "<button type='submit'>" + T("admin_os_update") + "</button></form>"
+        "<p class='sub'><small>" + T("admin_os_shutdown_note") + "</small></p>"
+        "<form method='POST' action='/admin/osshutdown' class='row'>" + hidden +
+        "<button type='submit'>" + T("admin_os_shutdown") + "</button></form>"
+    )
+
+
 def _render_admin_file_list_page(lang, names, pw):
     """Shown only after a correct password. The password travels
     forward as a hidden field on the SAME simple, stateless pattern
@@ -118,6 +223,7 @@ def _render_admin_file_list_page(lang, names, pw):
         + "".join(_card("pp-" + name, "\U0001f9e9", "<h2 class='sub'>" + billboard._esc(title) + "</h2>" + html, "")
                   for name, title, html in plugins.admin_panels(lang, pw))
         + _card("https", "\U0001f512", _render_admin_tls_line(lang), "")
+        + (_card("os", "\U0001f353", _render_admin_os_section(lang, pw), "") if _stump_os() else "")
         + _card("power", "\u23fb", _render_admin_power_section(lang, pw), ""))
     return (
         "<div class='admin-wide'>"
@@ -993,6 +1099,8 @@ async def _r_get_admin(reader, writer, method, path, headers, ip, identifier, se
     if B._session_ok(tok):
         names = fserv._list_files() if fserv.sd_ok else []
         await B._send(writer, "200 OK", B._page(_render_admin_file_list_page(lang, names, tok)))
+    elif _claimable():
+        await B._send(writer, "200 OK", B._page(_render_admin_claim_page(lang)))
     else:
         await B._send(writer, "200 OK", B._page(_render_admin_login_page(lang)))
 
@@ -1161,6 +1269,42 @@ async def _r_post_admin_poweroff(reader, writer, method, path, headers, ip, iden
             + i18n.t("admin_power_bye", lang, start=billboard._esc(h.START_FILE), folder=folder) + "</p>"))
         import uasyncio as asyncio
         asyncio.create_task(_power_off_soon())
+
+
+# Stump OS asks the Pi for what the Stump itself can't do: a request file
+# in its folder, which a systemd path unit picks up (pi/): the updater, as
+# the stump user; the shutdown, as root. (1.0.0-beta.87)
+OS_REQUESTS = {"/admin/osupdate": ".update-request", "/admin/osshutdown": ".shutdown-request"}
+
+
+async def _r_post_admin_os(reader, writer, method, path, headers, ip, identifier, secure):
+    length = int(headers.get("content-length", "0"))
+    body = await B._read_small_body(reader, length)
+    fields = {}
+    for kv in webtext.text(body).split("&"):
+        parts = kv.split("=", 1)
+        if len(parts) == 2:
+            fields[parts[0]] = billboard._url_decode(parts[1])
+    lang = i18n.get_lang(identifier)
+    h = _host()
+    which = "/admin/osshutdown" if path.startswith("/admin/osshutdown") else "/admin/osupdate"
+    if h is None or not _stump_os():
+        await B._send(writer, "404 Not Found", "Not a Stump OS Pi", "text/plain")
+        return
+    if not B._admin_ok(fields.get("admin_pass", ""), identifier):
+        await B._send(writer, "403 Forbidden", "Invalid admin password", "text/plain")
+        return
+    root = str(getattr(h, "ROOT", "") or "")
+    try:
+        with open((root + "/" if root else "") + OS_REQUESTS[which], "w") as f:
+            f.write("1\n")
+        ok = True
+    except OSError:
+        ok = False
+    key = ("admin_os_update_asked" if which == "/admin/osupdate" else "admin_os_shutdown_asked") if ok else "admin_os_request_failed"
+    await B._send(writer, "200 OK", B._page(
+        "<h1>" + i18n.t("admin_os_title", lang) + "</h1><p class='sub'>" + i18n.t(key, lang) + "</p>"
+        "<p class='sub'><a href='/admin'>" + i18n.t("admin_header", lang) + "</a></p>"))
 
 
 async def _r_post_admin_radioretry(reader, writer, method, path, headers, ip, identifier, secure):
@@ -1474,10 +1618,29 @@ async def _r_post_admin(reader, writer, method, path, headers, ip, identifier, s
     length = int(headers.get("content-length", "0"))
     body = await B._read_small_body(reader, length)
     pw = ""
+    claim = claim2 = None
     for kv in webtext.text(body).split("&"):
         if kv.startswith("admin_pass="):
             pw = billboard._url_decode(kv[11:])
+        elif kv.startswith("admin_claim="):
+            claim = billboard._url_decode(kv[12:])
+        elif kv.startswith("admin_claim2="):
+            claim2 = billboard._url_decode(kv[13:])
     lang = i18n.get_lang(identifier)
+    if claim is not None and _claimable():
+        # A fresh Stump OS claimed (1.0.0-beta.87): its password chosen now.
+        err = ""
+        if len(claim) < CLAIM_MIN:
+            err = i18n.t("admin_claim_short", lang, n=CLAIM_MIN)
+        elif claim != claim2:
+            err = i18n.t("admin_claim_mismatch", lang)
+        elif not _claim(claim):
+            err = i18n.t("admin_claim_failed", lang)
+        if err:
+            await B._send(writer, "200 OK", B._page(_render_admin_claim_page(lang, err)))
+            return
+        print("[admin] Stump OS claimed: its admin password was chosen at /admin")
+        pw = claim
     if not B._check_admin_pw(pw, identifier):
         await B._send(writer, "403 Forbidden", B._page(_render_admin_login_page(
             lang, error=True, wait=guard.locked(identifier))))
@@ -1598,6 +1761,8 @@ async def route(reader, writer, method, path, headers, ip, identifier, secure):
         await _r_post_admin_setup(reader, writer, method, path, headers, ip, identifier, secure)
     elif method == "POST" and path.startswith("/admin/poweroff"):
         await _r_post_admin_poweroff(reader, writer, method, path, headers, ip, identifier, secure)
+    elif method == "POST" and (path.startswith("/admin/osupdate") or path.startswith("/admin/osshutdown")):
+        await _r_post_admin_os(reader, writer, method, path, headers, ip, identifier, secure)
     elif method == "POST" and path.startswith("/admin/announce"):
         await _r_post_admin_announce(reader, writer, method, path, headers, ip, identifier, secure)
     elif method == "POST" and path.startswith("/admin/radioretry"):

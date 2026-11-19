@@ -1,0 +1,9 @@
+[Unit]
+Description=Stump OS: an update asked from /admin
+
+[Path]
+PathExists=/home/stump/Stump/.update-request
+Unit=stump-update.service
+
+[Install]
+WantedBy=paths.target

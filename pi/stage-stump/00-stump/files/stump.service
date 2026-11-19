@@ -1,0 +1,17 @@
+[Unit]
+Description=Stump (Stump OS)
+After=stump-net.service network.target
+Wants=stump-net.service
+
+[Service]
+User=stump
+Group=stump
+WorkingDirectory=/home/stump/Stump
+ExecStart=/home/stump/Stump/venv/bin/python /home/stump/Stump/stump_pc.py --service
+Restart=always
+RestartSec=5
+# Port 80 (the sign-in page) without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

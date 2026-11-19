@@ -1,0 +1,14 @@
+{
+  "_about": "Stump OS (pi/): the Provisioner's answers when the image is built (python3 provisioner.py --pc /home/stump/Stump --answers pi/answers.json). The name and the hotspot's name are set per Pi at first boot (Stump-XXXX); the admin password is chosen at the first visit to /admin (ADMIN_CLAIM), so the one here is cleared after.",
+  "folder for this stump": "/home/stump/Stump",
+  "node name": "Stump",
+  "the wi-fi name visitors join": "Stump",
+  "storage for this stump, in mb": "4096",
+  "is this stump part of a chain": false,
+  "the heltec": "Plugged into this computer by USB",
+  "its usb port": "auto",
+  "admin password": "cleared-after-build",
+  "start this stump automatically when you log in": false,
+  "keep these defaults": true,
+  "install meter": true
+}
