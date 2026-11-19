@@ -51,7 +51,9 @@ jobs:
         run: sudo bash pi/check_image.sh "dist/stump-os-${{ steps.v.outputs.version }}.img.xz"
 
       - name: Raspberry Pi Imager's catalogue entry
-        run: python3 pi/os_list.py "dist/stump-os-${{ steps.v.outputs.version }}.img.xz" "${{ steps.v.outputs.version }}" > dist/os_list.json
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" dist          # pi-gen ran as root
+          python3 pi/os_list.py "dist/stump-os-${{ steps.v.outputs.version }}.img.xz" "${{ steps.v.outputs.version }}" > dist/os_list.json
 
       - name: Keep it as a build artifact
         uses: actions/upload-artifact@v4
