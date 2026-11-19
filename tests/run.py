@@ -306,7 +306,7 @@ def main():
                          ("pc_chain", "pc_chain_test.py"),
                          ("pc_joins_cam", "pc_joins_cam_test.py"), ("pc_two_stumps", "pc_two_stumps_test.py"),
                          ("pc_parent_moves", "pc_parent_moves_test.py"), ("pc_power", "pc_power_test.py"),
-                         ("pc_settings", "settings_test.py"), ("pc_stump_os", "stump_os_test.py"),
+                         ("pc_settings", "settings_test.py"), ("pc_stump_os", "stump_os_test.py"), ("pc_stump_update", "stump_update_test.py"),
                          ("pc_discovery", "discovery_test.py"), ("pc_storage", "storage_test.py"),
                          ("pc_conn", "conn_test.py"), ("pc_watchdog", "watchdog_test.py"),
                          ("pc_radio_only", "pc_radio_only_test.py"), ("pc_chain_radio", "pc_chain_radio_test.py"), ("pc_lora_client_chain", "pc_lora_client_chain_test.py"),
