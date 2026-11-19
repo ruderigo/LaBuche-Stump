@@ -18,6 +18,11 @@ if [ ! -d "$WORK/.git" ]; then
 	git clone --depth 1 --branch "$PIGEN_REF" https://github.com/RPi-Distro/pi-gen.git "$WORK"
 fi
 echo "pi-gen: $(git -C "$WORK" log -1 --format='%H %cs %s')"
+# pi-gen's host packages, from its own list (lines "command[:package]").
+if [ "${INSTALL_DEPS:-0}" = 1 ]; then
+	pkgs=$(grep -v '^\s*#' "$WORK/depends" | sed -e 's/^[^:]*://' | tr '\n' ' ')
+	apt-get install -y -q $pkgs
+fi
 rm -rf "$WORK/stage-stump" "$WORK/deploy"
 cp -r "$SRC/pi/stage-stump" "$WORK/stage-stump"
 touch "$WORK/stage2/SKIP_IMAGES"          # the one image is Stump OS's

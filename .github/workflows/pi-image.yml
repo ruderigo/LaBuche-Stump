@@ -41,15 +41,11 @@ jobs:
           [ -n "$V" ] || V=$(sed -n 's/^STUMP_RELEASE = "\(.*\)"/\1/p' final_firmware/example_node.py)
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
-      - name: pi-gen's host packages
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q coreutils quilt parted debootstrap zerofree zip dosfstools \
-            libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd arch-test \
-            bmap-tools kmod qemu-user-static
+      - name: Package lists
+        run: sudo apt-get update -q
 
-      - name: Build Stump OS (pi-gen)
-        run: sudo -E bash pi/build.sh "${{ steps.v.outputs.version }}" dist
+      - name: Build Stump OS (pi-gen; its host packages from its own list)
+        run: sudo -E INSTALL_DEPS=1 bash pi/build.sh "${{ steps.v.outputs.version }}" dist
 
       - name: Check it (its files; the Stump running inside it)
         run: sudo bash pi/check_image.sh "dist/stump-os-${{ steps.v.outputs.version }}.img.xz"
