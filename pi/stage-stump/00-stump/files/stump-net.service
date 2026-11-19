@@ -1,0 +1,13 @@
+[Unit]
+Description=Stump OS: the Wi-Fi hotspot (and the Pi's name, first boot)
+After=NetworkManager.service
+Wants=NetworkManager.service
+Before=stump.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/stump-net
+
+[Install]
+WantedBy=multi-user.target

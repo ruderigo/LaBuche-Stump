@@ -130,7 +130,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        # ubuntu-24.04-arm: the processor a Raspberry Pi has (Stump OS, pi/; 1.0.0-beta.87).
+        os: [windows-latest, macos-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -164,6 +165,8 @@ jobs:
 
       - name: Turning the Stump off from /admin
         run: python tests/pc/pc_power_test.py
+      - name: "Stump OS: the admin password claimed at the first visit, the Pi's card (update, shutdown)"
+        run: python tests/pc/stump_os_test.py
       - name: The Stump's settings changed from /admin
         run: python tests/pc/settings_test.py
       - name: Finding a Stump on the Wi-Fi (STUMP? on UDP 4244)

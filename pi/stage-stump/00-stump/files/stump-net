@@ -1,0 +1,109 @@
+#!/bin/sh
+# Stump OS (1.0.0-beta.87): the Pi's Wi-Fi is the Stump's hotspot, at
+# every boot. Run by stump-net.service (root), before the Stump starts.
+#
+#  - First boot: this Pi's name, Stump-XXXX (from its serial number), for
+#    the Stump and its hotspot. Changed later in /admin, it stays changed.
+#  - The hotspot: an open Wi-Fi named after the Stump, 10.42.0.1, every
+#    name asked of its DNS answered with 10.42.0.1 (the sign-in pop-up;
+#    pi's dnsmasq-shared.d/stump-captive.conf). Any other Wi-Fi set on the
+#    Pi (Raspberry Pi Imager's options, say) gives the chip up to it.
+#  - stump-reset-admin.txt on the card's boot partition: the admin
+#    password cleared, chosen again at the next visit to /admin.
+#  - The console (a screen on the Pi) says the hotspot and the address.
+set -u
+STUMP=/home/stump/Stump
+CFG=$STUMP/config.py
+BOOT=/boot/firmware
+STATE=/var/lib/stump-os
+CON=stump-hotspot
+mkdir -p "$STATE"
+
+serial=$(tr -d '\0' < /sys/firmware/devicetree/base/serial-number 2>/dev/null)
+[ -n "$serial" ] || serial=$(awk '/^Serial/ {print $3}' /proc/cpuinfo)
+[ -n "$serial" ] || serial=$(cat /sys/class/net/wlan0/address 2>/dev/null | tr -d ':')
+suffix=$(printf '%s' "$serial" | tail -c 4 | tr 'a-f' 'A-F')
+[ -n "$suffix" ] || suffix=0000
+
+# Config values, read and written by the Stump's own rules (one KEY = value line).
+cfg_get() {
+    python3 - "$CFG" "$1" <<'PY'
+import re, sys, ast
+text = open(sys.argv[1], encoding="utf-8").read()
+val = ""
+for m in re.finditer(r"^%s\s*=\s*(.+)$" % re.escape(sys.argv[2]), text, re.M):
+    try:
+        val = ast.literal_eval(m.group(1).split("#")[0].strip())
+    except Exception:
+        pass
+print(val)
+PY
+}
+cfg_set() {
+    python3 - "$CFG" "$1" "$2" <<'PY'
+import re, sys
+path, key, value = sys.argv[1], sys.argv[2], sys.argv[3]
+text = open(path, encoding="utf-8").read()
+line = "%s = %r" % (key, value)
+pat = re.compile(r"^%s\s*=.*$" % re.escape(key), re.M)
+text = pat.sub(lambda m: line, text) if pat.search(text) else text.rstrip("\n") + "\n" + line + "\n"
+tmp = path + ".tmp"
+open(tmp, "w", encoding="utf-8").write(text)
+import os
+os.replace(tmp, path)
+PY
+    chown stump:stump "$CFG"
+}
+
+if [ ! -e "$STATE/named" ] && [ -f "$CFG" ]; then
+    cfg_set NODE_NAME "Stump-$suffix"
+    cfg_set PC_HOTSPOT_NAME "Stump-$suffix"
+    touch "$STATE/named"
+fi
+
+if [ -e "$BOOT/stump-reset-admin.txt" ] && [ -f "$CFG" ]; then
+    cfg_set AUTH_ADMIN_PASSWORD ""
+    cfg_set FSERVBOT_OP_PASSWORD ""
+    rm -f "$BOOT/stump-reset-admin.txt"
+    echo "stump-net: admin password cleared (stump-reset-admin.txt): chosen again at /admin"
+fi
+
+ssid=$(cfg_get PC_HOTSPOT_NAME)
+[ -n "$ssid" ] || ssid="Stump-$suffix"
+ssid=$(printf '%s' "$ssid" | cut -c1-32)
+
+rfkill unblock wifi 2>/dev/null || true
+nmcli radio wifi on 2>/dev/null || true
+
+# Any other Wi-Fi on the Pi: not brought up by itself any more.
+nmcli -t -f NAME,TYPE connection show 2>/dev/null | while IFS=: read -r name type; do
+    if [ "$type" = "802-11-wireless" ] && [ "$name" != "$CON" ]; then
+        nmcli connection modify "$name" connection.autoconnect no 2>/dev/null || true
+        nmcli connection down "$name" 2>/dev/null || true
+    fi
+done
+
+if nmcli -t -f NAME connection show 2>/dev/null | grep -qx "$CON"; then
+    nmcli connection modify "$CON" 802-11-wireless.ssid "$ssid" 2>/dev/null || true
+else
+    nmcli connection add type wifi ifname wlan0 con-name "$CON" autoconnect yes ssid "$ssid" \
+        connection.autoconnect-priority 100 \
+        802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 6 \
+        ipv4.method shared ipv4.addresses 10.42.0.1/24 ipv6.method disabled
+fi
+
+i=0
+until nmcli connection up "$CON" >/dev/null 2>&1; do
+    i=$((i + 1))
+    [ "$i" -ge 10 ] && { echo "stump-net: the hotspot didn't come up (the Stump starts anyway)"; break; }
+    sleep 3
+done
+
+cat > /etc/issue <<EOF
+Stump OS -- \l
+
+  Wi-Fi:   $ssid   (open)
+  Then:    http://10.42.0.1/   (the Stump's page; /admin to set it up)
+
+EOF
+exit 0

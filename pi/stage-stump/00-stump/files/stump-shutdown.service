@@ -1,0 +1,7 @@
+[Unit]
+Description=Stump OS: shut the Pi down (asked from /admin)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/rm -f /home/stump/Stump/.shutdown-request
+ExecStart=/bin/systemctl poweroff

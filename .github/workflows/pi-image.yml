@@ -1,0 +1,77 @@
+name: Stump OS (Raspberry Pi image)
+
+# Stump OS (pi/README.md, 1.0.0-beta.87): Raspberry Pi OS Lite 64-bit with
+# the Stump installed, built with pi-gen on an arm64 runner, then checked
+# (pi/check_image.sh: its files, and the Stump running inside it). Called
+# by the Release workflow once a release is out: the image goes on that
+# release, and Raspberry Pi Imager's catalogue (the "stump-os" release's
+# os_list.json) is pointed at it. A push touching pi/ builds and checks it
+# only; "Run workflow" by hand too.
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'pi/**'
+      - '.github/workflows/pi-image.yml'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      publish:
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: v
+        run: |
+          V="${{ inputs.version }}"
+          [ -n "$V" ] || V=$(sed -n 's/^STUMP_RELEASE = "\(.*\)"/\1/p' final_firmware/example_node.py)
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: pi-gen's host packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q coreutils quilt parted debootstrap zerofree zip dosfstools \
+            libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd arch-test \
+            bmap-tools kmod qemu-user-static
+
+      - name: Build Stump OS (pi-gen)
+        run: sudo -E pi/build.sh "${{ steps.v.outputs.version }}" dist
+
+      - name: Check it (its files; the Stump running inside it)
+        run: sudo pi/check_image.sh "dist/stump-os-${{ steps.v.outputs.version }}.img.xz"
+
+      - name: Raspberry Pi Imager's catalogue entry
+        run: python3 pi/os_list.py "dist/stump-os-${{ steps.v.outputs.version }}.img.xz" "${{ steps.v.outputs.version }}" > dist/os_list.json
+
+      - name: Keep it as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stump-os-${{ steps.v.outputs.version }}
+          path: dist/
+
+      - name: Put it on the release; point Imager's catalogue at it
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          gh release upload "v$V" "dist/stump-os-$V.img.xz" --clobber
+          if ! gh release view stump-os >/dev/null 2>&1; then
+            gh release create stump-os --prerelease --title "Stump OS catalogue" \
+              --notes "Raspberry Pi Imager's list for Stump OS (pi/README.md): add https://github.com/${{ github.repository }}/releases/download/stump-os/os_list.json in Imager's settings. The images themselves are on each release."
+          fi
+          gh release upload stump-os dist/os_list.json --clobber

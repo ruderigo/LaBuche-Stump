@@ -1,0 +1,5 @@
+python3-venv
+python3-pip
+network-manager
+dnsmasq-base
+rfkill

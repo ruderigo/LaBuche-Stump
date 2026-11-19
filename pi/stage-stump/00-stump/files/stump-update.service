@@ -1,0 +1,13 @@
+[Unit]
+Description=Stump OS: update the Stump in place (settings, identity and files kept)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=stump
+Group=stump
+ExecStart=/home/stump/Stump/venv/bin/python /home/stump/stump-src/pi/stump_update.py /home/stump/Stump
+# If it can't even start, the request mustn't fire again and again.
+ExecStopPost=/bin/rm -f /home/stump/Stump/.update-request
+TimeoutStartSec=1800

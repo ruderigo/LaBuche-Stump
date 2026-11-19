@@ -306,6 +306,14 @@ def write_config(changes, path=None):
         for i, line in enumerate(lines):
             if _is_assignment(line, key):
                 lines[i:_value_end(lines, i)] = [new]
+                # A later line for the same key would win at the next start
+                # over the one written here: gone (1.0.0-beta.87).
+                j = i + 1
+                while j < len(lines):
+                    if _is_assignment(lines[j], key):
+                        del lines[j:_value_end(lines, j)]
+                    else:
+                        j += 1
                 break
         else:
             if lines and lines[-1] == "":
