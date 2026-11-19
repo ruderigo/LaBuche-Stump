@@ -49,10 +49,10 @@ jobs:
             bmap-tools kmod qemu-user-static
 
       - name: Build Stump OS (pi-gen)
-        run: sudo -E pi/build.sh "${{ steps.v.outputs.version }}" dist
+        run: sudo -E bash pi/build.sh "${{ steps.v.outputs.version }}" dist
 
       - name: Check it (its files; the Stump running inside it)
-        run: sudo pi/check_image.sh "dist/stump-os-${{ steps.v.outputs.version }}.img.xz"
+        run: sudo bash pi/check_image.sh "dist/stump-os-${{ steps.v.outputs.version }}.img.xz"
 
       - name: Raspberry Pi Imager's catalogue entry
         run: python3 pi/os_list.py "dist/stump-os-${{ steps.v.outputs.version }}.img.xz" "${{ steps.v.outputs.version }}" > dist/os_list.json
