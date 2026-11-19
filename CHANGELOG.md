@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0-beta.87
+- **Stump OS: a Stump on a Raspberry Pi, no terminal** (`final_firmware/docs/PI.md`; maintainers: `pi/README.md`). A card image for Pi 5, 4, 3B+ and Zero 2 W: Raspberry Pi OS Lite 64-bit with the Stump set up by its own Provisioner. Write it with Raspberry Pi Imager (or pick it from Imager's list, with Stump OS's catalogue added once), plug the Pi in:
+  - the Pi's Wi-Fi is the Stump's **open hotspot**, Stump-XXXX (particular to each Pi), at every boot, taking the chip from any other Wi-Fi set on the Pi; every name a phone asks is answered with 10.42.0.1, so the **sign-in page pops up by itself**;
+  - **each Pi makes its own identity** at its first start (none in the image) and names itself Stump-XXXX;
+  - the Stump runs from boot on port 80, restarted if it stops; a Heltec on USB later is found by itself;
+  - **the admin password is chosen at the first visit to /admin** (`ADMIN_CLAIM`), only until one is set; `stump-reset-admin.txt` on the card's boot partition clears it again;
+  - **update in place from /admin** (Ethernet for the internet): the newest release downloaded, its signature checked with the key already on the Pi, its Provisioner run on the Stump as an update -- settings, identity, rooms and files kept; anything that doesn't check changes nothing;
+  - **shut the Pi down from /admin** before unplugging it.
+  - Built by CI with pi-gen on an ARM runner after every release (and on any push touching `pi/`), checked without a Pi (its files, the Stump running inside it), put on the release with Imager's catalogue. The first real boot is a bench test.
+- **CI tests the computer Stump on ARM Linux** too (the processor a Pi has).
+- **settings.write_config:** a later line for the same key in config.py, which would have won at the next start, is removed when the key is written.
+- The release zip carries `pi/` (a Pi updates itself from it).
+- Tests: `stump_os_test` (the claim, the Pi's card, update and shutdown requests), `stump_update_test` (an update from a fake GitHub signed with a test key; a wrong signature, a wrong download, GitHub unreachable: nothing changes).
+
 ## 1.0.0-beta.86
 - **Announce stamps, your choice** (/admin -> Stump settings -> Announcing, off by default). Reticulum 1.6.1 puts a proof-of-work stamp on announces, and a node can be set to ignore announces without one. Ticked, the Stump adds its own to every destination it announces: the same format, strength 25 (1.6.1's default target; a node enforcing stamps asks 23.5 by default), 18 bytes more per announce. A stamp depends only on the destination, so it's worked out once and kept (`rns/stamps.json`):
   - a computer Stump works it out in the background (about a minute each);

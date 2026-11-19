@@ -11,6 +11,10 @@ chains with CAM Stumps over Wi-Fi like any other Stump.
    and the CAM, join it                  for its visitors
 ```
 
+**A Raspberry Pi that's only a Stump?** Stump OS is a ready-made card
+image: write it with Raspberry Pi Imager, plug the Pi in, done -- no
+terminal at all. See `PI.md`.
+
 ## Setting it up
 
 You need Python 3.8 or newer (python.org on Windows and macOS) and
