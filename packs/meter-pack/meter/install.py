@@ -76,7 +76,8 @@ def _zero():
     _n.clear()
     _n.update({"mins": 0, "msgs": 0, "text": 0, "sent": 0, "packed": 0, "one": 0, "one_plain": 0,
                "f_msgs": 0, "f_text": 0, "f_sent": 0, "f_one": 0, "f_one_plain": 0,
-               "r_msgs": 0, "r_text": 0, "r_sent": 0, "c_msgs": 0, "c_text": 0, "c_sent": 0})
+               "r_msgs": 0, "r_text": 0, "r_sent": 0, "c_msgs": 0, "c_text": 0, "c_sent": 0,
+               "ar_msgs": 0, "ar_sent": 0})
     _tests.clear()
 
 
@@ -150,6 +151,31 @@ def _to_stump(item):
     _n[k + "msgs"] += 1
     _n[k + "text"] += len(data)
     _n[k + "sent"] += sent
+
+
+def _app_by_radio(dest_hex):
+    """True when a message to this app leaves by this Stump's radio (1.5):
+    its path comes in on the radio, or there is no path yet and a radio
+    is on (it is asked there, as for another Stump left to its route).
+    A path on any other interface (the Wi-Fi, TCP) costs no airtime."""
+    import rrc_mesh
+    radio = rrc_mesh._radio()
+    if radio is None:
+        return False
+    try:
+        from urns.transport import Transport
+        from urns import const
+        e = Transport.path_table.get(bytes.fromhex(dest_hex))
+        i = e[const.IDX_PT_RECV_IF] if e is not None else None
+    except Exception:
+        i = None            # no path known yet
+    if i is None or i is radio:
+        return True
+    try:
+        import radio as R
+        return any(i is b for b in R.bridges())
+    except Exception:
+        return False
 
 
 def _in(ctx):
@@ -262,6 +288,9 @@ def _out(dest_hex, text, title):
         _n["sent"] += sent
         if sent < plain:
             _n["packed"] += 1
+        if _app_by_radio(dest_hex):
+            _n["ar_msgs"] += 1
+            _n["ar_sent"] += sent
         if one:
             _n["one"] += 1
         if _one_packet(tlen, plain):
@@ -277,8 +306,12 @@ def _out(dest_hex, text, title):
     return None
 
 
-def _pct(sent, text):
-    return (sent * 100 + text // 2) // text if text else 100
+def _pct(ctx, sent, text):
+    """sent as a share of text, "47 %" (as the language writes it); a
+    dash when nothing was counted (1.5: it read "100 %")."""
+    if not text:
+        return ctx.t("pct_none")
+    return ctx.t("pct", n=(sent * 100 + text // 2) // text)
 
 
 def _release():
@@ -302,12 +335,12 @@ def _info(ctx):
 
 def _stats(ctx):
     out = [
-        ctx.t("apps", msgs=_n["msgs"], text=_n["text"], sent=_n["sent"], pct=_pct(_n["sent"], _n["text"]),
-              packed=_n["packed"], one=_n["one"], plain=_n["one_plain"]),
-        ctx.t("from", msgs=_n["f_msgs"], text=_n["f_text"], sent=_n["f_sent"], pct=_pct(_n["f_sent"], _n["f_text"]),
+        ctx.t("apps", msgs=_n["msgs"], text=_n["text"], sent=_n["sent"], pct=_pct(ctx, _n["sent"], _n["text"]),
+              packed=_n["packed"], rm=_n["ar_msgs"], rs=_n["ar_sent"], one=_n["one"], plain=_n["one_plain"]),
+        ctx.t("from", msgs=_n["f_msgs"], text=_n["f_text"], sent=_n["f_sent"], pct=_pct(ctx, _n["f_sent"], _n["f_text"]),
               one=_n["f_one"], plain=_n["f_one_plain"]),
-        ctx.t("stumps", rm=_n["r_msgs"], rt=_n["r_text"], rs=_n["r_sent"], rp=_pct(_n["r_sent"], _n["r_text"]),
-              cm=_n["c_msgs"], ct=_n["c_text"], cs=_n["c_sent"]) if _wrapped else ctx.t("stumps_none"),
+        ctx.t("stumps", rm=_n["r_msgs"], rt=_n["r_text"], rs=_n["r_sent"], rp=_pct(ctx, _n["r_sent"], _n["r_text"]),
+              cm=_n["c_msgs"], ct=_n["c_text"], cs=_n["c_sent"], cp=_pct(ctx, _n["c_sent"], _n["c_text"])) if _wrapped else ctx.t("stumps_none"),
     ]
     if not ctx.is_mesh:
         # The Wi-Fi page has room for more than the mesh's three lines.
@@ -338,7 +371,7 @@ def _last(ctx):
     if t is None:
         return [ctx.t("last_none")]
     lines, plain, sent, one, est = t
-    line = ctx.t("last", lines=lines, text=plain, sent=sent, pct=_pct(sent, plain),
+    line = ctx.t("last", lines=lines, text=plain, sent=sent, pct=_pct(ctx, sent, plain),
                  how=ctx.t("how_one" if one else "how_link"))
     return [line + (" " + ctx.t("est") if est else "")]
 
@@ -364,7 +397,7 @@ def _room(ctx):
     p = _packing()
     if p is None or not p[0]:
         return [ctx.t("room_plain", n=n, text=text)]
-    return [ctx.t("room", n=n, text=text, sent=sent, pct=_pct(sent, text))]
+    return [ctx.t("room", n=n, text=text, sent=sent, pct=_pct(ctx, sent, text))]
 
 
 def _test(ctx, count):

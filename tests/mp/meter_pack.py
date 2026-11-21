@@ -99,6 +99,8 @@ check("!meter is not a command (nothing of it in the room)", not any('meter' in 
       for m in rrc.since('lora-mesh', 0) if (m.get('body') or '').startswith('/')), rrc.since('lora-mesh', 0)[-3:])
 r = cmd(A, '/meter reset')
 check("/meter reset", "zero" in r[0] and M._n["msgs"] == 0 and not M._tests, (r, M._n))
+r = cmd(A, '/meter')
+check("nothing counted yet: a dash, not 100% (1.5)", "→ 0 B sent (—)" in r[0] and "(100%)" not in " ".join(r), r)
 
 # 2. Whatever the router is or does, counting never breaks a message.
 class Broken:
@@ -211,6 +213,26 @@ rrc_mesh._send_item((rt2, bytes.fromhex(S), lorem, "#lora-mesh", None, object())
 check("... on another interface (the chain): by the chain", M._n["r_msgs"] == 2 and M._n["c_msgs"] == 3, M._n)
 rrc_mesh._send_item((rt2, bytes.fromhex(G), lorem, "#lora-mesh"))
 check("... left to its route, with a radio on and no chain path to it: by radio", M._n["r_msgs"] == 3, M._n)
+# To people's apps, by radio or not (1.5): what costs airtime, apart.
+from urns.transport import Transport
+from urns import const as _const
+a0, s0 = M._n["ar_msgs"], M._n["ar_sent"]
+Transport.path_table.pop(bytes.fromhex(A), None)
+M._out(A, "to an app with no path yet", "")
+check("to an app with no path yet, a radio on: by radio (it's asked there)", M._n["ar_msgs"] == a0 + 1, M._n)
+_e = [None] * 8
+_e[_const.IDX_PT_RECV_IF] = object()
+Transport.path_table[bytes.fromhex(A)] = _e
+M._out(A, "to an app over the Wi-Fi", "")
+check("... its path on another interface (Wi-Fi, TCP): not by radio", M._n["ar_msgs"] == a0 + 1, M._n)
+_e[_const.IDX_PT_RECV_IF] = radio0
+M._out(A, "to an app heard on the radio", "")
+check("... its path on the radio: by radio, its bytes as sent", M._n["ar_msgs"] == a0 + 2
+      and M._n["ar_sent"] == s0 + M._sent_size(A, b"to an app with no path yet") + M._sent_size(A, b"to an app heard on the radio"), M._n)
+Transport.path_table.pop(bytes.fromhex(A), None)
+r = cmd(A, '/meter')
+check("/meter's first line: how many of them by radio, and their bytes",
+      ("of them by radio %d (%d B)" % (M._n["ar_msgs"], M._n["ar_sent"])) in r[0], r[0])
 rrc_mesh._radio = real_radio
 if HAS:
     rrc_mesh._send_item(("lb", lorem, None, True))
@@ -219,6 +241,8 @@ if HAS:
 r = cmd(A, '/meter')
 check("/meter says so on its third line", r[2].startswith("to other Stumps: by radio %d messages, %d B of text" % (M._n["r_msgs"], M._n["r_text"]))
       and ("by the chain %d messages, %d B" % (M._n["c_msgs"], M._n["c_text"])) in r[2], r[2])
+cp = (M._n["c_sent"] * 100 + M._n["c_text"] // 2) // M._n["c_text"]
+check("... the chain's share too (1.5)", r[2].endswith("→ %d B (%d%%)" % (M._n["c_sent"], cp)), r[2])
 check("... still three lines within the mesh's length", len(r) == 3 and all(len(l) <= plugins.MESH_LINE_CHARS for l in r), [len(l) for l in r])
 
 # 3c. What people's apps send (1.3): each room line written from an app.
@@ -240,7 +264,7 @@ if HAS:
     check("the same long line from an app that packs: %d B as it came, one packet" % z,
           M._n["f_sent"] == ln + 2 + z and M._n["f_one"] == 2 and M._n["f_one_plain"] == 1 and z <= M.ONE_PACKET, (z, M._n))
 r = cmd(A, '/meter')
-check("/meter's second line", r[1].startswith("from apps: %d lines, %d B of text → %d B received" % (M._n["f_msgs"], M._n["f_text"], M._n["f_sent"])), r[1])
+check("/meter's second line", r[1].startswith("from apps: %d lines, %d B of text → %d B received, estimated (" % (M._n["f_msgs"], M._n["f_text"], M._n["f_sent"])), r[1])
 before = dict(M._n)
 odd = object()
 rrc_mesh._send_item((rt2, bytes.fromhex(S), odd, "#lora-mesh"))

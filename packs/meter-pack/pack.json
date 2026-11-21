@@ -1,6 +1,6 @@
 {
   "name": "meter",
-  "version": "1.4",
+  "version": "1.5",
   "author": "Project Stump",
   "license": "MIT",
   "stump_api": 2,
@@ -11,6 +11,6 @@
   ],
   "hashes": {},
   "plugin_hashes": {
-    "meter": "f0a2620ddeeaaaa2"
+    "meter": "f0776c8438753061"
   }
 }

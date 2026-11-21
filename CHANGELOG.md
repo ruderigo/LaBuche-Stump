@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-beta.88
+- **Meter 1.5: three readings made plain, and the airtime to apps apart** (from LaBuche's /meter after 14 hours):
+  - to apps, **how many went by radio and their bytes** ("36 packed, of them by radio 22 (1010 B)"): an app reached over the Wi-Fi or TCP (FireFly on Android has both) costs no airtime, and now isn't mixed in. By radio = the app's path comes in on the radio, or no path yet with a radio on;
+  - nothing counted reads a dash, not "100 %" ("by radio 0 messages, 0 B of text → 0 B sent (—)");
+  - the chain's line gets its share like the others ("425603 B → 249853 B (59%)");
+  - the line from apps says its bytes are **estimated**: each line is packed again on the Stump to count it, not read off the radio, so a long repeated line (a stress test) shows a few percent where chat shows about half.
+- **A board's message times are Unix time** (from the Android team). On an ESP32 Stump, the "ts" of room lines and DMs in /poll was MicroPython's clock, which counts from 2000, without the 946684800 s the rest of the firmware adds: a client dated a DM relayed by LaBuche 1996-11-21 and sorted it before older ones. `rrc.unix_now()` now stamps them, and the two things that compare with them use it too (a DM's lifetime, how far back #lora-mesh catches another Stump up). Computer and Pi Stumps were already right. Until a board learns the time from the network its messages read early 2000: a client can take anything before 2020 as "time unknown".
+- Tests: apps by radio or not (no path, a path on another interface, a path on the radio), the dash, the chain's share, the estimate (`meter_pack`); `unix_ts` (a board's ts in Unix time, the DM lifetime and the #lora-mesh catch-up on the same clock).
+
 ## 1.0.0-beta.87
 - **Stump OS: a Stump on a Raspberry Pi, no terminal** (`final_firmware/docs/PI.md`; maintainers: `pi/README.md`). A card image for Pi 5, 4, 3B+ and Zero 2 W: Raspberry Pi OS Lite 64-bit with the Stump set up by its own Provisioner. Write it with Raspberry Pi Imager (or pick it from Imager's list, with Stump OS's catalogue added once), plug the Pi in:
   - the Pi's Wi-Fi is the Stump's **open hotspot**, Stump-XXXX (particular to each Pi), at every boot, taking the chip from any other Wi-Fi set on the Pi; every name a phone asks is answered with 10.42.0.1, so the **sign-in page pops up by itself**;

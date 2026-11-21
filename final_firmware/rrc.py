@@ -28,10 +28,24 @@
 # -- a chat that quietly forgets old lines is fine; one that OOMs the
 # whole node is not.
 
+import sys
 import time
 import i18n
 import plugins
 import guard
+
+# A message's "ts" is Unix time on every Stump (1.0.0-beta.88). A board's
+# MicroPython counts from 2000, 946684800 s after Unix's 1970: without
+# this, clients reading /poll dated a board's lines 30 years back (a DM
+# relayed by LaBuche "on 1996-11-21", sorted before older ones). The same
+# offset as propagation.py and urns/lxmf.py; 0 on a computer.
+EPOCH_OFFSET = 946684800 if sys.platform == "esp32" else 0
+
+
+def unix_now():
+    """Now, in Unix time, as every message's "ts" is. (Until a board
+    learns the time it reads early 2000.)"""
+    return time.time() + EPOCH_OFFSET
 
 MAX_ROOMS = 16
 MAX_MESSAGES_PER_ROOM = 60
@@ -975,7 +989,7 @@ def post(room, nick, body, kind="msg", via=None, bot=False):
         import mods
         if mods.remote_hidden(room, nick, via):
             return None
-    msg = {"id": _next_id[0], "ts": time.time(), "nick": nick,
+    msg = {"id": _next_id[0], "ts": unix_now(), "nick": nick,
            "body": body, "kind": kind}
     if via:
         # Relayed from another Stump of the chain (rrc_mesh): never sent
@@ -1050,7 +1064,7 @@ def _prune_dms(cid, now=None):
     box = _dms.get(cid)
     if not box:
         return
-    now = now if now is not None else time.time()
+    now = now if now is not None else unix_now()
     box[:] = [m for m in box if now - m["ts"] <= DM_TTL_SECONDS]
 
 
@@ -1072,7 +1086,7 @@ def send_dm(from_nick, to_nick, body, audio=None):
     if cid is None:
         return False, "no one here called '%s' -- /names shows who is" % to_nick
     user = _users.get(cid) or _reachable.get(cid)
-    now = time.time()
+    now = unix_now()
     _prune_dms(cid, now)
     msg = {"id": _next_id[0], "ts": now, "nick": from_nick,
            "body": body, "kind": "dm"}

@@ -90,6 +90,7 @@ TESTS = [
     ("mem_low", "assert", []),
     ("simple_pack", "assert", SIMPLE),
     ("meter_pack", "assert", METER),
+    ("unix_ts", "assert", []),
     ("marcopolo_pack", "assert", MARCOPOLO),
     ("mods_room", "assert", []),
     ("default_lang", "assert", []),
