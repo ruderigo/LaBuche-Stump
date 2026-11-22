@@ -109,6 +109,16 @@ carries 18 to 34 bytes more than the one-packet rule here assumes.
 
 ## Good to know
 
+- 1.5: **to apps, by radio apart**: how many of the messages to apps
+  left by the Stump's radio, and their bytes as sent (the airtime). A
+  message counts as by radio when the app's path comes in on the radio,
+  or when there's no path yet and a radio is on; a path on the Wi-Fi or
+  TCP costs no airtime and isn't counted there.
+- 1.5: a dash instead of "100 %" when nothing was counted; the
+  chain's line gets its share too; the line from apps says its bytes
+  are **estimated** (each line packed again here, not read off the
+  radio: a long repeated line packs to a few percent).
+- 1.4: `/meter ann`, the announces and their stamps.
 - 1.3: lines **from apps**; **radio** apart from **chain**; the state
   line moved to `/meter info`. To time what the bytes cost, see the
   Marco Polo pack.

@@ -207,7 +207,7 @@ def _lora_start(h):
     msgs = rrc.since(rrc.MESH_ROOM, 0)
     if not msgs:
         return 0
-    cutoff = time.time() - LORA_BACKLOG_S
+    cutoff = rrc.unix_now() - LORA_BACKLOG_S
     floor = 0
     for m in msgs:
         if m.get("ts", 0) >= cutoff:
